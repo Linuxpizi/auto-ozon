@@ -1,54 +1,120 @@
 <template>
   <div class="container">
-    <div class="grid grid-2">
-      <div class="card">
-        <h2 class="section-title">店铺管理</h2>
-        <StoreForm
-          :editingStore="editingStore"
-          @store-added="handleStoreAdded"
-          @store-updated="handleStoreUpdated"
-          @cancel-edit="clearEditing"
+    <div style="margin-bottom: 16px; display: flex; justify-content: space-between; align-items: center;">
+      <h2 class="section-title" style="margin: 0;">店铺管理</h2>
+      <div style="display: flex; gap: 8px; align-items: center;">
+        <input
+          v-model="keyword"
+          class="input"
+          style="width: 200px;"
+          placeholder="搜索名称/账号/Client ID"
+          @keyup.enter="searchStores"
         />
+        <button class="button-secondary" @click="searchStores">搜索</button>
+        <button class="button-secondary" @click="showImport = true">导入 Excel</button>
+        <button class="button-primary" @click="openAdd">添加店铺</button>
       </div>
-      <div class="card">
-        <h2 class="section-title">店铺列表</h2>
-        <StoreList :stores="stores" @edit-store="handleEdit" @delete-store="handleDelete" />
+    </div>
+
+    <div class="card">
+      <StoreList
+        :stores="appStore.stores"
+        @edit-store="openEdit"
+        @sync-warehouse="handleSyncWarehouse"
+        @accounting="handleAccounting"
+        @delete-store="handleDelete"
+      />
+      <div v-if="appStore.storeTotal > appStore.storePageSize" style="margin-top: 16px; display: flex; justify-content: center; align-items: center; gap: 12px;">
+        <button class="button-secondary" :disabled="appStore.storePage <= 1" @click="changePage(appStore.storePage - 1)">上一页</button>
+        <span style="font-size: 14px; color: #475569;">第 {{ appStore.storePage }} / {{ totalPages }} 页（共 {{ appStore.storeTotal }} 条）</span>
+        <button class="button-secondary" :disabled="appStore.storePage >= totalPages" @click="changePage(appStore.storePage + 1)">下一页</button>
+      </div>
+    </div>
+
+    <!-- Modal -->
+    <StoreForm
+      :visible="formVisible"
+      :editing-store="editingStore"
+      @close="closeForm"
+      @saved="refreshStores"
+    />
+
+    <!-- Import Dialog -->
+    <div v-if="showImport" class="dialog-overlay" @click.self="showImport = false">
+      <div class="dialog" style="max-width: 420px;">
+        <h2 class="section-title">导入店铺 (Excel)</h2>
+        <p style="font-size: 14px; color: #5e6f7c; margin-bottom: 12px;">
+          选择 .xlsx 文件，表头需包含: account_name, name, client_id, api_key 等字段。
+        </p>
+        <input type="file" accept=".xlsx,.xls" @change="onFileChange" style="margin-bottom: 12px;" />
+        <p v-if="importError" class="error">{{ importError }}</p>
+        <div style="display: flex; gap: 8px; justify-content: flex-end;">
+          <button class="button-secondary" @click="showImport = false">取消</button>
+          <button class="button-primary" :disabled="!importFile" @click="uploadImport">导入</button>
+        </div>
       </div>
     </div>
   </div>
 </template>
 
 <script setup lang="ts">
-import { onMounted, ref } from "vue";
+import { computed, onMounted, ref } from "vue";
 import { useAppStore } from "../store";
+import type { StoreItem } from "../store";
 import StoreForm from "../components/StoreForm.vue";
 import StoreList from "../components/StoreList.vue";
 
 const appStore = useAppStore();
-const editingStore = ref<null | { id: number; name: string; client_id: string; api_key?: string; status: string }>(null);
+const keyword = ref("");
+const formVisible = ref(false);
+const editingStore = ref<Partial<StoreItem> | null>(null);
+const showImport = ref(false);
+const importFile = ref<File | null>(null);
+const importError = ref("");
+
+const totalPages = computed(() => Math.max(1, Math.ceil(appStore.storeTotal / appStore.storePageSize)));
 
 async function refreshStores() {
-  try {
-    const response = await fetch("http://localhost:8000/api/stores");
-    const data = await response.json();
-    appStore.stores = data;
-  } catch (error) {
-    console.error("Failed to load stores", error);
-  }
+  await appStore.fetchStores({ keyword: keyword.value || undefined });
 }
 
-function handleEdit(store: { id: number; name: string; client_id: string; api_key?: string; status: string }) {
+function changePage(page: number) {
+  appStore.storePage = page;
+  refreshStores();
+}
+
+function searchStores() {
+  appStore.storePage = 1;
+  refreshStores();
+}
+
+function openAdd() {
+  editingStore.value = null;
+  formVisible.value = true;
+}
+
+function openEdit(store: StoreItem) {
   editingStore.value = { ...store };
+  formVisible.value = true;
 }
 
-function clearEditing() {
+function closeForm() {
+  formVisible.value = false;
   editingStore.value = null;
 }
 
-async function handleDelete(payload: { id: number }) {
+async function handleSyncWarehouse(store: StoreItem) {
+  alert(`同步仓库功能开发中 — ${store.name}`);
+}
+
+async function handleAccounting(store: StoreItem) {
+  alert(`核算功能开发中 — ${store.name}`);
+}
+
+async function handleDelete(id: number) {
   try {
-    const response = await fetch(`http://localhost:8000/api/stores/${payload.id}`, { method: "DELETE" });
-    if (!response.ok) throw new Error("删除失败");
+    const res = await fetch(`http://localhost:8000/api/stores/${id}`, { method: "DELETE" });
+    if (!res.ok) throw new Error("删除失败");
     await refreshStores();
   } catch (error) {
     console.error("Failed to delete store", error);
@@ -56,13 +122,35 @@ async function handleDelete(payload: { id: number }) {
   }
 }
 
-function handleStoreAdded() {
-  refreshStores();
+function onFileChange(e: Event) {
+  const target = e.target as HTMLInputElement;
+  importFile.value = target.files?.[0] || null;
+  importError.value = "";
 }
 
-function handleStoreUpdated() {
-  refreshStores();
-  clearEditing();
+async function uploadImport() {
+  if (!importFile.value) return;
+  importError.value = "";
+  try {
+    const formData = new FormData();
+    formData.append("file", importFile.value);
+    const res = await fetch("http://localhost:8000/api/stores/import", {
+      method: "POST",
+      body: formData,
+    });
+    if (!res.ok) {
+      const err = await res.json();
+      throw new Error(err.detail || "导入失败");
+    }
+    const result = await res.json();
+    alert(`成功导入 ${result.count} 条店铺记录`);
+    showImport.value = false;
+    importFile.value = null;
+    await refreshStores();
+  } catch (error: any) {
+    console.error(error);
+    importError.value = error?.message || "导入失败，请检查文件格式";
+  }
 }
 
 onMounted(refreshStores);

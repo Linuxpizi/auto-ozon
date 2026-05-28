@@ -2,12 +2,16 @@ import { createRouter, createWebHistory } from "vue-router";
 import DashboardView from "../views/DashboardView.vue";
 import StoreManagementView from "../views/StoreManagementView.vue";
 import OrdersView from "../views/OrdersView.vue";
+import StoreMonitorView from "../views/StoreMonitorView.vue";
+import ListingView from "../views/ListingView.vue";
 import NotFoundView from "../views/NotFoundView.vue";
 
 const routes = [
   { path: "/", name: "Dashboard", component: DashboardView },
   { path: "/stores", name: "StoreManagement", component: StoreManagementView },
   { path: "/orders", name: "Orders", component: OrdersView },
+  { path: "/monitor", name: "StoreMonitor", component: StoreMonitorView },
+  { path: "/listings", name: "Listing", component: ListingView },
   { path: "/:pathMatch(.*)*", name: "NotFound", component: NotFoundView },
 ];
 

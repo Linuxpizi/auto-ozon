@@ -1,0 +1,60 @@
+from typing import List, Optional
+from fastapi import APIRouter, Depends, HTTPException, Query
+from sqlalchemy.orm import Session
+from app.crud import listing as listing_crud
+from app.schemas.listing import ListingCreate, ListingUpdate, ListingRead
+from app.core.db import get_db
+
+router = APIRouter()
+
+
+@router.get("/", response_model=List[ListingRead])
+def list_listings(
+    skip: int = Query(0, ge=0),
+    limit: int = Query(20, ge=1, le=100),
+    store_id: Optional[int] = Query(None),
+    status: Optional[str] = Query(None),
+    keyword: Optional[str] = Query(None),
+    db: Session = Depends(get_db),
+):
+    return listing_crud.get_listings(db, skip=skip, limit=limit, store_id=store_id, status=status, keyword=keyword)
+
+
+@router.get("/count")
+def count_listings(
+    store_id: Optional[int] = Query(None),
+    status: Optional[str] = Query(None),
+    keyword: Optional[str] = Query(None),
+    db: Session = Depends(get_db),
+):
+    total = listing_crud.count_listings(db, store_id=store_id, status=status, keyword=keyword)
+    return {"total": total}
+
+
+@router.get("/{listing_id}", response_model=ListingRead)
+def get_listing(listing_id: int, db: Session = Depends(get_db)):
+    obj = listing_crud.get_listing(db, listing_id)
+    if not obj:
+        raise HTTPException(status_code=404, detail="Listing not found")
+    return obj
+
+
+@router.post("/", response_model=ListingRead, status_code=201)
+def create_listing(data: ListingCreate, db: Session = Depends(get_db)):
+    return listing_crud.create_listing(db, data)
+
+
+@router.put("/{listing_id}", response_model=ListingRead)
+def update_listing(listing_id: int, data: ListingUpdate, db: Session = Depends(get_db)):
+    obj = listing_crud.update_listing(db, listing_id, data)
+    if not obj:
+        raise HTTPException(status_code=404, detail="Listing not found")
+    return obj
+
+
+@router.delete("/{listing_id}")
+def delete_listing(listing_id: int, db: Session = Depends(get_db)):
+    ok = listing_crud.delete_listing(db, listing_id)
+    if not ok:
+        raise HTTPException(status_code=404, detail="Listing not found")
+    return {"ok": True}

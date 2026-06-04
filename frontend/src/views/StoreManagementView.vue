@@ -43,9 +43,14 @@
     <div v-if="showImport" class="dialog-overlay" @click.self="showImport = false">
       <div class="dialog" style="max-width: 420px;">
         <h2 class="section-title">导入店铺 (Excel)</h2>
-        <p style="font-size: 14px; color: #5e6f7c; margin-bottom: 12px;">
-          选择 .xlsx 文件，表头需包含: account_name, name, client_id, api_key 等字段。
+        <p style="font-size: 14px; color: #5e6f7c; margin-bottom: 8px;">
+          选择 .xlsx 文件导入店铺数据。
         </p>
+        <a
+          :href="templateUrl"
+          style="display: inline-block; margin-bottom: 12px; font-size: 13px; color: #2563eb; cursor: pointer;"
+          download
+        >下载导入模板 →</a>
         <input type="file" accept=".xlsx,.xls" @change="onFileChange" style="margin-bottom: 12px;" />
         <p v-if="importError" class="error">{{ importError }}</p>
         <div style="display: flex; gap: 8px; justify-content: flex-end;">
@@ -71,6 +76,7 @@ const editingStore = ref<Partial<StoreItem> | null>(null);
 const showImport = ref(false);
 const importFile = ref<File | null>(null);
 const importError = ref("");
+const templateUrl = "http://localhost:8000/api/stores/import/template";
 
 const totalPages = computed(() => Math.max(1, Math.ceil(appStore.storeTotal / appStore.storePageSize)));
 

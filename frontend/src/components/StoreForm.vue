@@ -222,7 +222,7 @@ async function submitStore() {
         throw new Error(err.detail || "更新店铺失败");
       }
     } else {
-      const res = await fetch("http://localhost:8000/api/stores", {
+      const res = await fetch("http://localhost:8000/api/stores/", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),

@@ -97,7 +97,7 @@ export const useAppStore = defineStore("app", () => {
       if (params?.keyword) q.set("keyword", params.keyword);
 
       const [listRes, countRes] = await Promise.all([
-        fetch(`http://localhost:8000/api/stores?${q}`),
+        fetch(`http://localhost:8000/api/stores/?${q}`),
         fetch(`http://localhost:8000/api/stores/count?${params?.keyword ? `keyword=${encodeURIComponent(params.keyword)}` : ""}`),
       ]);
       stores.value = await listRes.json();

@@ -6,7 +6,7 @@ Each sync_* function is called by either:
 """
 
 import logging
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 from sqlalchemy.orm import Session
@@ -29,7 +29,7 @@ def sync_orders_for_store(db: Session, store: Store, since: Optional[str] = None
     """
     client = OzonClient(client_id=store.client_id, api_key=store.api_key)
     if not since:
-        since = (datetime.utcnow() - timedelta(days=30)).isoformat()
+        since = (datetime.now(timezone.utc) - timedelta(days=30)).isoformat().replace('+00:00', 'Z')
 
     postings = client.get_fbs_postings(since=since, limit=500)
     count = 0
@@ -67,8 +67,9 @@ def sync_finance_for_store(db: Session, store: Store) -> dict:
     Returns a dict with keys: balance, total_income, total_expense, pending_amount.
     """
     client = OzonClient(client_id=store.client_id, api_key=store.api_key)
-    date_to = datetime.utcnow().strftime("%Y-%m-%d")
-    date_from = (datetime.utcnow() - timedelta(days=90)).strftime("%Y-%m-%d")
+    now_utc = datetime.now(timezone.utc)
+    date_to = now_utc.strftime("%Y-%m-%d")
+    date_from = (now_utc - timedelta(days=90)).strftime("%Y-%m-%d")
 
     statements = client.get_finance_statement(date_from=date_from, date_to=date_to)
     total_income = sum(s.amount for s in statements if s.amount > 0)

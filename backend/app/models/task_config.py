@@ -1,6 +1,10 @@
-from datetime import datetime
+from datetime import datetime, timezone
 from sqlalchemy import Column, Integer, String, Boolean, DateTime, Text
 from app.core.db import Base
+
+
+def _utcnow():
+    return datetime.now(timezone.utc).replace(tzinfo=None)
 
 
 class TaskConfig(Base):
@@ -18,5 +22,5 @@ class TaskConfig(Base):
     enabled = Column(Boolean, default=True, comment="是否启用")
     last_run_at = Column(DateTime, nullable=True, comment="最后执行时间")
     last_status = Column(String(16), default="", comment="success / failed")
-    created_at = Column(DateTime, default=datetime.utcnow)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at = Column(DateTime, default=_utcnow)
+    updated_at = Column(DateTime, default=_utcnow, onupdate=_utcnow)

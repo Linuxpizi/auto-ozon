@@ -1,6 +1,10 @@
-from datetime import datetime
+from datetime import datetime, timezone
 from sqlalchemy import Column, Integer, String, Float, DateTime, ForeignKey
 from app.core.db import Base
+
+
+def _utcnow():
+    return datetime.now(timezone.utc).replace(tzinfo=None)
 
 
 class StoreFinance(Base):
@@ -14,6 +18,6 @@ class StoreFinance(Base):
     total_income = Column(Float, default=0.0, comment="总收入")
     total_expense = Column(Float, default=0.0, comment="总支出/扣款")
     pending_amount = Column(Float, default=0.0, comment="待结算金额")
-    last_sync_at = Column(DateTime, default=datetime.utcnow, comment="最后同步时间")
-    created_at = Column(DateTime, default=datetime.utcnow)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    last_sync_at = Column(DateTime, default=_utcnow, comment="最后同步时间")
+    created_at = Column(DateTime, default=_utcnow)
+    updated_at = Column(DateTime, default=_utcnow, onupdate=_utcnow)

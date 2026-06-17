@@ -46,9 +46,9 @@ def upsert_task_config(db: Session, data: TaskConfigCreate) -> TaskConfig:
 
 
 def mark_task_run(db: Session, task_key: str, status: str) -> None:
-    from datetime import datetime
+    from datetime import datetime, timezone
     obj = db.query(TaskConfig).filter(TaskConfig.task_key == task_key).first()
     if obj:
-        obj.last_run_at = datetime.utcnow()
+        obj.last_run_at = datetime.now(timezone.utc).replace(tzinfo=None)
         obj.last_status = status
         db.commit()

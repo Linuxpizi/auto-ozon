@@ -80,7 +80,7 @@ def sync_orders(db: Session = Depends(get_db)):
     for store in store_list[:3]:
         for _ in range(random.randint(1, 5)):
             order_data = OrderCreate(
-                order_number=f"SYNC-{datetime.now().strftime('%y%m%d')}-{random.randint(10000, 99999)}",
+                order_number=f"SYNC-{datetime.utcnow().strftime('%y%m%d')}-{random.randint(10000, 99999)}",
                 store_id=store.id,
                 store_name=store.name,
                 account_name=store.account_name,
@@ -94,7 +94,7 @@ def sync_orders(db: Session = Depends(get_db)):
                 tracking_number=f"TRACK-{random.randint(100000, 999999)}",
                 quantity=random.randint(1, 10),
                 unit_price=round(random.uniform(50, 500), 2),
-                must_ship_by=(datetime.now() + timedelta(days=random.randint(1, 14))).isoformat() if random.random() > 0.3 else None,
+                must_ship_by=(datetime.utcnow() + timedelta(days=random.randint(1, 14))).isoformat() if random.random() > 0.3 else None,
                 express_delivery=random.choice([True, False]),
             )
             order_crud.create_order(db, order_data)

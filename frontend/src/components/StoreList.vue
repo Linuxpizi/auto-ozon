@@ -10,10 +10,6 @@
           <th>仓库 ID</th>
           <th>仓库状态</th>
           <th>状态</th>
-          <th>刊登状态</th>
-          <th>自动广告</th>
-          <th>自动归档</th>
-          <th>自动删除</th>
           <th>备注</th>
           <th>操作</th>
         </tr>
@@ -35,10 +31,6 @@
               {{ store.status === 'active' ? '有效' : '停用' }}
             </span>
           </td>
-          <td>{{ listingStatusLabel(store.listing_status) }}</td>
-          <td>{{ store.auto_ad ? '是' : '否' }}</td>
-          <td>{{ store.auto_archive ? '是' : '否' }}</td>
-          <td>{{ store.auto_delete ? '是' : '否' }}</td>
           <td style="max-width: 120px; overflow: hidden; text-overflow: ellipsis;">{{ store.notes }}</td>
           <td>
             <div style="display: flex; gap: 4px; flex-wrap: wrap;">
@@ -58,7 +50,7 @@
 import type { PropType } from "vue";
 import type { StoreItem } from "../store";
 
-const props = defineProps({
+defineProps({
   stores: {
     type: Array as PropType<StoreItem[]>,
     default: () => [],
@@ -68,14 +60,9 @@ const props = defineProps({
 const emit = defineEmits<{
   "edit-store": [store: StoreItem];
   "sync-warehouse": [store: StoreItem];
-  "accounting": [store: StoreItem];
+  accounting: [store: StoreItem];
   "delete-store": [id: number];
 }>();
-
-function listingStatusLabel(s: string) {
-  const map: Record<string, string> = { active: "在售", inactive: "停售", draft: "草稿" };
-  return map[s] || s || "-";
-}
 
 function emitEdit(store: StoreItem) {
   emit("edit-store", store);

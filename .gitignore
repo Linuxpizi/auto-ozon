@@ -6,6 +6,8 @@ __pycache__/
 .venv/
 */__pycache__/
 
+.pytest_cache/
+
 # db
 backend/app/ozon.db
 
@@ -26,3 +28,7 @@ backend/ozon.db
 
 # VS Code
 .vscode/
+
+# 测试文件
+backend/tests/mail.py
+backend/tests/xx.py

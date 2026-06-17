@@ -1,14 +1,16 @@
 {
-    "compilerOptions": {
-        "module": "ESNext",
-        "moduleResolution": "Bundler",
-        "strict": true,
-        "composite": true,
-        "types": [
-            "vite/client"
-        ]
-    },
-    "include": [
-        "./vite.config.ts"
-    ]
+  "compilerOptions": {
+    "tsBuildInfoFile": "./node_modules/.tmp/tsconfig.node.tsbuildinfo",
+    "target": "ES2020",
+    "lib": ["ES2020"],
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "strict": true,
+    "types": ["node"],
+    "skipLibCheck": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "noFallthroughCasesInSwitch": true
+  },
+  "include": ["vite.config.mts", "vite.config.mjs"]
 }

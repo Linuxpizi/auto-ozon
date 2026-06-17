@@ -46,44 +46,14 @@
           </select>
         </div>
         <div>
-          <label class="label">刊登状态</label>
-          <select v-model="form.listing_status" class="select">
-            <option value="">请选择</option>
-            <option value="active">在售</option>
-            <option value="inactive">停售</option>
-            <option value="draft">草稿</option>
-          </select>
-        </div>
-        <div>
           <label class="label">合同货币</label>
           <input v-model="form.contract_currency" class="input" placeholder="例如 USD" />
-        </div>
-        <div>
-          <label class="label">VAT 税率 (%)</label>
-          <input v-model.number="form.vat_rate" class="input" type="number" step="0.01" placeholder="0" />
         </div>
         <div>
           <label class="label">备注</label>
           <input v-model="form.notes" class="input" placeholder="备注信息" />
         </div>
-        <div class="grid" style="grid-column: span 2; gap: 8px;">
-          <label class="label">自动操作</label>
-          <div style="display: flex; gap: 20px; flex-wrap: wrap;">
-            <label style="display: flex; align-items: center; gap: 6px; font-size: 14px;">
-              <input type="checkbox" v-model="form.auto_ad" class="switch" />
-              自动广告
-            </label>
-            <label style="display: flex; align-items: center; gap: 6px; font-size: 14px;">
-              <input type="checkbox" v-model="form.auto_archive" class="switch" />
-              自动归档
-            </label>
-            <label style="display: flex; align-items: center; gap: 6px; font-size: 14px;">
-              <input type="checkbox" v-model="form.auto_delete" class="switch" />
-              自动删除
-            </label>
-          </div>
-        </div>
-        <div style="grid-column: span 2; display: flex; gap: 12px; justify-content: flex-end;">
+        <div style="grid-column: span 2; display: flex; gap: 12px; justify-content: flex-end; margin-top: 8px;">
           <button type="button" class="button-secondary" @click="close">取消</button>
           <button type="submit" class="button-primary">{{ editingStore ? '保存更改' : '添加店铺' }}</button>
         </div>
@@ -95,6 +65,7 @@
 
 <script setup lang="ts">
 import { reactive, watch } from "vue";
+import { apiPost, apiPut } from "../api";
 import type { StoreItem } from "../store";
 
 const props = defineProps<{
@@ -116,13 +87,8 @@ const form = reactive({
   warehouse_status: "",
   type_id: "",
   status: "active",
-  listing_status: "",
   contract_currency: "",
-  vat_rate: 0,
   notes: "",
-  auto_ad: false,
-  auto_archive: false,
-  auto_delete: false,
 });
 
 const errors = reactive<Record<string, string | null>>({ name: null, client_id: null, api_key: null });
@@ -141,13 +107,8 @@ watch(
         warehouse_status: val.warehouse_status || "",
         type_id: val.type_id || "",
         status: val.status || "active",
-        listing_status: val.listing_status || "",
         contract_currency: val.contract_currency || "",
-        vat_rate: val.vat_rate ?? 0,
         notes: val.notes || "",
-        auto_ad: val.auto_ad ?? false,
-        auto_archive: val.auto_archive ?? false,
-        auto_delete: val.auto_delete ?? false,
       });
     } else {
       resetForm();
@@ -165,13 +126,8 @@ function resetForm() {
   form.warehouse_status = "";
   form.type_id = "";
   form.status = "active";
-  form.listing_status = "";
   form.contract_currency = "";
-  form.vat_rate = 0;
   form.notes = "";
-  form.auto_ad = false;
-  form.auto_archive = false;
-  form.auto_delete = false;
   errors.name = errors.client_id = errors.api_key = null;
   submitError.value = "";
 }
@@ -192,7 +148,7 @@ async function submitStore() {
   submitError.value = "";
   if (!validate()) return;
 
-  const body = {
+  const body: Record<string, any> = {
     account_name: form.account_name,
     name: form.name,
     client_id: form.client_id,
@@ -201,36 +157,15 @@ async function submitStore() {
     warehouse_status: form.warehouse_status,
     type_id: form.type_id,
     status: form.status,
-    listing_status: form.listing_status,
     contract_currency: form.contract_currency,
-    vat_rate: form.vat_rate,
     notes: form.notes,
-    auto_ad: form.auto_ad,
-    auto_archive: form.auto_archive,
-    auto_delete: form.auto_delete,
   };
 
   try {
     if (props.editingStore?.id) {
-      const res = await fetch(`http://localhost:8000/api/stores/${props.editingStore.id}`, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(body),
-      });
-      if (!res.ok) {
-        const err = await res.json();
-        throw new Error(err.detail || "更新店铺失败");
-      }
+      await apiPut(`/stores/${props.editingStore.id}`, body);
     } else {
-      const res = await fetch("http://localhost:8000/api/stores/", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(body),
-      });
-      if (!res.ok) {
-        const err = await res.json();
-        throw new Error(err.detail || "添加店铺失败");
-      }
+      await apiPost("/stores/", body);
     }
     emit("saved");
     close();

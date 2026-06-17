@@ -31,7 +31,7 @@
           <td style="white-space: nowrap;">{{ order.order_number }}</td>
           <td>
             <span :class="['badge', statusBadge(order.status)]">
-              {{ order.status }}
+              {{ statusLabel(order.status) }}
             </span>
           </td>
           <td>
@@ -79,10 +79,19 @@ const emit = defineEmits<{
   "delete-order": [id: number];
 }>();
 
+const statusMap: Record<string, { label: string; badge: string }> = {
+  accepted: { label: "已接单", badge: "badge-active" },
+  processing: { label: "处理中", badge: "badge-active" },
+  shipped: { label: "已发货", badge: "" },
+  delivered: { label: "已送达", badge: "" },
+  cancelled: { label: "已取消", badge: "badge-inactive" },
+};
+
+function statusLabel(status: string) {
+  return statusMap[status]?.label || status;
+}
 function statusBadge(status: string) {
-  if (status === "accepted" || status === "processing") return "badge-active";
-  if (status === "shipped" || status === "delivered") return "";
-  return "badge-inactive";
+  return statusMap[status]?.badge || "badge-inactive";
 }
 
 function formatDate(d: string) {

@@ -31,7 +31,7 @@
       </div>
     </div>
 
-    <!-- Modal -->
+    <!-- Add/Edit Dialog -->
     <StoreForm
       :visible="formVisible"
       :editing-store="editingStore"
@@ -64,6 +64,7 @@
 
 <script setup lang="ts">
 import { computed, onMounted, ref } from "vue";
+import { apiDelete, apiUpload, apiUrl } from "../api";
 import { useAppStore } from "../store";
 import type { StoreItem } from "../store";
 import StoreForm from "../components/StoreForm.vue";
@@ -76,7 +77,7 @@ const editingStore = ref<Partial<StoreItem> | null>(null);
 const showImport = ref(false);
 const importFile = ref<File | null>(null);
 const importError = ref("");
-const templateUrl = "http://localhost:8000/api/stores/import/template";
+const templateUrl = apiUrl("/stores/import/template");
 
 const totalPages = computed(() => Math.max(1, Math.ceil(appStore.storeTotal / appStore.storePageSize)));
 
@@ -119,8 +120,7 @@ async function handleAccounting(store: StoreItem) {
 
 async function handleDelete(id: number) {
   try {
-    const res = await fetch(`http://localhost:8000/api/stores/${id}`, { method: "DELETE" });
-    if (!res.ok) throw new Error("删除失败");
+    await apiDelete(`/stores/${id}`);
     await refreshStores();
   } catch (error) {
     console.error("Failed to delete store", error);
@@ -138,17 +138,7 @@ async function uploadImport() {
   if (!importFile.value) return;
   importError.value = "";
   try {
-    const formData = new FormData();
-    formData.append("file", importFile.value);
-    const res = await fetch("http://localhost:8000/api/stores/import", {
-      method: "POST",
-      body: formData,
-    });
-    if (!res.ok) {
-      const err = await res.json();
-      throw new Error(err.detail || "导入失败");
-    }
-    const result = await res.json();
+    const result = await apiUpload<{ count: number; errors?: string[] }>("/stores/import", importFile.value);
     alert(`成功导入 ${result.count} 条店铺记录`);
     showImport.value = false;
     importFile.value = null;

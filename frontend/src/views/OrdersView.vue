@@ -43,6 +43,7 @@
 
 <script setup lang="ts">
 import { computed, onMounted, ref } from "vue";
+import { apiPost } from "../api";
 import { useAppStore } from "../store";
 import OrderSummary from "../components/OrderSummary.vue";
 
@@ -77,12 +78,7 @@ async function refreshOrders() {
 
 async function syncOrders() {
   try {
-    const res = await fetch("http://localhost:8000/api/orders/sync", { method: "POST" });
-    if (!res.ok) {
-      const err = await res.json();
-      throw new Error(err.detail || "同步失败");
-    }
-    const result = await res.json();
+    const result = await apiPost<{ count: number }>("/orders/sync");
     alert(`同步成功，共同步 ${result.count || 0} 条订单`);
     await loadOrders();
   } catch (error: any) {

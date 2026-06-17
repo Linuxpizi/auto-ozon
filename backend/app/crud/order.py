@@ -37,6 +37,10 @@ def get_order(db: Session, order_id: int):
     return db.query(Order).filter(Order.id == order_id).first()
 
 
+def get_order_by_number(db: Session, order_number: str):
+    return db.query(Order).filter(Order.order_number == order_number).first()
+
+
 def count_orders(
     db: Session,
     store_id: Optional[int] = None,

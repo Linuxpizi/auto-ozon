@@ -47,8 +47,40 @@ class OzonSellerInfo:
     site: str
 
 
+@dataclass
+class OzonWarehouse:
+    """Parsed warehouse from POST /v2/warehouse/list."""
+    warehouse_id: int
+    name: str
+    is_rfbs: bool
+    status: str
+
+
+@dataclass
+class OzonPostingFBS:
+    """An FBS posting from POST /v2/posting/fbs/list."""
+    posting_number: str
+    order_number: str
+    status: str
+    sku: str
+    product_name: str
+    price: float
+    quantity: int
+    in_process_at: Optional[str]
+    created_at: str
+
+
+@dataclass
+class OzonFinanceStatement:
+    """Finance statement entry."""
+    amount: float
+    type: str
+    description: str
+    posted_at: str
+
+
 class OzonClient:
-    """Thin async+sync wrapper around the Ozon Seller API.
+    """Thin sync+async wrapper around the Ozon Seller API.
 
     Usage:
         client = OzonClient(client_id="...", api_key="...")
@@ -113,3 +145,77 @@ class OzonClient:
             is_self_employed=result.get("is_self_employed", False),
             site=result.get("site", ""),
         )
+
+    def get_warehouses(self) -> list[OzonWarehouse]:
+        """Get warehouse list.
+
+        POST /v2/warehouse/list
+        https://docs.ozon.ru/api/seller/zh/#tag/WarehouseAPI
+        """
+        data = self._request("POST", "/v2/warehouse/list", json_body={})
+        result = data.get("result", [])
+        warehouses = []
+        for item in result:
+            warehouses.append(OzonWarehouse(
+                warehouse_id=item.get("warehouse_id", 0),
+                name=item.get("name", ""),
+                is_rfbs=item.get("is_rfbs", False),
+                status=item.get("status", ""),
+            ))
+        return warehouses
+
+    def get_fbs_postings(self, since: Optional[str] = None, limit: int = 100) -> list[OzonPostingFBS]:
+        """Get FBS postings.
+
+        POST /v2/posting/fbs/list
+        https://docs.ozon.ru/api/seller/zh/#tag/FBS
+        """
+        payload: dict[str, Any] = {
+            "dir": "asc",
+            "limit": limit,
+            "filter": {"status": ""},
+        }
+        if since:
+            payload["filter"]["since"] = since
+        data = self._request("POST", "/v2/posting/fbs/list", json_body=payload)
+        result = data.get("result", [])
+        postings = []
+        for item in result:
+            products = item.get("products", [{}])
+            product = products[0] if products else {}
+            postings.append(OzonPostingFBS(
+                posting_number=item.get("posting_number", ""),
+                order_number=item.get("order_number", ""),
+                status=item.get("status", ""),
+                sku=str(product.get("sku", "")),
+                product_name=product.get("name", ""),
+                price=float(product.get("price", "0") or 0),
+                quantity=int(product.get("quantity", 1)),
+                in_process_at=item.get("in_process_at"),
+                created_at=item.get("created_at", ""),
+            ))
+        return postings
+
+    def get_finance_statement(self, date_from: str, date_to: str) -> list[OzonFinanceStatement]:
+        """Get finance statement.
+
+        POST /v1/finance/statement/list
+        https://docs.ozon.ru/api/seller/zh/#tag/FinanceAPI
+        """
+        payload = {
+            "filter": {
+                "date_from": date_from,
+                "date_to": date_to,
+            }
+        }
+        data = self._request("POST", "/v1/finance/statement/list", json_body=payload)
+        result = data.get("result", [])
+        statements = []
+        for item in result:
+            statements.append(OzonFinanceStatement(
+                amount=float(item.get("amount", 0)),
+                type=item.get("type", ""),
+                description=item.get("description", ""),
+                posted_at=item.get("posted_at", ""),
+            ))
+        return statements

@@ -4,9 +4,10 @@
 
 1. 前端
    1. 使用 Vue3，Pinia，Vue Router 框架
+   2. [UI](https://www.naiveui.com/zh-CN/os-theme)
 2. 后端
    1. 使用 FastAPI
-   2. 数据持久话使用 SQlite
+   2. 数据持久话使用 SQLite
    3. [数据库操作 ORM](https://www.sqlalchemy.org/)
 3. [Ozon 开放 API](https://docs.ozon.ru/api/seller/zh/?__rr=1&abt_att=1&origin_referer=docs.ozon.com)
 
@@ -23,26 +24,17 @@
 ## 项目结构
 
 - backend/
-  - app/main.py
-  - app/core/
-  - app/models/
-  - app/schemas/
-  - app/crud/
-  - app/api/routers/
 - frontend/
-  - src/
-  - package.json
-  - vite.config.ts
 
 ## 初始化与运行
 
 1. 后端：
    - 进入 `backend`
    - 安装依赖：`pip install -r requirements.txt`
-   - 启动服务：`uvicorn app.main:app --reload --host 0.0.0.0 --port 8000`
+   - 启动服务：`uvicorn app.main:app --reload --host 0.0.0.0 --port 9000`
 2. 前端：
    - 进入 `frontend`
    - 安装依赖：`npm install`
    - 启动开发服务器：`npm run dev`
 
-前端页面已实现：仪表盘、店铺管理、订单管理三个功能页面；后端接口支持店铺查询、新增、订单列表和仪表盘汇总。
+前端页面已实现：仪表盘、店铺管理、订单管理、店铺流水四个功能页面；后端接口支持店铺查询、新增、订单列表和仪表盘汇总。

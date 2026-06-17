@@ -1,5 +1,6 @@
 import { defineStore } from "pinia";
 import { ref } from "vue";
+import { apiGet } from "../api";
 
 export interface DashboardSummary {
   total_orders: number;
@@ -52,7 +53,6 @@ export interface OrderItem {
 }
 
 export const useAppStore = defineStore("app", () => {
-  // Data
   const stores = ref<StoreItem[]>([]);
   const orders = ref<OrderItem[]>([]);
   const dashboard = ref<DashboardSummary>({
@@ -72,11 +72,9 @@ export const useAppStore = defineStore("app", () => {
   const orderTotal = ref(0);
   const orderPageSize = ref(20);
 
-  // Fetch actions
   async function fetchDashboard() {
     try {
-      const res = await fetch("http://localhost:8000/api/dashboard/summary");
-      const data = await res.json();
+      const data = await apiGet<any>("/dashboard/summary");
       Object.assign(dashboard.value, data);
     } catch (e) {
       console.error("fetchDashboard failed", e);
@@ -89,20 +87,17 @@ export const useAppStore = defineStore("app", () => {
     keyword?: string;
   }) {
     try {
-      const q = new URLSearchParams();
       const skip = params?.skip ?? (storePage.value - 1) * storePageSize.value;
       const limit = params?.limit ?? storePageSize.value;
-      q.set("skip", String(skip));
-      q.set("limit", String(limit));
-      if (params?.keyword) q.set("keyword", params.keyword);
+      const query: Record<string, string | number> = { skip, limit };
+      if (params?.keyword) query.keyword = params.keyword;
 
-      const [listRes, countRes] = await Promise.all([
-        fetch(`http://localhost:8000/api/stores/?${q}`),
-        fetch(`http://localhost:8000/api/stores/count?${params?.keyword ? `keyword=${encodeURIComponent(params.keyword)}` : ""}`),
+      const [list, count] = await Promise.all([
+        apiGet<StoreItem[]>("/stores/", query),
+        apiGet<{ count: number }>("/stores/count", params?.keyword ? { keyword: params.keyword } : {}),
       ]);
-      stores.value = await listRes.json();
-      const cnt = await countRes.json();
-      storeTotal.value = cnt.count;
+      stores.value = list;
+      storeTotal.value = count.count;
     } catch (e) {
       console.error("fetchStores failed", e);
     }
@@ -116,44 +111,29 @@ export const useAppStore = defineStore("app", () => {
     keyword?: string;
   }) {
     try {
-      const q = new URLSearchParams();
       const skip = params?.skip ?? (orderPage.value - 1) * orderPageSize.value;
       const limit = params?.limit ?? orderPageSize.value;
-      q.set("skip", String(skip));
-      q.set("limit", String(limit));
-      if (params?.store_id) q.set("store_id", String(params.store_id));
-      if (params?.status) q.set("status", params.status);
-      if (params?.keyword) q.set("keyword", params.keyword);
+      const listQuery: Record<string, string | number> = { skip, limit };
+      const countQuery: Record<string, string | number> = {};
+      if (params?.store_id) { listQuery.store_id = params.store_id; countQuery.store_id = params.store_id; }
+      if (params?.status) { listQuery.status = params.status; countQuery.status = params.status; }
+      if (params?.keyword) { listQuery.keyword = params.keyword; countQuery.keyword = params.keyword; }
 
-      const countQ = new URLSearchParams();
-      if (params?.store_id) countQ.set("store_id", String(params.store_id));
-      if (params?.status) countQ.set("status", params.status);
-      if (params?.keyword) countQ.set("keyword", params.keyword);
-
-      const [listRes, countRes] = await Promise.all([
-        fetch(`http://localhost:8000/api/orders?${q}`),
-        fetch(`http://localhost:8000/api/orders/count?${countQ}`),
+      const [list, count] = await Promise.all([
+        apiGet<OrderItem[]>("/orders", listQuery),
+        apiGet<{ count: number }>("/orders/count", countQuery),
       ]);
-      orders.value = await listRes.json();
-      const cnt = await countRes.json();
-      orderTotal.value = cnt.count;
+      orders.value = list;
+      orderTotal.value = count.count;
     } catch (e) {
       console.error("fetchOrders failed", e);
     }
   }
 
   return {
-    stores,
-    orders,
-    dashboard,
-    storePage,
-    storeTotal,
-    storePageSize,
-    orderPage,
-    orderTotal,
-    orderPageSize,
-    fetchDashboard,
-    fetchStores,
-    fetchOrders,
+    stores, orders, dashboard,
+    storePage, storeTotal, storePageSize,
+    orderPage, orderTotal, orderPageSize,
+    fetchDashboard, fetchStores, fetchOrders,
   };
 });

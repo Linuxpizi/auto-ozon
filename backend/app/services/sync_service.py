@@ -18,7 +18,7 @@ from app.crud import order as order_crud
 from app.crud import finance as finance_crud
 from app.crud import monitor as monitor_crud
 from app.schemas.order import OrderCreate
-from app.schemas.finance import StoreFinanceUpdate
+from app.schemas.finance import StoreFinanceUpdate, FinanceCashFlowBase
 from app.schemas.monitor import StoreMonitorCreate
 from app.crud.task_config import mark_task_run
 
@@ -87,34 +87,66 @@ def sync_orders_for_store(
 def sync_finance_for_store(db: Session, store: Store) -> dict:
     """Fetch finance data from Ozon and upsert into local finance table.
 
-    Uses /v1/finance/balance for summary, /v1/finance/cash-flow-statement/list for detail.
+    Balance API limits date_from~date_to to 30 days, so we split into windows.
+    Also persists cash-flow statement details.
     Returns a dict with keys: balance, total_income, total_expense, pending_amount.
     """
+    from app.crud import finance as finance_crud
+
     client = OzonClient(client_id=store.client_id, api_key=store.api_key)
     now_utc = datetime.now(timezone.utc)
-    date_to = now_utc.strftime("%Y-%m-%d")
-    date_from = (now_utc - timedelta(days=90)).strftime("%Y-%m-%d")
 
-    # 1) Balance report — authoritative source for summary numbers
-    balance_data = client.get_balance_report(date_from=date_from, date_to=date_to)
+    # 1) Balance report — split into 30-day windows
+    latest_balance = None
+    walk_from = now_utc - timedelta(days=90)
+    while walk_from < now_utc:
+        window_end = min(walk_from + timedelta(days=29), now_utc)
+        date_from = walk_from.strftime("%Y-%m-%d")
+        date_to = window_end.strftime("%Y-%m-%d")
+        balance_data = client.get_balance_report(date_from=date_from, date_to=date_to)
+        latest_balance = balance_data  # last window has the most current closing_balance
+        walk_from = window_end + timedelta(days=1)
 
-    # 2) Cash-flow statement — detailed records (fetch first page for record-keeping)
-    client.get_finance_statement(date_from=date_from, date_to=date_to)
-
-    update = StoreFinanceUpdate(
-        balance=balance_data["closing_balance"],
-        total_income=balance_data["sales_amount"],
-        total_expense=balance_data["sales_fee"] + balance_data["services_cost"],
-        pending_amount=balance_data["accrued"],
+    # 2) Cash-flow statement — persist bi-monthly detail records
+    cf_statements, _ = client.get_finance_statement(
+        date_from=(now_utc - timedelta(days=90)).strftime("%Y-%m-%d"),
+        date_to=now_utc.strftime("%Y-%m-%d"),
+        with_details=False,
     )
-    result = finance_crud.upsert_finance(db, store.id, update)
-    logger.info("sync_finance[%s]: balance=%.2f", store.name, result.balance)
-    return {
-        "balance": result.balance,
-        "total_income": result.total_income,
-        "total_expense": result.total_expense,
-        "pending_amount": result.pending_amount,
-    }
+    for stmt in cf_statements:
+        cash_flow_data = FinanceCashFlowBase(
+            store_id=store.id,
+            store_name=store.name,
+            period_id=stmt.period_id,
+            period_begin=stmt.period_begin,
+            period_end=stmt.period_end,
+            orders_amount=stmt.orders_amount,
+            returns_amount=stmt.returns_amount,
+            commission_amount=stmt.commission_amount,
+            services_amount=stmt.services_amount,
+            delivery_amount=stmt.delivery_and_return_amount,
+            currency_code=stmt.currency_code,
+        )
+        finance_crud.upsert_cash_flow(db, store.id, store.name, cash_flow_data)
+
+    if latest_balance:
+        update = StoreFinanceUpdate(
+            opening_balance=latest_balance["opening_balance"],
+            balance=latest_balance["closing_balance"],
+            total_income=latest_balance["sales_amount"],
+            total_expense=latest_balance["sales_fee"] + latest_balance["services_cost"],
+            pending_amount=latest_balance["accrued"],
+            paid=latest_balance["paid"],
+        )
+        result = finance_crud.upsert_finance(db, store.id, update, store_name=store.name)
+        logger.info("sync_finance[%s]: balance=%.2f", store.name, result.balance)
+        return {
+            "balance": result.balance,
+            "total_income": result.total_income,
+            "total_expense": result.total_expense,
+            "pending_amount": result.pending_amount,
+        }
+    return {}
 
 
 def sync_warehouses_for_store(db: Session, store: Store) -> int:

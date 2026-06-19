@@ -2,12 +2,21 @@ from typing import List, Optional
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from app.crud import finance as finance_crud
-from app.schemas.finance import StoreFinanceCreate, StoreFinanceUpdate, StoreFinanceRead
+from app.schemas.finance import StoreFinanceCreate, StoreFinanceUpdate, StoreFinanceRead, FinanceCashFlowRead
 from app.core.db import get_db
 from app.services.sync_service import run_sync_task
 from app.services.ozon_client import clear_cache
 
 router = APIRouter()
+
+
+@router.get("/cashflows", response_model=List[FinanceCashFlowRead])
+def list_cash_flows(
+    store_id: Optional[int] = None,
+    limit: int = 50,
+    db: Session = Depends(get_db),
+):
+    return finance_crud.list_cash_flows(db, store_id=store_id, limit=limit)
 
 
 @router.get("/", response_model=List[StoreFinanceRead])
@@ -64,3 +73,12 @@ def delete_finance(finance_id: int, db: Session = Depends(get_db)):
     if not ok:
         raise HTTPException(404, "资金记录不存在")
     return {"ok": True}
+
+
+@router.get("/cashflows", response_model=List[FinanceCashFlowRead])
+def list_cash_flows(
+    store_id: Optional[int] = None,
+    limit: int = 50,
+    db: Session = Depends(get_db),
+):
+    return finance_crud.list_cash_flows(db, store_id=store_id, limit=limit)

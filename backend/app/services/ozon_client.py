@@ -298,7 +298,8 @@ class OzonClient:
         return postings, next_cursor, has_next
 
     def get_finance_statement(
-        self, date_from: str, date_to: str, page: int = 1, page_size: int = 100
+        self, date_from: str, date_to: str, page: int = 1, page_size: int = 100,
+        with_details: bool = False,
     ) -> tuple[list[OzonFinanceStatement], int]:
         """Get cash-flow statement list (财务报告).
 
@@ -307,12 +308,17 @@ class OzonClient:
 
         Returns (statements, page_count).
         """
+        # Ozon cash-flow API requires full ISO timestamps, not plain YYYY-MM-DD
+        if "T" not in date_from:
+            date_from = f"{date_from}T00:00:00.000Z"
+        if "T" not in date_to:
+            date_to = f"{date_to}T23:59:59.999Z"
         payload = {
             "date": {
                 "from": date_from,
                 "to": date_to,
             },
-            "with_details": False,
+            "with_details": with_details,
             "page": page,
             "page_size": page_size,
         }

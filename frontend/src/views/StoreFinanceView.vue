@@ -33,18 +33,17 @@
             <thead>
               <tr>
                 <th>店铺名称</th>
-                <th>所属账号</th>
                 <th>可用余额</th>
                 <th>总收入</th>
                 <th>总支出/扣款</th>
-                <th>待结算金额</th>
+                <th>已打款</th>
+                <th>待结算</th>
                 <th>最后同步</th>
               </tr>
             </thead>
             <tbody>
               <tr v-for="item in finances" :key="item.id">
                 <td>{{ item.store_name }}</td>
-                <td>{{ item.account_name }}</td>
                 <td>
                   <span :style="{ color: item.balance >= 0 ? 'var(--success)' : 'var(--danger)', fontWeight: 600 }">
                     ¥ {{ item.balance.toFixed(2) }}
@@ -52,6 +51,7 @@
                 </td>
                 <td style="color: var(--success);">¥ {{ item.total_income.toFixed(2) }}</td>
                 <td style="color: var(--danger);">¥ {{ item.total_expense.toFixed(2) }}</td>
+                <td>¥ {{ item.paid.toFixed(2) }}</td>
                 <td>¥ {{ item.pending_amount.toFixed(2) }}</td>
                 <td style="font-size: 12px; color: var(--text-secondary);">{{ formatTime(item.last_sync_at) }}</td>
               </tr>
@@ -61,7 +61,7 @@
 
         <div class="card">
           <n-h3 prefix="bar" style="margin: 0 0 16px;">汇总</n-h3>
-          <n-grid :cols="3" :x-gap="20">
+          <n-grid :cols="4" :x-gap="20">
             <n-gi>
               <div class="summary-item">
                 <n-statistic label="总可用余额" :value="totalBalance" :precision="2" :prefix="() => '¥'" />
@@ -77,6 +77,11 @@
                 <n-statistic label="总支出" :value="totalExpense" :precision="2" :prefix="() => '¥'" />
               </div>
             </n-gi>
+            <n-gi>
+              <div class="summary-item">
+                <n-statistic label="总已打款" :value="totalPaid" :precision="2" :prefix="() => '¥'" />
+              </div>
+            </n-gi>
           </n-grid>
         </div>
       </template>
@@ -87,7 +92,7 @@
       <div v-if="loading" style="text-align: center; padding: 48px; color: var(--text-secondary);">
         加载中...
       </div>
-      <div v-else-if="!cashFlowItems.length" style="text-align: center; padding: 48px; color: var(--text-secondary);">
+      <div v-else-if="!cashFlows.length" style="text-align: center; padding: 48px; color: var(--text-secondary);">
         暂无财务报告数据，请先同步店铺流水。
       </div>
       <div v-else class="card">
@@ -95,25 +100,27 @@
           <thead>
             <tr>
               <th>店铺</th>
-              <th>金额</th>
-              <th>类型</th>
-              <th>描述</th>
-              <th>时间</th>
+              <th>周期</th>
+              <th>订单金额</th>
+              <th>退货金额</th>
+              <th>佣金</th>
+              <th>服务费</th>
+              <th>配送费</th>
+              <th>币种</th>
             </tr>
           </thead>
           <tbody>
-            <tr v-for="(item, idx) in cashFlowItems" :key="idx">
+            <tr v-for="item in cashFlows" :key="item.id">
               <td>{{ item.store_name }}</td>
-              <td>
-                <span :style="{ color: item.amount >= 0 ? 'var(--success)' : 'var(--danger)', fontWeight: 600 }">
-                  ¥ {{ item.amount.toFixed(2) }}
-                </span>
+              <td style="font-size: 12px; color: var(--text-secondary);">{{ item.period_begin.slice(0, 10) }} ~ {{ item.period_end.slice(0, 10) }}</td>
+              <td style="color: var(--success); font-weight: 600;">¥ {{ item.orders_amount.toFixed(2) }}</td>
+              <td :style="{ color: item.returns_amount < 0 ? 'var(--danger)' : 'var(--text-secondary)', fontWeight: 600 }">
+                ¥ {{ item.returns_amount.toFixed(2) }}
               </td>
-              <td>{{ item.type }}</td>
-              <td style="max-width: 300px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
-                {{ item.description }}
-              </td>
-              <td style="font-size: 12px; color: var(--text-secondary);">{{ item.posted_at }}</td>
+              <td style="color: var(--danger);">¥ {{ item.commission_amount.toFixed(2) }}</td>
+              <td style="color: var(--danger);">¥ {{ item.services_amount.toFixed(2) }}</td>
+              <td style="color: var(--danger);">¥ {{ item.delivery_amount.toFixed(2) }}</td>
+              <td>{{ item.currency_code }}</td>
             </tr>
           </tbody>
         </table>
@@ -131,31 +138,36 @@ interface StoreFinance {
   id: number;
   store_id: number;
   store_name: string;
-  account_name: string;
   balance: number;
   total_income: number;
   total_expense: number;
   pending_amount: number;
+  paid: number;
   last_sync_at: string | null;
 }
 
-interface CashFlowItem {
+interface CashFlowRecord {
   store_name: string;
-  amount: number;
-  type: string;
-  description: string;
-  posted_at: string;
+  period_begin: string;
+  period_end: string;
+  orders_amount: number;
+  returns_amount: number;
+  commission_amount: number;
+  services_amount: number;
+  delivery_amount: number;
+  currency_code: string;
 }
 
 const activeTab = ref<string | number>("balance");
 const finances = ref<StoreFinance[]>([]);
-const cashFlowItems = ref<CashFlowItem[]>([]);
+const cashFlows = ref<CashFlowRecord[]>([]);
 const loading = ref(false);
 const syncing = ref(false);
 
 const totalBalance = computed(() => finances.value.reduce((s, f) => s + f.balance, 0));
 const totalIncome = computed(() => finances.value.reduce((s, f) => s + f.total_income, 0));
 const totalExpense = computed(() => finances.value.reduce((s, f) => s + f.total_expense, 0));
+const totalPaid = computed(() => finances.value.reduce((s, f) => s + f.paid, 0));
 
 function formatTime(t: string | null) {
   if (!t) return "-";
@@ -166,22 +178,7 @@ async function loadData() {
   loading.value = true;
   try {
     finances.value = await apiGet<StoreFinance[]>("/finances/");
-    cashFlowItems.value = finances.value.flatMap(f => [
-      {
-        store_name: f.store_name,
-        amount: f.total_income,
-        type: "收入",
-        description: "期间总收入",
-        posted_at: f.last_sync_at || "",
-      },
-      {
-        store_name: f.store_name,
-        amount: -f.total_expense,
-        type: "支出",
-        description: "期间总支出/扣款",
-        posted_at: f.last_sync_at || "",
-      },
-    ]);
+    cashFlows.value = await apiGet<CashFlowRecord[]>("/finances/cashflows");
   } catch (e) {
     console.error(e);
   } finally {

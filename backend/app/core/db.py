@@ -31,6 +31,8 @@ def _migrate_columns(engine):
         ("listings", "primary_image", "ALTER TABLE listings ADD COLUMN primary_image TEXT DEFAULT ''"),
         ("listings", "old_price", "ALTER TABLE listings ADD COLUMN old_price VARCHAR(32) DEFAULT ''"),
         ("listings", "vat", "ALTER TABLE listings ADD COLUMN vat VARCHAR(16) DEFAULT ''"),
+        ("store_finances", "paid", "ALTER TABLE store_finances ADD COLUMN paid REAL DEFAULT 0.0"),
+        ("store_finances", "opening_balance", "ALTER TABLE store_finances ADD COLUMN opening_balance REAL DEFAULT 0.0"),
     ]
     for table, column, sql in simple_migrations:
         columns = {c["name"] for c in inspector.get_columns(table)}
@@ -38,6 +40,9 @@ def _migrate_columns(engine):
             with engine.connect() as conn:
                 conn.execute(text(sql))
                 conn.commit()
+
+    # Drop obsolete columns that still exist in SQLite with NOT NULL constraints
+    _drop_column_if_exists(engine, "store_finances", "account_name")
 
     # Columns that may exist with wrong type — fix by recreating
     _fix_column_type(engine, "listings", "sku", "VARCHAR(128)", "''")

@@ -4,6 +4,8 @@ from sqlalchemy.orm import Session
 from app.crud import finance as finance_crud
 from app.schemas.finance import StoreFinanceCreate, StoreFinanceUpdate, StoreFinanceRead
 from app.core.db import get_db
+from app.services.sync_service import run_sync_task
+from app.services.ozon_client import clear_cache
 
 router = APIRouter()
 
@@ -44,6 +46,16 @@ def update_finance(finance_id: int, data: StoreFinanceUpdate, db: Session = Depe
 def sync_finance(store_id: int, data: StoreFinanceUpdate, db: Session = Depends(get_db)):
     """Upsert finance data for a store (sync from Ozon)."""
     return finance_crud.upsert_finance(db, store_id, data)
+
+
+@router.post("/sync")
+def sync_all_finances(db: Session = Depends(get_db)):
+    """从 Ozon 同步所有店铺的资金流水数据。"""
+    clear_cache()
+    result = run_sync_task(db, "sync_finance")
+    if result == "failed":
+        raise HTTPException(500, detail="资金同步失败，请检查 Ozon API 凭证和网络连接")
+    return {"status": result}
 
 
 @router.delete("/{finance_id}")

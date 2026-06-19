@@ -50,6 +50,14 @@ DEFAULT_TASKS = [
         interval_seconds=86400,  # 24 hours
         enabled=False,
     ),
+    TaskConfigCreate(
+        task_key="sync_monitors",
+        name="同步监控",
+        description="定时从 Ozon 同步商品库存快照到监控报表",
+        trigger_type="interval",
+        interval_seconds=43200,  # 12 hours
+        enabled=False,
+    ),
 ]
 
 
@@ -124,14 +132,17 @@ def reload_all_jobs(db: Session) -> None:
 
 
 def ensure_default_configs(db: Session) -> None:
-    """Create default task configs if the table is empty."""
+    """Create default task configs if the table is empty, or add missing ones."""
     existing = list_task_configs(db)
-    if existing:
-        return
+    existing_keys = {c.task_key for c in existing}
+    added = 0
     for cfg in DEFAULT_TASKS:
-        create_task_config(db, cfg)
-    db.commit()
-    logger.info("Scheduler: created %d default task configs", len(DEFAULT_TASKS))
+        if cfg.task_key not in existing_keys:
+            create_task_config(db, cfg)
+            added += 1
+    if added:
+        db.commit()
+        logger.info("Scheduler: added %d missing default task configs", added)
 
 
 def manual_trigger(task_key: str) -> str:

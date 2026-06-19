@@ -1,70 +1,91 @@
 <template>
-  <div v-if="visible" class="dialog-overlay" @click.self="close">
-    <div class="dialog">
-      <h2 class="section-title">{{ editingStore ? '编辑店铺' : '添加店铺' }}</h2>
-      <form class="grid grid-2" @submit.prevent="submitStore">
-        <div>
-          <label class="label">所属账号</label>
-          <input v-model="form.account_name" class="input" placeholder="请输入所属账号" />
-        </div>
-        <div>
-          <label class="label">店铺名称</label>
-          <input v-model="form.name" class="input" placeholder="请输入店铺名称" required />
-          <p v-if="errors.name" class="error">{{ errors.name }}</p>
-        </div>
-        <div>
-          <label class="label">Client ID</label>
-          <input v-model="form.client_id" class="input" placeholder="请输入 Client ID" required />
-          <p v-if="errors.client_id" class="error">{{ errors.client_id }}</p>
-        </div>
-        <div>
-          <label class="label">API Key</label>
-          <input v-model="form.api_key" class="input" placeholder="请输入 API Key" required />
-          <p v-if="errors.api_key" class="error">{{ errors.api_key }}</p>
-        </div>
-        <div>
-          <label class="label">仓库 ID</label>
-          <input v-model="form.warehouse_id" class="input" placeholder="请输入仓库 ID" />
-        </div>
-        <div>
-          <label class="label">仓库状态</label>
-          <select v-model="form.warehouse_status" class="select">
-            <option value="">请选择</option>
-            <option value="active">有效</option>
-            <option value="inactive">停用</option>
-          </select>
-        </div>
-        <div>
-          <label class="label">类型 ID</label>
-          <input v-model="form.type_id" class="input" placeholder="请输入类型 ID" />
-        </div>
-        <div>
-          <label class="label">状态</label>
-          <select v-model="form.status" class="select" required>
-            <option value="active">有效</option>
-            <option value="inactive">停用</option>
-          </select>
-        </div>
-        <div>
-          <label class="label">合同货币</label>
-          <input v-model="form.contract_currency" class="input" placeholder="例如 USD" />
-        </div>
-        <div>
-          <label class="label">备注</label>
-          <input v-model="form.notes" class="input" placeholder="备注信息" />
-        </div>
-        <div style="grid-column: span 2; display: flex; gap: 12px; justify-content: flex-end; margin-top: 8px;">
-          <button type="button" class="button-secondary" @click="close">取消</button>
-          <button type="submit" class="button-primary">{{ editingStore ? '保存更改' : '添加店铺' }}</button>
-        </div>
-        <p v-if="submitError" class="error" style="grid-column: span 2">{{ submitError }}</p>
-      </form>
-    </div>
-  </div>
+  <n-modal :show="visible" preset="card" :title="editingStore ? '编辑店铺' : '添加店铺'" :style="{ maxWidth: '640px' }"
+    @update:show="(v) => !v && close()">
+    <n-form label-placement="top" :model="form">
+      <n-grid :cols="2" :x-gap="16">
+        <n-gi>
+          <n-form-item label="所属账号">
+            <n-input v-model:value="form.account_name" placeholder="请输入所属账号" />
+          </n-form-item>
+        </n-gi>
+        <n-gi>
+          <n-form-item label="店铺名称" :validation-status="errors.name ? 'error' : undefined"
+            :feedback="errors.name || undefined">
+            <n-input v-model:value="form.name" placeholder="请输入店铺名称" />
+          </n-form-item>
+        </n-gi>
+        <n-gi>
+          <n-form-item label="Client ID" :validation-status="errors.client_id ? 'error' : undefined"
+            :feedback="errors.client_id || undefined">
+            <n-input v-model:value="form.client_id" placeholder="请输入 Client ID" />
+          </n-form-item>
+        </n-gi>
+        <n-gi>
+          <n-form-item label="API Key" :validation-status="errors.api_key ? 'error' : undefined"
+            :feedback="errors.api_key || undefined">
+            <n-input v-model:value="form.api_key" :type="showApiKey ? 'text' : 'password'" placeholder="请输入 API Key">
+              <template #suffix>
+                <n-button text size="small" @click="showApiKey = !showApiKey">
+                  {{ showApiKey ? '🙈' : '👁' }}
+                </n-button>
+              </template>
+            </n-input>
+          </n-form-item>
+        </n-gi>
+        <n-gi>
+          <n-form-item label="仓库 ID">
+            <n-input v-model:value="form.warehouse_id" placeholder="请输入仓库 ID" />
+          </n-form-item>
+        </n-gi>
+        <n-gi>
+          <n-form-item label="仓库状态">
+            <n-select v-model:value="form.warehouse_status" :options="[
+              { label: '请选择', value: '' },
+              { label: '有效', value: 'active' },
+              { label: '停用', value: 'inactive' },
+            ]" placeholder="请选择" />
+          </n-form-item>
+        </n-gi>
+        <n-gi>
+          <n-form-item label="类型 ID">
+            <n-input v-model:value="form.type_id" placeholder="请输入类型 ID" />
+          </n-form-item>
+        </n-gi>
+        <n-gi>
+          <n-form-item label="状态">
+            <n-select v-model:value="form.status" :options="[
+              { label: '有效', value: 'active' },
+              { label: '停用', value: 'inactive' },
+            ]" />
+          </n-form-item>
+        </n-gi>
+        <n-gi>
+          <n-form-item label="合同货币">
+            <n-input v-model:value="form.contract_currency" placeholder="例如 USD" />
+          </n-form-item>
+        </n-gi>
+        <n-gi>
+          <n-form-item label="备注">
+            <n-input v-model:value="form.notes" placeholder="备注信息" />
+          </n-form-item>
+        </n-gi>
+      </n-grid>
+      <p v-if="submitError" class="error">{{ submitError }}</p>
+    </n-form>
+    <template #footer>
+      <div style="display: flex; gap: 12px; justify-content: flex-end;">
+        <n-button @click="close">取消</n-button>
+        <n-button type="primary" :loading="submitting" @click="submitStore">
+          {{ editingStore ? '保存更改' : '添加店铺' }}
+        </n-button>
+      </div>
+    </template>
+  </n-modal>
 </template>
 
 <script setup lang="ts">
-import { reactive, watch } from "vue";
+import { reactive, ref, watch } from "vue";
+import { NModal, NForm, NFormItem, NInput, NSelect, NButton, NGrid, NGi } from "naive-ui";
 import { apiPost, apiPut } from "../api";
 import type { StoreItem } from "../store";
 
@@ -77,6 +98,9 @@ const emit = defineEmits<{
   close: [];
   saved: [];
 }>();
+
+const showApiKey = ref(false);
+const submitting = ref(false);
 
 const form = reactive({
   account_name: "",
@@ -92,7 +116,7 @@ const form = reactive({
 });
 
 const errors = reactive<Record<string, string | null>>({ name: null, client_id: null, api_key: null });
-const submitError = reactive({ value: "" });
+const submitError = ref("");
 
 watch(
   () => props.editingStore,
@@ -113,6 +137,7 @@ watch(
     } else {
       resetForm();
     }
+    showApiKey.value = false;
   },
   { immediate: true }
 );
@@ -147,6 +172,7 @@ function validate() {
 async function submitStore() {
   submitError.value = "";
   if (!validate()) return;
+  submitting.value = true;
 
   const body: Record<string, any> = {
     account_name: form.account_name,
@@ -172,6 +198,8 @@ async function submitStore() {
   } catch (error: any) {
     console.error(error);
     submitError.value = error?.message || "操作失败，请重试";
+  } finally {
+    submitting.value = false;
   }
 }
 </script>

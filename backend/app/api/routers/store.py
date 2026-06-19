@@ -12,7 +12,7 @@ router = APIRouter()
 @router.get("/", response_model=List[StoreRead])
 def list_stores(
     skip: int = Query(0, ge=0),
-    limit: int = Query(50, ge=1, le=200),
+    limit: int = Query(50, ge=1, le=999),
     keyword: Optional[str] = None,
     db: Session = Depends(get_db),
 ):

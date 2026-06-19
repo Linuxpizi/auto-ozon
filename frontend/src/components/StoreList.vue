@@ -19,26 +19,33 @@
           <td>{{ store.account_name }}</td>
           <td>{{ store.name }}</td>
           <td style="max-width: 100px; overflow: hidden; text-overflow: ellipsis;">{{ store.client_id }}</td>
-          <td style="max-width: 80px; overflow: hidden; text-overflow: ellipsis;">{{ store.api_key }}</td>
+          <td>
+            <n-tooltip trigger="hover">
+              <template #trigger>
+                <span style="font-family: monospace; letter-spacing: 1px;">{{ maskKey(store.api_key) }}</span>
+              </template>
+              点击查看完整 Key 时需通过编辑弹窗
+            </n-tooltip>
+          </td>
           <td>{{ store.warehouse_id }}</td>
           <td>
-            <span :class="['badge', store.warehouse_status === 'active' ? 'badge-active' : 'badge-inactive']">
+            <n-tag :type="store.warehouse_status === 'active' ? 'success' : 'default'" size="small" round>
               {{ store.warehouse_status === 'active' ? '有效' : '停用' }}
-            </span>
+            </n-tag>
           </td>
           <td>
-            <span :class="['badge', store.status === 'active' ? 'badge-active' : 'badge-inactive']">
+            <n-tag :type="store.status === 'active' ? 'success' : 'default'" size="small" round>
               {{ store.status === 'active' ? '有效' : '停用' }}
-            </span>
+            </n-tag>
           </td>
           <td style="max-width: 120px; overflow: hidden; text-overflow: ellipsis;">{{ store.notes }}</td>
           <td>
-            <div style="display: flex; gap: 4px; flex-wrap: wrap;">
-              <button class="button-link" @click.prevent="emitEdit(store)">编辑</button>
-              <button class="button-link" @click.prevent="emitSync(store)">同步仓库</button>
-              <button class="button-link" @click.prevent="emitAccounting(store)">核算</button>
-              <button class="button-link danger" @click.prevent="emitDelete(store.id)">删除</button>
-            </div>
+            <n-space :size="4">
+              <n-button text type="primary" size="small" @click="emitEdit(store)">编辑</n-button>
+              <n-button text type="primary" size="small" @click="emitSync(store)">同步仓库</n-button>
+              <n-button text type="primary" size="small" @click="emitAccounting(store)">核算</n-button>
+              <n-button text type="error" size="small" @click="emitDelete(store.id)">删除</n-button>
+            </n-space>
           </td>
         </tr>
       </tbody>
@@ -48,6 +55,7 @@
 
 <script setup lang="ts">
 import type { PropType } from "vue";
+import { NTag, NTooltip, NButton, NSpace } from "naive-ui";
 import type { StoreItem } from "../store";
 
 defineProps({
@@ -63,6 +71,12 @@ const emit = defineEmits<{
   accounting: [store: StoreItem];
   "delete-store": [id: number];
 }>();
+
+function maskKey(key: string): string {
+  if (!key) return "";
+  if (key.length <= 8) return "*".repeat(key.length);
+  return key.slice(0, 4) + "****" + key.slice(-4);
+}
 
 function emitEdit(store: StoreItem) {
   emit("edit-store", store);

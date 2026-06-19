@@ -4,6 +4,8 @@ from sqlalchemy.orm import Session
 from app.crud import order as order_crud
 from app.schemas.order import OrderCreate, OrderUpdate, OrderRead
 from app.core.db import get_db
+from app.services.sync_service import run_sync_task
+from app.services.ozon_client import clear_cache
 
 router = APIRouter()
 
@@ -63,41 +65,9 @@ def delete_order(order_id: int, db: Session = Depends(get_db)):
 
 @router.post("/sync")
 def sync_orders(db: Session = Depends(get_db)):
-    """同步 Ozon 订单（占位实现，模拟生成订单数据）"""
-    import random
-    from datetime import datetime, timedelta
-    from app.schemas.order import OrderCreate
-
-    stores = db.query("id, name, account_name from stores")  # not real — just placeholder
-    # Use proper query
-    from app.models.store import Store
-    store_list = db.query(Store).limit(10).all()
-    if not store_list:
-        raise HTTPException(400, detail="请先添加店铺")
-
-    statuses = ["accepted", "processing", "shipped", "delivered"]
-    count = 0
-    for store in store_list[:3]:
-        for _ in range(random.randint(1, 5)):
-            order_data = OrderCreate(
-                order_number=f"SYNC-{datetime.utcnow().strftime('%y%m%d')}-{random.randint(10000, 99999)}",
-                store_id=store.id,
-                store_name=store.name,
-                account_name=store.account_name,
-                is_quality_check=random.choice([True, False]),
-                gmv=round(random.uniform(100, 5000), 2),
-                status=random.choice(statuses),
-                shipment_number=f"SHIP-{random.randint(1000, 9999)}",
-                sku=f"SKU-{random.randint(10000, 99999)}",
-                product_name=f"商品-{random.choice(['A', 'B', 'C', 'D'])}-{random.randint(100, 999)}",
-                image_url="",
-                tracking_number=f"TRACK-{random.randint(100000, 999999)}",
-                quantity=random.randint(1, 10),
-                unit_price=round(random.uniform(50, 500), 2),
-                must_ship_by=(datetime.utcnow() + timedelta(days=random.randint(1, 14))).isoformat() if random.random() > 0.3 else None,
-                express_delivery=random.choice([True, False]),
-            )
-            order_crud.create_order(db, order_data)
-            count += 1
-
-    return {"count": count}
+    """从 Ozon 同步所有店铺的 FBS 订单数据。"""
+    clear_cache()
+    result = run_sync_task(db, "sync_orders")
+    if result == "failed":
+        raise HTTPException(500, detail="订单同步失败，请检查 Ozon API 凭证和网络连接")
+    return {"status": result}

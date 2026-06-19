@@ -1,10 +1,10 @@
 <template>
   <div class="container">
     <div style="margin-bottom: 16px; display: flex; justify-content: space-between; align-items: center;">
-      <h2 class="section-title" style="margin: 0;">定时任务配置</h2>
-      <button class="button-secondary" @click="loadData" :disabled="loading">
+      <n-h2 prefix="bar" style="margin: 0;">定时任务配置</n-h2>
+      <n-button @click="loadData" :loading="loading">
         {{ loading ? '刷新中...' : '刷新' }}
-      </button>
+      </n-button>
     </div>
 
     <div v-if="loading && !tasks.length" style="text-align: center; padding: 48px; color: #64748b;">
@@ -32,28 +32,31 @@
                 <div style="font-weight: 500;">{{ task.name }}</div>
                 <div style="font-size: 12px; color: #64748b;">{{ task.description }}</div>
               </td>
-              <td><code style="background: #f1f5f9; padding: 2px 6px; border-radius: 4px; font-size: 12px;">{{ task.task_key }}</code></td>
+              <td><n-tag size="small" round>{{ task.task_key }}</n-tag></td>
               <td>{{ task.trigger_type === 'interval' ? '间隔' : 'Cron' }}</td>
               <td>{{ formatInterval(task) }}</td>
               <td>
-                <span :class="['badge', task.enabled ? 'badge-active' : 'badge-inactive']">
+                <n-tag :type="task.enabled ? 'success' : 'default'" size="small" round>
                   {{ task.enabled ? '运行中' : '已暂停' }}
-                </span>
+                </n-tag>
               </td>
               <td style="font-size: 12px; color: #64748b;">{{ formatTime(task.last_run_at) }}</td>
               <td>
-                <span v-if="task.last_status" :class="['badge', task.last_status === 'success' ? 'badge-success' : 'badge-inactive']">
+                <n-tag v-if="task.last_status" :type="task.last_status === 'success' ? 'success' : 'error'" size="small"
+                  round>
                   {{ task.last_status === 'success' ? '成功' : '失败' }}
-                </span>
+                </n-tag>
                 <span v-else style="color: #94a3b8;">-</span>
               </td>
               <td>
-                <div style="display: flex; gap: 4px;">
-                  <button class="button-link" @click="toggleTask(task)">{{ task.enabled ? '暂停' : '启用' }}</button>
-                  <button class="button-link" @click="triggerTask(task)" :disabled="triggering === task.task_key">
+                <n-space :size="4">
+                  <n-button text type="primary" size="small" @click="toggleTask(task)">{{ task.enabled ? '暂停' : '启用'
+                    }}</n-button>
+                  <n-button text type="primary" size="small" :loading="triggering === task.task_key"
+                    @click="triggerTask(task)">
                     {{ triggering === task.task_key ? '触发中...' : '立即执行' }}
-                  </button>
-                </div>
+                  </n-button>
+                </n-space>
               </td>
             </tr>
           </tbody>
@@ -65,6 +68,7 @@
 
 <script setup lang="ts">
 import { onMounted, ref } from "vue";
+import { NH2, NButton, NTag, NSpace } from "naive-ui";
 import { apiGet, apiPost, apiPut } from "../api";
 
 interface TaskConfig {
@@ -111,22 +115,20 @@ async function loadData() {
 
 async function toggleTask(task: TaskConfig) {
   try {
-    await apiPut(`/task-configs/${task.task_key}`, { enabled: !task.enabled });
+    await apiPut(`/task-configs/${task.id}`, { enabled: !task.enabled });
     await loadData();
   } catch (e) {
     console.error(e);
-    alert("操作失败");
   }
 }
 
 async function triggerTask(task: TaskConfig) {
   triggering.value = task.task_key;
   try {
-    const result = await apiPost<{ status: string }>(`/task-configs/${task.task_key}/trigger`);
-    alert(`执行完成: ${result.status}`);
+    await apiPost(`/task-configs/${task.id}/trigger`);
     await loadData();
-  } catch (e: any) {
-    alert(`触发失败: ${e.message}`);
+  } catch (e) {
+    console.error(e);
   } finally {
     triggering.value = "";
   }

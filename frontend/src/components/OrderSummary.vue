@@ -16,35 +16,34 @@
         <tr v-for="order in orders" :key="order.id">
           <td>
             <div style="display: flex; align-items: center; gap: 6px;">
-              <img
-                v-if="order.image_url"
-                :src="order.image_url"
-                style="width: 36px; height: 36px; object-fit: cover; border-radius: 4px; flex-shrink: 0;"
-                alt=""
-              />
+              <img v-if="order.image_url" :src="order.image_url"
+                style="width: 36px; height: 36px; object-fit: cover; border-radius: 4px; flex-shrink: 0;" alt="" />
               <div style="min-width: 0;">
-                <div style="font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">{{ order.shipment_number }}</div>
+                <div style="font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">{{
+                  order.shipment_number }}</div>
                 <div style="font-size: 12px; color: #64748b;">{{ order.sku }}</div>
               </div>
             </div>
           </td>
           <td style="white-space: nowrap;">{{ order.order_number }}</td>
           <td>
-            <span :class="['badge', statusBadge(order.status)]">
+            <n-tag :type="statusType(order.status)" size="small" round>
               {{ statusLabel(order.status) }}
-            </span>
+            </n-tag>
           </td>
           <td>
             <div style="min-width: 0;">
               <div v-if="order.must_ship_by" style="font-size: 12px; color: #b91c1c; white-space: nowrap;">
                 截止: {{ formatDate(order.must_ship_by) }}
               </div>
-              <div style="overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">{{ order.product_name }}</div>
+              <div style="overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">{{ order.product_name }}
+              </div>
             </div>
           </td>
           <td>
             <div>{{ order.tracking_number || '-' }}</div>
-            <div style="font-size: 12px; color: #64748b;">x{{ order.quantity }} / ¥{{ order.unit_price.toFixed(2) }}</div>
+            <div style="font-size: 12px; color: #64748b;">x{{ order.quantity }} / ¥{{ order.unit_price.toFixed(2) }}
+            </div>
           </td>
           <td>
             <div>{{ order.store_name }}</div>
@@ -52,10 +51,10 @@
             <div v-if="order.express_delivery" style="font-size: 12px; color: #0891b2; font-weight: 500;">极速</div>
           </td>
           <td>
-            <div style="display: flex; gap: 4px;">
-              <button class="button-link" @click.prevent="emitEdit(order)">编辑</button>
-              <button class="button-link danger" @click.prevent="emitDelete(order.id)">删除</button>
-            </div>
+            <n-space :size="4">
+              <n-button text type="primary" size="small" @click="emitEdit(order)">编辑</n-button>
+              <n-button text type="error" size="small" @click="emitDelete(order.id)">删除</n-button>
+            </n-space>
           </td>
         </tr>
       </tbody>
@@ -65,6 +64,7 @@
 
 <script setup lang="ts">
 import type { PropType } from "vue";
+import { NTag, NButton, NSpace } from "naive-ui";
 import type { OrderItem } from "../store";
 
 defineProps({
@@ -79,19 +79,22 @@ const emit = defineEmits<{
   "delete-order": [id: number];
 }>();
 
-const statusMap: Record<string, { label: string; badge: string }> = {
-  accepted: { label: "已接单", badge: "badge-active" },
-  processing: { label: "处理中", badge: "badge-active" },
-  shipped: { label: "已发货", badge: "" },
-  delivered: { label: "已送达", badge: "" },
-  cancelled: { label: "已取消", badge: "badge-inactive" },
+const statusMap: Record<string, { label: string; type: "success" | "warning" | "error" | "info" | "default" }> = {
+  awaiting_packaging: { label: "待包装", type: "warning" },
+  awaiting_deliver: { label: "待发货", type: "info" },
+  delivering: { label: "配送中", type: "info" },
+  delivered: { label: "已送达", type: "success" },
+  cancelled: { label: "已取消", type: "error" },
+  cancelled_from_pending: { label: "已取消(待发货)", type: "error" },
+  returned: { label: "已退货", type: "error" },
+  sold: { label: "已售出", type: "success" },
 };
 
 function statusLabel(status: string) {
   return statusMap[status]?.label || status;
 }
-function statusBadge(status: string) {
-  return statusMap[status]?.badge || "badge-inactive";
+function statusType(status: string) {
+  return statusMap[status]?.type || "default";
 }
 
 function formatDate(d: string) {

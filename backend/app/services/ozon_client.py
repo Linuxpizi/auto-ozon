@@ -133,6 +133,18 @@ class OzonFinanceStatement:
     period_end: str
 
 
+@dataclass
+class OzonFbsRatingInfo:
+    """Parsed response from POST /v1/rating/index/fbs/info."""
+
+    index: float
+    currency_code: str
+    period_from: str
+    period_to: str
+    processing_costs_sum: float
+    defects: list
+
+
 class OzonClient:
     """Thin sync+async wrapper around the Ozon Seller API.
 
@@ -410,3 +422,92 @@ class OzonClient:
                 break
             page += 1
         return result
+
+    @_cached(ttl=3600)
+    def get_seller_rating(self) -> OzonFbsRatingInfo:
+        """Get seller FBS rating index.
+
+        POST /v1/rating/index/fbs/info
+        """
+        data = self._request("POST", "/v1/rating/index/fbs/info", json_body={})
+        return OzonFbsRatingInfo(
+            index=float(data.get("index", 0)),
+            currency_code=data.get("currency_code", ""),
+            period_from=data.get("period_from", ""),
+            period_to=data.get("period_to", ""),
+            processing_costs_sum=float(data.get("processing_costs_sum", 0)),
+            defects=data.get("defects", []),
+        )
+
+    # ------------------------------------------------------------------
+    # Product
+    # ------------------------------------------------------------------
+
+    def get_product_list(self, visibility: str = "ALL") -> list:
+        """Get all products via POST /v3/product/list with cursor pagination.
+
+        Returns list of raw product dicts.
+        """
+        result = []
+        last_id = ""
+        while True:
+            body = {
+                "filter": {"visibility": visibility},
+                "last_id": last_id,
+                "limit": 1000,
+            }
+            data = self._request("POST", "/v3/product/list", json_body=body)
+            items = data.get("result", {}).get("items", [])
+            for item in items:
+                result.append({
+                    "product_id": str(item.get("product_id", "")),
+                    "offer_id": item.get("offer_id", ""),
+                    "has_fbo_stocks": item.get("has_fbo_stocks", False),
+                    "has_fbs_stocks": item.get("has_fbs_stocks", False),
+                    "archived": item.get("archived", False),
+                    "is_discounted": item.get("is_discounted", False),
+                })
+            if not items:
+                break
+            new_last_id = str(data.get("result", {}).get("last_id", ""))
+            if new_last_id == last_id:
+                break
+            last_id = new_last_id
+        return result
+
+    def archive_product(self, product_ids: list[int]) -> bool:
+        """Archive products. POST /v1/product/archive.
+
+        Args:
+            product_ids: list of product_id integers.
+        """
+        data = self._request("POST", "/v1/product/archive", json_body={"product_id": product_ids})
+        return bool(data.get("result", False))
+
+    def get_product_info_list(self, product_ids: list[str]) -> list[dict]:
+        """Get detailed product info via POST /v3/product/info/list.
+
+        API allows max 1000 product_ids per request. This method handles
+        batching automatically.
+
+        Returns list of dicts with keys: sku, name, primary_image, price,
+        old_price, vat, etc. (raw API response items).
+        """
+        result = []
+        for i in range(0, len(product_ids), 1000):
+            batch = product_ids[i:i + 1000]
+            data = self._request(
+                "POST", "/v3/product/info/list",
+                json_body={"product_id": batch},
+            )
+            result.extend(data.get("items", []))
+        return result
+
+    def import_products_by_sku(self, items: list[dict]) -> dict:
+        """Create or update products via POST /v3/product/import.
+
+        Args:
+            items: list of dicts with complete product info.
+        """
+        data = self._request("POST", "/v3/product/import", json_body={"items": items})
+        return data

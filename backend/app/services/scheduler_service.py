@@ -58,6 +58,22 @@ DEFAULT_TASKS = [
         interval_seconds=43200,  # 12 hours
         enabled=False,
     ),
+    TaskConfigCreate(
+        task_key="sync_seller_rating",
+        name="同步卖家评级",
+        description="定时从 Ozon 同步卖家 FBS 评级指数",
+        trigger_type="interval",
+        interval_seconds=86400,  # 24 hours
+        enabled=True,
+    ),
+    TaskConfigCreate(
+        task_key="sync_products",
+        name="同步商品列表",
+        description="定时从 Ozon 同步所有店铺商品列表",
+        trigger_type="interval",
+        interval_seconds=43200,  # 12 hours
+        enabled=True,
+    ),
 ]
 
 

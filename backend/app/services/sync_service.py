@@ -5,6 +5,7 @@ Each sync_* function is called by either:
   - Manual trigger via API
 """
 
+import json
 import logging
 from datetime import datetime, timedelta, timezone
 from typing import Optional
@@ -172,6 +173,161 @@ def sync_monitors_for_store(db: Session, store: Store) -> bool:
     return True
 
 
+def sync_seller_rating_for_store(db: Session, store: Store) -> bool:
+    """Fetch FBS seller rating index from Ozon and store as JSON on the Store."""
+    client = OzonClient(client_id=store.client_id, api_key=store.api_key)
+    try:
+        rating = client.get_seller_rating()
+        payload = {
+            "index": rating.index,
+            "currency_code": rating.currency_code,
+            "period_from": rating.period_from,
+            "period_to": rating.period_to,
+            "processing_costs_sum": rating.processing_costs_sum,
+            "defects": rating.defects,
+        }
+        store.seller_rating = json.dumps(payload, ensure_ascii=False)
+        db.commit()
+        logger.info("sync_seller_rating[%s]: index=%.2f", store.name, rating.index)
+    except Exception as e:
+        logger.warning("sync_seller_rating[%s] failed: %s", store.name, e)
+    return True
+
+
+def sync_products_for_store(db: Session, store: Store) -> int:
+    """Sync product list from Ozon for a single store.
+
+    Two API passes because Ozon's visibility=ALL EXCLUDES archived products:
+      1. visibility=ALL  -> active products
+      2. visibility=ARCHIVED -> archived products
+    Products absent from both passes are also marked archived.
+    """
+    from app.models.listing import Listing
+    from datetime import datetime as dt, timezone
+
+    client = OzonClient(client_id=store.client_id, api_key=store.api_key)
+
+    try:
+        active_products = client.get_product_list(visibility="ALL")
+    except Exception as e:
+        logger.warning("sync_products[%s] failed to fetch active: %s", store.name, e)
+        active_products = []
+
+    try:
+        archived_products = client.get_product_list(visibility="ARCHIVED")
+    except Exception as e:
+        logger.warning("sync_products[%s] failed to fetch archived: %s", store.name, e)
+        archived_products = []
+
+    all_product_ids = set()
+    upserted = 0
+
+    # Pass 1: upsert active products
+    for p in active_products:
+        product_id = p.get("product_id", "")
+        all_product_ids.add(product_id)
+        existing = db.query(Listing).filter(
+            Listing.store_id == store.id,
+            Listing.product_id == product_id,
+        ).first()
+        if existing:
+            existing.offer_id = p.get("offer_id", "")
+            existing.has_fbo_stocks = p.get("has_fbo_stocks", False)
+            existing.has_fbs_stocks = p.get("has_fbs_stocks", False)
+            existing.archived = False
+            existing.is_discounted = p.get("is_discounted", False)
+            existing.updated_at = dt.now(timezone.utc)
+        else:
+            db.add(Listing(
+                store_id=store.id,
+                store_name=store.name,
+                account_name=store.account_name,
+                offer_id=p.get("offer_id", ""),
+                product_id=product_id,
+                has_fbo_stocks=p.get("has_fbo_stocks", False),
+                has_fbs_stocks=p.get("has_fbs_stocks", False),
+                archived=False,
+                is_discounted=p.get("is_discounted", False),
+            ))
+            upserted += 1
+
+    # Pass 2: upsert archived products
+    for p in archived_products:
+        product_id = p.get("product_id", "")
+        all_product_ids.add(product_id)
+        existing = db.query(Listing).filter(
+            Listing.store_id == store.id,
+            Listing.product_id == product_id,
+        ).first()
+        if existing:
+            if not existing.archived:
+                existing.archived = True
+                existing.updated_at = dt.now(timezone.utc)
+        else:
+            db.add(Listing(
+                store_id=store.id,
+                store_name=store.name,
+                account_name=store.account_name,
+                offer_id=p.get("offer_id", ""),
+                product_id=product_id,
+                archived=True,
+            ))
+            upserted += 1
+
+    # Pass 3: products disappeared from both passes -> archived
+    missing = db.query(Listing).filter(
+        Listing.store_id == store.id,
+        Listing.archived == False,
+    ).all()
+    for listing in missing:
+        if listing.product_id and listing.product_id not in all_product_ids:
+            listing.archived = True
+            listing.updated_at = dt.now(timezone.utc)
+
+    db.commit()
+
+    # --- Pass 4: fetch detailed info via /v3/product/info/list ---
+    all_ids = [pid for pid in all_product_ids if pid]
+    if all_ids:
+        try:
+            info_items = client.get_product_info_list(all_ids)
+        except Exception as e:
+            logger.warning("sync_products[%s] failed to fetch info: %s", store.name, e)
+            info_items = []
+
+        info_map = {}
+        for item in info_items:
+            pid = str(item.get("id", ""))
+            if pid:
+                info_map[pid] = item
+
+        for listing in db.query(Listing).filter(
+            Listing.store_id == store.id,
+            Listing.product_id.in_(all_ids),
+        ).all():
+            info = info_map.get(listing.product_id)
+            if not info:
+                continue
+            listing.sku = str(info.get("sku", "") or "")
+            if not listing.sku:
+                sources = info.get("sources", [])
+                if sources and isinstance(sources, list):
+                    listing.sku = str(sources[0].get("sku", ""))
+            listing.name = info.get("name", "")
+            images = info.get("primary_image", [])
+            listing.primary_image = images[0] if isinstance(images, list) and images else str(images) if images else ""
+            listing.price = str(info.get("price", ""))
+            listing.old_price = str(info.get("old_price", ""))
+            listing.vat = str(info.get("vat", ""))
+        db.commit()
+
+    logger.info(
+        "sync_products[%s]: active=%d archived=%d upserted=%d",
+        store.name, len(active_products), len(archived_products), upserted,
+    )
+    return len(active_products) + len(archived_products)
+
+
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -212,6 +368,11 @@ def run_sync_task(db: Session, task_key: str) -> str:
             elif task_key == "sync_monitors":
                 sync_monitors_for_store(db, store)
                 total += 1
+            elif task_key == "sync_seller_rating":
+                sync_seller_rating_for_store(db, store)
+                total += 1
+            elif task_key == "sync_products":
+                total += sync_products_for_store(db, store)
 
         clear_cache()
         logger.info("run_sync_task(%s): done, processed %d stores", task_key, total)

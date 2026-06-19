@@ -1,29 +1,31 @@
 <template>
   <div class="container">
-    <div class="card">
-      <div
-        style="margin-bottom: 16px; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px;">
-        <n-h2 prefix="bar" style="margin: 0;">订单管理</n-h2>
-        <div style="display: flex; gap: 8px; align-items: center; flex-wrap: wrap;">
-          <n-select v-model:value="filterStoreId"
-            :options="[{ label: '全部店铺', value: '' }, ...appStore.stores.map(s => ({ label: s.name, value: s.id }))]"
-            placeholder="全部店铺" clearable style="width: 160px;" />
-          <n-select v-model:value="filterStatus" :options="statusOptions" placeholder="全部状态" clearable
-            style="width: 160px;" />
-          <n-input v-model:value="keyword" placeholder="订单号 / 货件号 / 运单号" clearable style="width: 200px;"
-            @keyup.enter="searchOrders" />
-          <n-button @click="searchOrders">搜索</n-button>
-          <n-button @click="refreshOrders">刷新</n-button>
-          <n-button type="primary" :loading="syncing" @click="syncOrders">一键同步</n-button>
-        </div>
+    <div class="page-header">
+      <n-h2 class="page-title" style="margin: 0;">订单管理</n-h2>
+      <div class="toolbar">
+        <n-select v-model:value="filterStoreId"
+          :options="[{ label: '全部店铺', value: '' }, ...appStore.stores.map(s => ({ label: s.name, value: s.id }))]"
+          placeholder="全部店铺" clearable style="width: 160px;" size="small" />
+        <n-select v-model:value="filterStatus" :options="statusOptions" placeholder="全部状态" clearable
+          style="width: 160px;" size="small" />
+        <n-input v-model:value="keyword" placeholder="订单号 / 货件号 / 运单号" clearable style="width: 200px;"
+          size="small" @keyup.enter="searchOrders" />
+        <n-button size="small" @click="searchOrders">搜索</n-button>
+        <n-button size="small" @click="refreshOrders">刷新</n-button>
+        <n-button type="primary" size="small" :loading="syncing" @click="syncOrders">一键同步</n-button>
       </div>
-      <div v-if="appStore.orderTotal > 0" style="margin-bottom: 12px; font-size: 14px; color: #475569;">
+    </div>
+    <div class="card">
+      <div v-if="appStore.orderTotal > 0" style="margin-bottom: 12px; font-size: 14px; color: var(--text-secondary);">
         共 {{ appStore.orderTotal }} 条订单记录
       </div>
       <OrderSummary :orders="appStore.orders" />
-      <div v-if="appStore.orderTotal > appStore.orderPageSize"
-        style="margin-top: 16px; display: flex; justify-content: center;">
-        <n-pagination v-model:page="appStore.orderPage" :page-count="totalPages" @update:page="changePage" />
+      <div v-if="appStore.orderTotal > 0"
+        class="pagination-footer">
+        <n-select :value="appStore.orderPageSize" :options="pageSizes" size="small" style="width: 120px;"
+          @update:value="onOrderPageSizeChange" />
+        <n-pagination :value="appStore.orderPage" :page-count="totalPages"
+          :page-slot="7" @update:page="changePage" />
       </div>
     </div>
   </div>
@@ -41,6 +43,11 @@ const filterStoreId = ref<number | null>(null);
 const filterStatus = ref<string | null>(null);
 const keyword = ref("");
 const syncing = ref(false);
+const pageSizes = [
+  { label: "20 条/页", value: 20 },
+  { label: "50 条/页", value: 50 },
+  { label: "100 条/页", value: 100 },
+];
 
 const statusOptions = [
   { label: "待包装", value: "awaiting_packaging" },
@@ -69,6 +76,13 @@ async function searchOrders() {
 }
 
 function changePage(page: number) {
+  appStore.orderPage = page;
+  loadOrders();
+}
+
+function onOrderPageSizeChange(size: number) {
+  appStore.orderPageSize = size;
+  appStore.orderPage = 1;
   loadOrders();
 }
 

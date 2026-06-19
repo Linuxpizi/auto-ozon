@@ -4,11 +4,6 @@
     <n-form label-placement="top" :model="form">
       <n-grid :cols="2" :x-gap="16">
         <n-gi>
-          <n-form-item label="所属账号">
-            <n-input v-model:value="form.account_name" placeholder="请输入所属账号" />
-          </n-form-item>
-        </n-gi>
-        <n-gi>
           <n-form-item label="店铺名称" :validation-status="errors.name ? 'error' : undefined"
             :feedback="errors.name || undefined">
             <n-input v-model:value="form.name" placeholder="请输入店铺名称" />
@@ -103,7 +98,6 @@ const showApiKey = ref(false);
 const submitting = ref(false);
 
 const form = reactive({
-  account_name: "",
   name: "",
   client_id: "",
   api_key: "",
@@ -123,7 +117,6 @@ watch(
   (val) => {
     if (val) {
       Object.assign(form, {
-        account_name: val.account_name || "",
         name: val.name || "",
         client_id: val.client_id || "",
         api_key: val.api_key || "",
@@ -143,7 +136,6 @@ watch(
 );
 
 function resetForm() {
-  form.account_name = "";
   form.name = "";
   form.client_id = "";
   form.api_key = "";
@@ -175,7 +167,6 @@ async function submitStore() {
   submitting.value = true;
 
   const body: Record<string, any> = {
-    account_name: form.account_name,
     name: form.name,
     client_id: form.client_id,
     api_key: form.api_key,

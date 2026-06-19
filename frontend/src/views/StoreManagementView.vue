@@ -1,33 +1,35 @@
 <template>
   <div class="container">
-    <div style="margin-bottom: 16px; display: flex; justify-content: space-between; align-items: center;">
-      <n-h2 prefix="bar" style="margin: 0;">店铺管理</n-h2>
-      <div style="display: flex; gap: 8px; align-items: center;">
+    <div class="page-header">
+      <n-h2 class="page-title" style="margin: 0;">店铺管理</n-h2>
+      <div class="toolbar">
         <n-input v-model:value="keyword" placeholder="搜索名称/账号/Client ID" clearable style="width: 200px;"
-          @keyup.enter="searchStores" />
-        <n-button @click="searchStores">搜索</n-button>
-        <n-button @click="showImport = true">导入 Excel</n-button>
-        <n-button type="primary" @click="openAdd">添加店铺</n-button>
+          size="small" @keyup.enter="searchStores" />
+        <n-button size="small" @click="searchStores">搜索</n-button>
+        <n-button size="small" @click="showImport = true">导入 Excel</n-button>
+        <n-button type="primary" size="small" @click="openAdd">添加店铺</n-button>
       </div>
     </div>
 
     <div class="card">
-      <StoreList :stores="appStore.stores" @edit-store="openEdit" @sync-warehouse="handleSyncWarehouse"
-        @accounting="handleAccounting" @delete-store="handleDelete" />
-      <div v-if="appStore.storeTotal > appStore.storePageSize"
-        style="margin-top: 16px; display: flex; justify-content: center;">
-        <n-pagination v-model:page="appStore.storePage" :page-count="totalPages" @update:page="changePage" />
+      <StoreList :stores="appStore.stores" @edit-store="openEdit" @delete-store="handleDelete" />
+      <div v-if="appStore.storeTotal > 0"
+        class="pagination-footer">
+        <n-select :value="appStore.storePageSize" :options="pageSizes" size="small" style="width: 120px;"
+          @update:value="onStorePageSizeChange" />
+        <n-pagination :value="appStore.storePage" :page-count="totalPages"
+          :page-slot="7" @update:page="changePage" />
       </div>
     </div>
 
     <StoreForm :visible="formVisible" :editing-store="editingStore" @close="closeForm" @saved="refreshStores" />
 
     <n-modal v-model:show="showImport" preset="card" title="导入店铺 (Excel)" style="max-width: 420px;">
-      <p style="font-size: 14px; color: #5e6f7c; margin-bottom: 8px;">
+      <p style="font-size: 14px; color: var(--text-secondary); margin-bottom: 8px;">
         选择 .xlsx 文件导入店铺数据。
       </p>
       <a :href="templateUrl"
-        style="display: inline-block; margin-bottom: 12px; font-size: 13px; color: #2563eb; cursor: pointer;"
+        style="display: inline-block; margin-bottom: 12px; font-size: 13px; color: var(--accent); cursor: pointer;"
         download>下载导入模板 →</a>
       <n-upload :max="1" accept=".xlsx,.xls" @change="onFileChange">
         <n-button>选择文件</n-button>
@@ -45,7 +47,7 @@
 
 <script setup lang="ts">
 import { computed, onMounted, ref } from "vue";
-import { NH2, NInput, NButton, NPagination, NModal, NUpload } from "naive-ui";
+import { NH2, NInput, NButton, NPagination, NModal, NUpload, NSelect } from "naive-ui";
 import { apiDelete, apiUrl } from "../api";
 import { useAppStore } from "../store";
 import type { StoreItem } from "../store";
@@ -61,14 +63,30 @@ const importFile = ref<File | null>(null);
 const importError = ref("");
 const importing = ref(false);
 const templateUrl = apiUrl("/stores/import/template");
+const pageSizes = [
+  { label: "10 条/页", value: 10 },
+  { label: "20 条/页", value: 20 },
+  { label: "50 条/页", value: 50 },
+];
 
 const totalPages = computed(() => Math.max(1, Math.ceil(appStore.storeTotal / appStore.storePageSize)));
 
 async function refreshStores() {
-  await appStore.fetchStores({ keyword: keyword.value || undefined });
+  await appStore.fetchStores({
+    skip: (appStore.storePage - 1) * appStore.storePageSize,
+    limit: appStore.storePageSize,
+    keyword: keyword.value || undefined,
+  });
 }
 
 function changePage(page: number) {
+  appStore.storePage = page;
+  refreshStores();
+}
+
+function onStorePageSizeChange(size: number) {
+  appStore.storePageSize = size;
+  appStore.storePage = 1;
   refreshStores();
 }
 
@@ -92,14 +110,6 @@ function closeForm() {
   editingStore.value = null;
 }
 
-async function handleSyncWarehouse(store: StoreItem) {
-  alert(`同步仓库功能开发中 — ${store.name}`);
-}
-
-async function handleAccounting(store: StoreItem) {
-  alert(`核算功能开发中 — ${store.name}`);
-}
-
 async function handleDelete(id: number) {
   try {
     await apiDelete(`/stores/${id}`);
@@ -110,9 +120,12 @@ async function handleDelete(id: number) {
   }
 }
 
-function onFileChange(payload: { file: { file: File } }) {
-  importFile.value = payload.file.file;
-  importError.value = "";
+function onFileChange(payload: { fileList: { file: File | null }[] }) {
+  const f = payload.fileList?.[0]?.file;
+  if (f) {
+    importFile.value = f;
+    importError.value = "";
+  }
 }
 
 async function uploadImport() {
@@ -136,4 +149,9 @@ async function uploadImport() {
     importing.value = false;
   }
 }
+
+onMounted(() => {
+  appStore.storePage = 1;
+  refreshStores();
+});
 </script>

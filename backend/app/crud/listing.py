@@ -10,18 +10,18 @@ def get_listings(
     skip: int = 0,
     limit: int = 20,
     store_id: Optional[int] = None,
-    status: Optional[str] = None,
+    archived: Optional[bool] = None,
     keyword: Optional[str] = None,
 ) -> List[Listing]:
     query = db.query(Listing)
     if store_id is not None:
         query = query.filter(Listing.store_id == store_id)
-    if status:
-        query = query.filter(Listing.status == status)
+    if archived is not None:
+        query = query.filter(Listing.archived == archived)
     if keyword:
         query = query.filter(
-            Listing.sku.ilike(f"%{keyword}%")
-            | Listing.product_name.ilike(f"%{keyword}%")
+            Listing.offer_id.ilike(f"%{keyword}%")
+            | Listing.product_id.ilike(f"%{keyword}%")
         )
     return query.order_by(Listing.updated_at.desc()).offset(skip).limit(limit).all()
 
@@ -29,18 +29,18 @@ def get_listings(
 def count_listings(
     db: Session,
     store_id: Optional[int] = None,
-    status: Optional[str] = None,
+    archived: Optional[bool] = None,
     keyword: Optional[str] = None,
 ) -> int:
     query = db.query(Listing)
     if store_id is not None:
         query = query.filter(Listing.store_id == store_id)
-    if status:
-        query = query.filter(Listing.status == status)
+    if archived is not None:
+        query = query.filter(Listing.archived == archived)
     if keyword:
         query = query.filter(
-            Listing.sku.ilike(f"%{keyword}%")
-            | Listing.product_name.ilike(f"%{keyword}%")
+            Listing.offer_id.ilike(f"%{keyword}%")
+            | Listing.product_id.ilike(f"%{keyword}%")
         )
     return query.count()
 
@@ -55,11 +55,12 @@ def create_listing(db: Session, data: ListingCreate) -> Listing:
         store_id=data.store_id,
         store_name=store.name if store else "",
         account_name=store.account_name if store else "",
-        sku=data.sku,
-        product_name=data.product_name,
-        price=data.price,
-        status=data.status,
-        image_url=data.image_url,
+        offer_id=data.offer_id,
+        product_id=data.product_id,
+        has_fbo_stocks=data.has_fbo_stocks,
+        has_fbs_stocks=data.has_fbs_stocks,
+        archived=data.archived,
+        is_discounted=data.is_discounted,
     )
     db.add(obj)
     db.commit()
@@ -85,3 +86,28 @@ def delete_listing(db: Session, listing_id: int) -> bool:
     db.delete(obj)
     db.commit()
     return True
+
+
+def archive_listing(db: Session, listing_id: int) -> bool:
+    """Archive a single listing by setting archived=True."""
+    obj = db.query(Listing).filter(Listing.id == listing_id).first()
+    if not obj:
+        return False
+    obj.archived = True
+    db.commit()
+    return True
+
+
+def archive_listings_bulk(db: Session, listing_ids: list[int]) -> int:
+    """Archive multiple listings by ids."""
+    updated = db.query(Listing).filter(Listing.id.in_(listing_ids)).update(
+        {"archived": True}, synchronize_session=False
+    )
+    db.commit()
+    return updated
+
+
+def get_listing_by_offer(db: Session, store_id: int, offer_id: str) -> Optional[Listing]:
+    return db.query(Listing).filter(
+        Listing.store_id == store_id, Listing.offer_id == offer_id
+    ).first()

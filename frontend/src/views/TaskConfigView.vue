@@ -1,13 +1,15 @@
 <template>
   <div class="container">
-    <div style="margin-bottom: 16px; display: flex; justify-content: space-between; align-items: center;">
-      <n-h2 prefix="bar" style="margin: 0;">定时任务配置</n-h2>
-      <n-button @click="loadData" :loading="loading">
-        {{ loading ? '刷新中...' : '刷新' }}
-      </n-button>
+    <div class="page-header">
+      <n-h2 class="page-title" style="margin: 0;">定时任务配置</n-h2>
+      <div class="toolbar">
+        <n-button size="small" @click="loadData" :loading="loading">
+          {{ loading ? '刷新中...' : '刷新' }}
+        </n-button>
+      </div>
     </div>
 
-    <div v-if="loading && !tasks.length" style="text-align: center; padding: 48px; color: #64748b;">
+    <div v-if="loading && !tasks.length" style="text-align: center; padding: 48px; color: var(--text-secondary);">
       加载中...
     </div>
 
@@ -30,7 +32,7 @@
             <tr v-for="task in tasks" :key="task.task_key">
               <td>
                 <div style="font-weight: 500;">{{ task.name }}</div>
-                <div style="font-size: 12px; color: #64748b;">{{ task.description }}</div>
+                <div style="font-size: 12px; color: var(--text-secondary);">{{ task.description }}</div>
               </td>
               <td><n-tag size="small" round>{{ task.task_key }}</n-tag></td>
               <td>{{ task.trigger_type === 'interval' ? '间隔' : 'Cron' }}</td>
@@ -40,13 +42,13 @@
                   {{ task.enabled ? '运行中' : '已暂停' }}
                 </n-tag>
               </td>
-              <td style="font-size: 12px; color: #64748b;">{{ formatTime(task.last_run_at) }}</td>
+              <td style="font-size: 12px; color: var(--text-secondary);">{{ formatTime(task.last_run_at) }}</td>
               <td>
                 <n-tag v-if="task.last_status" :type="task.last_status === 'success' ? 'success' : 'error'" size="small"
                   round>
                   {{ task.last_status === 'success' ? '成功' : '失败' }}
                 </n-tag>
-                <span v-else style="color: #94a3b8;">-</span>
+                <span v-else style="color: var(--text-muted);">-</span>
               </td>
               <td>
                 <n-space :size="4">
@@ -115,7 +117,7 @@ async function loadData() {
 
 async function toggleTask(task: TaskConfig) {
   try {
-    await apiPut(`/task-configs/${task.id}`, { enabled: !task.enabled });
+    await apiPut(`/task-configs/${task.task_key}`, { enabled: !task.enabled });
     await loadData();
   } catch (e) {
     console.error(e);
@@ -125,7 +127,7 @@ async function toggleTask(task: TaskConfig) {
 async function triggerTask(task: TaskConfig) {
   triggering.value = task.task_key;
   try {
-    await apiPost(`/task-configs/${task.id}/trigger`);
+    await apiPost(`/task-configs/${task.task_key}/trigger`);
     await loadData();
   } catch (e) {
     console.error(e);

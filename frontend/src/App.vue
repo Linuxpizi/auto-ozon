@@ -1,14 +1,18 @@
 <template>
-  <n-config-provider :theme-overrides="themeOverrides">
+  <n-config-provider :theme="isDark ? darkTheme : undefined" :theme-overrides="themeOverrides">
     <n-message-provider>
       <n-dialog-provider>
         <n-notification-provider>
-          <div class="dashboard-layout">
-            <Sidebar />
-            <main class="main-content">
-              <router-view />
-            </main>
-          </div>
+          <n-layout has-sider style="min-height: 100vh;">
+            <n-config-provider :theme-overrides="sidebarThemeOverrides">
+              <Sidebar :is-dark="isDark" @toggle-theme="isDark = !isDark" />
+            </n-config-provider>
+            <n-layout-content style="padding: 0;">
+              <main class="main-content">
+                <router-view />
+              </main>
+            </n-layout-content>
+          </n-layout>
         </n-notification-provider>
       </n-dialog-provider>
     </n-message-provider>
@@ -16,20 +20,61 @@
 </template>
 
 <script setup lang="ts">
+import { ref, watch } from "vue";
 import {
   NConfigProvider,
   NMessageProvider,
   NDialogProvider,
   NNotificationProvider,
+  NLayout,
+  NLayoutContent,
+  darkTheme,
   type GlobalThemeOverrides,
 } from "naive-ui";
 import Sidebar from "./components/Sidebar.vue";
 
+const isDark = ref(localStorage.getItem("theme") === "dark");
+
+function applyTheme(dark: boolean) {
+  document.documentElement.setAttribute("data-theme", dark ? "dark" : "");
+  localStorage.setItem("theme", dark ? "dark" : "light");
+}
+
+applyTheme(isDark.value);
+watch(isDark, (v) => applyTheme(v));
+
 const themeOverrides: GlobalThemeOverrides = {
   common: {
-    primaryColor: "#2563eb",
-    primaryColorHover: "#1d4ed8",
-    borderRadius: "10px",
+    primaryColor: "#4f46e5",
+    primaryColorHover: "#6366f1",
+    primaryColorPressed: "#4338ca",
+    borderRadius: "8px",
+    borderRadiusSmall: "6px",
+  },
+};
+
+// Sidebar wrapper uses light theme so NMenu text stays visible even when app is dark
+const sidebarThemeOverrides: GlobalThemeOverrides = {
+  common: {
+    borderRadius: "8px",
+  },
+  Menu: {
+    color: "var(--bg-sidebar)",
+    itemTextColor: "var(--text-sidebar)",
+    itemTextColorHover: "#ffffff",
+    itemTextColorActive: "#ffffff",
+    itemIconColor: "var(--text-sidebar)",
+    itemIconColorHover: "#ffffff",
+    itemIconColorActive: "#ffffff",
+    itemColorActive: "var(--bg-sidebar-active)",
+    itemColorHover: "var(--bg-sidebar-hover)",
+    itemColorActiveHover: "var(--bg-sidebar-active)",
+    arrowColor: "var(--text-sidebar)",
+  },
+  Layout: {
+    color: "var(--bg-sidebar)",
+    siderColor: "var(--bg-sidebar)",
+    siderBorder: "none",
   },
 };
 </script>
@@ -43,62 +88,14 @@ const themeOverrides: GlobalThemeOverrides = {
 
 body {
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
-  background: #f8fafc;
-  color: #1e293b;
-}
-
-.dashboard-layout {
-  display: flex;
-  min-height: 100vh;
+  background: var(--bg-page);
+  color: var(--text-primary);
+  -webkit-font-smoothing: antialiased;
 }
 
 .main-content {
-  flex: 1;
-  padding: 32px;
-  overflow-y: auto;
-}
-
-.container {
-  max-width: 1200px;
-}
-
-.card {
-  background: #ffffff;
-  border: 1px solid #e2e8f0;
-  border-radius: 12px;
-  padding: 24px;
-}
-
-.table {
-  width: 100%;
-  border-collapse: collapse;
-  font-size: 14px;
-}
-
-.table th {
-  background: #f8fafc;
-  font-weight: 600;
-  color: #475569;
-  padding: 10px 12px;
-  text-align: left;
-  border-bottom: 2px solid #e2e8f0;
-  white-space: nowrap;
-}
-
-.table td {
-  padding: 10px 12px;
-  border-bottom: 1px solid #f1f5f9;
-  vertical-align: middle;
-}
-
-.table tr:hover td {
-  background: #f8fafc;
-}
-
-.summary-item {
-  background: #f8fafc;
-  border: 1px solid #e2e8f0;
-  border-radius: 10px;
-  padding: 16px;
+  padding: 28px 36px;
+  min-height: 100vh;
+  overflow-x: auto;
 }
 </style>

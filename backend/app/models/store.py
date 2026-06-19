@@ -21,3 +21,4 @@ class Store(Base):
     auto_archive = Column(Boolean, default=False)
     auto_delete = Column(Boolean, default=False)
     notes = Column(Text, default="")
+    seller_rating = Column(Text, default="")

@@ -4,6 +4,7 @@ from sqlalchemy.orm import Session
 from app.crud import listing as listing_crud
 from app.schemas.listing import ListingCreate, ListingUpdate, ListingRead
 from app.core.db import get_db
+from app.services.ozon_client import OzonClient
 
 router = APIRouter()
 
@@ -13,21 +14,21 @@ def list_listings(
     skip: int = Query(0, ge=0),
     limit: int = Query(20, ge=1, le=100),
     store_id: Optional[int] = Query(None),
-    status: Optional[str] = Query(None),
+    archived: Optional[bool] = Query(None),
     keyword: Optional[str] = Query(None),
     db: Session = Depends(get_db),
 ):
-    return listing_crud.get_listings(db, skip=skip, limit=limit, store_id=store_id, status=status, keyword=keyword)
+    return listing_crud.get_listings(db, skip=skip, limit=limit, store_id=store_id, archived=archived, keyword=keyword)
 
 
 @router.get("/count")
 def count_listings(
     store_id: Optional[int] = Query(None),
-    status: Optional[str] = Query(None),
+    archived: Optional[bool] = Query(None),
     keyword: Optional[str] = Query(None),
     db: Session = Depends(get_db),
 ):
-    total = listing_crud.count_listings(db, store_id=store_id, status=status, keyword=keyword)
+    total = listing_crud.count_listings(db, store_id=store_id, archived=archived, keyword=keyword)
     return {"total": total}
 
 
@@ -58,3 +59,73 @@ def delete_listing(listing_id: int, db: Session = Depends(get_db)):
     if not ok:
         raise HTTPException(status_code=404, detail="Listing not found")
     return {"ok": True}
+
+
+@router.post("/archive")
+def archive_listings(listing_ids: List[int], db: Session = Depends(get_db)):
+    count = listing_crud.archive_listings_bulk(db, listing_ids)
+    return {"archived": count}
+
+
+@router.post("/archive/ozon")
+def archive_on_ozon(listing_ids: List[int], db: Session = Depends(get_db)):
+    """Archive products on Ozon platform (using product_id)."""
+    listings = db.query(listing_crud.Listing).filter(
+        listing_crud.Listing.id.in_(listing_ids)
+    ).all()
+    if not listings:
+        raise HTTPException(status_code=404, detail="No listings found")
+
+    from app.models.store import Store
+    results = {}
+    for listing in listings:
+        if listing.store_id not in results:
+            store = db.query(Store).filter(Store.id == listing.store_id).first()
+            if not store:
+                continue
+            results[listing.store_id] = {"client": OzonClient(store.client_id, store.api_key), "product_ids": []}
+        if listing.product_id:
+            results[listing.store_id]["product_ids"].append(int(listing.product_id))
+
+    archived_count = 0
+    for store_id, info in results.items():
+        if info["product_ids"]:
+            ok = info["client"].archive_product(info["product_ids"])
+            if ok:
+                archived_count += len(info["product_ids"])
+
+    listing_crud.archive_listings_bulk(db, listing_ids)
+    return {"archived_on_ozon": archived_count}
+
+
+@router.post("/import")
+def import_products(
+    listing_ids: List[int],
+    db: Session = Depends(get_db),
+):
+    """Import/migrate products between warehouses on Ozon."""
+    listings = db.query(listing_crud.Listing).filter(
+        listing_crud.Listing.id.in_(listing_ids)
+    ).all()
+    if not listings:
+        raise HTTPException(status_code=404, detail="No listings found")
+
+    from app.models.store import Store
+    store_cache = {}
+    imported_count = 0
+    for listing in listings:
+        if listing.store_id not in store_cache:
+            store = db.query(Store).filter(Store.id == listing.store_id).first()
+            if not store:
+                continue
+            store_cache[listing.store_id] = OzonClient(store.client_id, store.api_key)
+
+        if listing.product_id and listing.offer_id:
+            client = store_cache[listing.store_id]
+            client.import_products_by_sku([{
+                "offer_id": listing.offer_id,
+                "product_id": int(listing.product_id),
+            }])
+            imported_count += 1
+
+    return {"imported": imported_count}

@@ -3,7 +3,6 @@ from pydantic import BaseModel
 
 
 class StoreBase(BaseModel):
-    account_name: str = ""
     name: str
     client_id: str
     api_key: str
@@ -18,6 +17,7 @@ class StoreBase(BaseModel):
     auto_archive: bool = False
     auto_delete: bool = False
     notes: str = ""
+    seller_rating: str = ""
 
 
 class StoreCreate(StoreBase):
@@ -25,7 +25,6 @@ class StoreCreate(StoreBase):
 
 
 class StoreUpdate(BaseModel):
-    account_name: Optional[str] = None
     name: Optional[str] = None
     client_id: Optional[str] = None
     api_key: Optional[str] = None
@@ -40,6 +39,7 @@ class StoreUpdate(BaseModel):
     auto_archive: Optional[bool] = None
     auto_delete: Optional[bool] = None
     notes: Optional[str] = None
+    seller_rating: Optional[str] = None
 
 
 class StoreRead(StoreBase):

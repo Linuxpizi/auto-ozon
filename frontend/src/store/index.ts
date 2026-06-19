@@ -13,7 +13,6 @@ export interface DashboardSummary {
 
 export interface StoreItem {
   id: number;
-  account_name: string;
   name: string;
   client_id: string;
   api_key: string;
@@ -28,6 +27,7 @@ export interface StoreItem {
   auto_archive: boolean;
   auto_delete: boolean;
   notes: string;
+  seller_rating: string;
 }
 
 export interface OrderItem {

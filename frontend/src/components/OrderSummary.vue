@@ -21,7 +21,7 @@
               <div style="min-width: 0;">
                 <div style="font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">{{
                   order.shipment_number }}</div>
-                <div style="font-size: 12px; color: #64748b;">{{ order.sku }}</div>
+                <div style="font-size: 12px; color: var(--text-secondary);">{{ order.sku }}</div>
               </div>
             </div>
           </td>
@@ -33,7 +33,7 @@
           </td>
           <td>
             <div style="min-width: 0;">
-              <div v-if="order.must_ship_by" style="font-size: 12px; color: #b91c1c; white-space: nowrap;">
+              <div v-if="order.must_ship_by" style="font-size: 12px; color: var(--danger); white-space: nowrap;">
                 截止: {{ formatDate(order.must_ship_by) }}
               </div>
               <div style="overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">{{ order.product_name }}
@@ -42,13 +42,13 @@
           </td>
           <td>
             <div>{{ order.tracking_number || '-' }}</div>
-            <div style="font-size: 12px; color: #64748b;">x{{ order.quantity }} / ¥{{ order.unit_price.toFixed(2) }}
+            <div style="font-size: 12px; color: var(--text-secondary);">x{{ order.quantity }} / ¥{{ order.unit_price.toFixed(2) }}
             </div>
           </td>
           <td>
             <div>{{ order.store_name }}</div>
-            <div style="font-size: 12px; color: #64748b;">{{ order.account_name }}</div>
-            <div v-if="order.express_delivery" style="font-size: 12px; color: #0891b2; font-weight: 500;">极速</div>
+            <div style="font-size: 12px; color: var(--text-secondary);">{{ order.account_name }}</div>
+            <div v-if="order.express_delivery" style="font-size: 12px; color: var(--accent); font-weight: 500;">极速</div>
           </td>
           <td>
             <n-space :size="4">

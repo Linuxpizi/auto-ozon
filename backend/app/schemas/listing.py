@@ -7,28 +7,49 @@ class ListingBase(BaseModel):
     store_id: int
     store_name: str
     account_name: str
-    sku: str
-    product_name: str
-    price: float = 0.0
-    status: str = "draft"
-    image_url: str = ""
+    offer_id: str = ""
+    product_id: str = ""
+    sku: str = ""
+    name: str = ""
+    primary_image: str = ""
+    price: str = ""
+    old_price: str = ""
+    vat: str = ""
+    has_fbo_stocks: bool = False
+    has_fbs_stocks: bool = False
+    archived: bool = False
+    is_discounted: bool = False
 
 
 class ListingCreate(BaseModel):
     store_id: int
-    sku: str
-    product_name: str
-    price: float = 0.0
-    status: str = "draft"
-    image_url: str = ""
+    offer_id: str = ""
+    product_id: str = ""
+    sku: str = ""
+    name: str = ""
+    primary_image: str = ""
+    price: str = ""
+    old_price: str = ""
+    vat: str = ""
+    has_fbo_stocks: bool = False
+    has_fbs_stocks: bool = False
+    archived: bool = False
+    is_discounted: bool = False
 
 
 class ListingUpdate(BaseModel):
-    product_name: Optional[str] = None
-    price: Optional[float] = None
-    status: Optional[str] = None
-    image_url: Optional[str] = None
+    offer_id: Optional[str] = None
+    product_id: Optional[str] = None
     sku: Optional[str] = None
+    name: Optional[str] = None
+    primary_image: Optional[str] = None
+    price: Optional[str] = None
+    old_price: Optional[str] = None
+    vat: Optional[str] = None
+    has_fbo_stocks: Optional[bool] = None
+    has_fbs_stocks: Optional[bool] = None
+    archived: Optional[bool] = None
+    is_discounted: Optional[bool] = None
 
 
 class ListingRead(ListingBase):

@@ -25,7 +25,6 @@ def get_stores(
         q = q.filter(
             Store.name.ilike(like)
             | Store.client_id.ilike(like)
-            | Store.account_name.ilike(like)
         )
     return q.offset(skip).limit(limit).all()
 
@@ -37,7 +36,6 @@ def count_stores(db: Session, keyword: Optional[str] = None) -> int:
         q = q.filter(
             Store.name.ilike(like)
             | Store.client_id.ilike(like)
-            | Store.account_name.ilike(like)
         )
     return q.scalar() or 0
 

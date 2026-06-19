@@ -1,29 +1,29 @@
 <template>
   <div class="container">
-    <div style="margin-bottom: 16px; display: flex; justify-content: space-between; align-items: center;">
-      <n-h2 prefix="bar" style="margin: 0;">店铺流水</n-h2>
-      <div style="display: flex; gap: 8px; align-items: center;">
-        <n-button type="primary" @click="syncFinance" :loading="syncing">
+    <div class="page-header">
+      <n-h2 class="page-title" style="margin: 0;">店铺流水</n-h2>
+      <div class="toolbar">
+        <n-button type="primary" size="small" @click="syncFinance" :loading="syncing">
           {{ syncing ? '同步中...' : '一键同步' }}
         </n-button>
-        <n-button @click="loadData" :loading="loading">
+        <n-button size="small" @click="loadData" :loading="loading">
           {{ loading ? '刷新中...' : '刷新' }}
         </n-button>
       </div>
     </div>
 
-    <n-tabs v-model:value="activeTab" type="line" style="margin-bottom: 16px;">
+    <n-tabs v-model:value="activeTab" type="line" style="margin-bottom: 20px;">
       <n-tab-pane name="balance" tab="余额报告" />
       <n-tab-pane name="cashflow" tab="财务报告" />
     </n-tabs>
 
     <!-- 余额报告 tab -->
     <template v-if="activeTab === 'balance'">
-      <div v-if="loading && !finances.length" style="text-align: center; padding: 48px; color: #64748b;">
+      <div v-if="loading && !finances.length" style="text-align: center; padding: 48px; color: var(--text-secondary);">
         加载中...
       </div>
 
-      <div v-else-if="!finances.length" style="text-align: center; padding: 48px; color: #64748b;">
+      <div v-else-if="!finances.length" style="text-align: center; padding: 48px; color: var(--text-secondary);">
         暂无资金数据，请先同步店铺流水信息。
       </div>
 
@@ -46,14 +46,14 @@
                 <td>{{ item.store_name }}</td>
                 <td>{{ item.account_name }}</td>
                 <td>
-                  <span :style="{ color: item.balance >= 0 ? '#166534' : '#dc2626', fontWeight: 600 }">
+                  <span :style="{ color: item.balance >= 0 ? 'var(--success)' : 'var(--danger)', fontWeight: 600 }">
                     ¥ {{ item.balance.toFixed(2) }}
                   </span>
                 </td>
-                <td style="color: #166534;">¥ {{ item.total_income.toFixed(2) }}</td>
-                <td style="color: #dc2626;">¥ {{ item.total_expense.toFixed(2) }}</td>
+                <td style="color: var(--success);">¥ {{ item.total_income.toFixed(2) }}</td>
+                <td style="color: var(--danger);">¥ {{ item.total_expense.toFixed(2) }}</td>
                 <td>¥ {{ item.pending_amount.toFixed(2) }}</td>
-                <td style="font-size: 12px; color: #64748b;">{{ formatTime(item.last_sync_at) }}</td>
+                <td style="font-size: 12px; color: var(--text-secondary);">{{ formatTime(item.last_sync_at) }}</td>
               </tr>
             </tbody>
           </table>
@@ -84,10 +84,10 @@
 
     <!-- 财务报告 tab -->
     <template v-if="activeTab === 'cashflow'">
-      <div v-if="loading" style="text-align: center; padding: 48px; color: #64748b;">
+      <div v-if="loading" style="text-align: center; padding: 48px; color: var(--text-secondary);">
         加载中...
       </div>
-      <div v-else-if="!cashFlowItems.length" style="text-align: center; padding: 48px; color: #64748b;">
+      <div v-else-if="!cashFlowItems.length" style="text-align: center; padding: 48px; color: var(--text-secondary);">
         暂无财务报告数据，请先同步店铺流水。
       </div>
       <div v-else class="card">
@@ -105,7 +105,7 @@
             <tr v-for="(item, idx) in cashFlowItems" :key="idx">
               <td>{{ item.store_name }}</td>
               <td>
-                <span :style="{ color: item.amount >= 0 ? '#166534' : '#dc2626', fontWeight: 600 }">
+                <span :style="{ color: item.amount >= 0 ? 'var(--success)' : 'var(--danger)', fontWeight: 600 }">
                   ¥ {{ item.amount.toFixed(2) }}
                 </span>
               </td>
@@ -113,7 +113,7 @@
               <td style="max-width: 300px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
                 {{ item.description }}
               </td>
-              <td style="font-size: 12px; color: #64748b;">{{ item.posted_at }}</td>
+              <td style="font-size: 12px; color: var(--text-secondary);">{{ item.posted_at }}</td>
             </tr>
           </tbody>
         </table>

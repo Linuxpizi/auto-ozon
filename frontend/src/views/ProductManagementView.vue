@@ -125,24 +125,10 @@ const pagination = reactive({
   prefix: ({ itemCount }: { itemCount: number }) => `共 ${itemCount} 条`,
 });
 
-function boolTag(val: boolean, trueText: string, falseText: string) {
-  return h(
-    NTag,
-    { type: val ? "success" : "default", size: "small", round: true },
-    () => val ? trueText : falseText,
-  );
-}
-
 const columns: DataTableColumns<any> = [
   { type: "selection" },
   {
-    title: "店铺",
-    key: "store_name",
-    width: 100,
-    ellipsis: { tooltip: true },
-  },
-  {
-    title: "SKU Image",
+    title: "商品图片",
     key: "primary_image",
     width: 70,
     align: "center",
@@ -154,12 +140,6 @@ const columns: DataTableColumns<any> = [
         onError: (e: Event) => { (e.target as HTMLImageElement).style.display = "none"; },
       });
     },
-  },
-  {
-    title: "Product ID",
-    key: "product_id",
-    width: 130,
-    ellipsis: { tooltip: true },
   },
   {
     title: "Offer ID",
@@ -177,14 +157,14 @@ const columns: DataTableColumns<any> = [
   {
     title: "商品名",
     key: "name",
-    width: 180,
+    width: 200,
     ellipsis: { tooltip: true },
     render(row) { return row.name || "—"; },
   },
   {
     title: "价格",
     key: "price",
-    width: 90,
+    width: 100,
     align: "right",
     render(row) {
       if (!row.price) return "—";
@@ -197,40 +177,62 @@ const columns: DataTableColumns<any> = [
     },
   },
   {
-    title: "FBO",
-    key: "has_fbo_stocks",
-    width: 55,
-    align: "center",
-    render(row) { return boolTag(row.has_fbo_stocks, "有", "无"); },
+    title: "最低价",
+    key: "min_price",
+    width: 80,
+    align: "right",
+    render(row) { return row.min_price || "—"; },
   },
   {
-    title: "FBS",
-    key: "has_fbs_stocks",
-    width: 55,
-    align: "center",
-    render(row) { return boolTag(row.has_fbs_stocks, "有", "无"); },
-  },
-  {
-    title: "归档",
-    key: "archived",
-    width: 65,
+    title: "库存",
+    key: "stock_present",
+    width: 70,
     align: "center",
     render(row) {
-      return row.archived
-        ? h(NTag, { type: "error", size: "small", round: true }, () => "是")
-        : h(NTag, { type: "default", size: "small", round: true }, () => "否");
+      const present = row.stock_present || 0;
+      const reserved = row.stock_reserved || 0;
+      if (present === 0 && reserved === 0) return h("span", { style: "color: var(--text-muted);" }, "0");
+      return h("span", {}, [
+        h("span", { style: "font-weight:600;" }, String(present)),
+        reserved > 0 ? h("span", { style: "color:var(--text-muted); font-size:11px; margin-left:2px;" }, `(${reserved})`) : null,
+      ]);
     },
   },
   {
-    title: "打折",
-    key: "is_discounted",
-    width: 65,
+    title: "VAT",
+    key: "vat",
+    width: 50,
+    align: "center",
+  },
+  {
+    title: "货币",
+    key: "currency_code",
+    width: 55,
+    align: "center",
+  },
+  {
+    title: "状态",
+    key: "status",
+    width: 80,
     align: "center",
     render(row) {
-      return row.is_discounted
-        ? h(NTag, { type: "warning", size: "small", round: true }, () => "是")
-        : h(NTag, { type: "default", size: "small", round: true }, () => "否");
+      if (!row.status) return "—";
+      const statusMap: Record<string, { label: string; type: string }> = {
+        "Продается": { label: "在售", type: "success" },
+        "Не продается": { label: "未在售", type: "warning" },
+        "Готов к продаже": { label: "待售", type: "info" },
+      };
+      const m = statusMap[row.status];
+      if (m) return h(NTag, { type: m.type as any, size: "small", round: true }, () => m.label);
+      return h(NTag, { type: "default" as any, size: "small", round: true }, () => row.status);
     },
+  },
+  {
+    title: "KGT",
+    key: "is_kgt",
+    width: 45,
+    align: "center",
+    render(row) { return row.is_kgt ? h(NTag, { type: "warning", size: "small", round: true }, () => "是") : "—"; },
   },
   {
     title: "操作",

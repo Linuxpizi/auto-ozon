@@ -352,28 +352,45 @@ def sync_seller_rating_for_store(db: Session, store: Store) -> bool:
 def sync_products_for_store(db: Session, store: Store) -> int:
     """Sync product list from Ozon for a single store.
 
+    Uses persisted ``last_id`` cursors per visibility so that subsequent
+    syncs only fetch new/changed products since the last run.
     Two API passes because Ozon's visibility=ALL EXCLUDES archived products:
       1. visibility=ALL  -> active products
       2. visibility=ARCHIVED -> archived products
     Products absent from both passes are also marked archived.
+
+    After the list sync, fetches detailed info via /v3/product/info/list
+    to populate richer listing fields (barcodes, images, description, etc.).
     """
     from app.models.listing import Listing
     from datetime import datetime as dt, timezone
 
     client = OzonClient(client_id=store.client_id, api_key=store.api_key)
 
+    # Use persisted cursors from Store for incremental sync
+    active_cursor = store.product_cursor_active or ""
+    archived_cursor = store.product_cursor_archived or ""
+
     try:
-        active_products = client.get_product_list(visibility="ALL")
+        active_products, new_active_cursor = client.get_product_list(
+            visibility="ALL", start_last_id=active_cursor,
+        )
     except Exception as e:
         logger.warning("sync_products[%s] failed to fetch active: %s", store.name, e, exc_info=True)
-        active_products = []
+        active_products, new_active_cursor = [], active_cursor
 
     try:
-        archived_products = client.get_product_list(visibility="ARCHIVED")
+        archived_products, new_archived_cursor = client.get_product_list(
+            visibility="ARCHIVED", start_last_id=archived_cursor,
+        )
     except Exception as e:
         logger.warning("sync_products[%s] failed to fetch archived: %s", store.name, e, exc_info=True)
-        archived_products = []
+        archived_products, new_archived_cursor = [], archived_cursor
 
+    # If either cursor moved, this is an incremental sync — only new products
+    # need info enrichment.  If a cursor didn't move, it means either nothing
+    # changed or we finished a full pass.  We track all product IDs seen in
+    # this pass for the archiving logic regardless.
     all_product_ids = set()
     upserted = 0
 
@@ -428,19 +445,41 @@ def sync_products_for_store(db: Session, store: Store) -> int:
             upserted += 1
 
     # Pass 3: products disappeared from both passes -> archived
-    missing = db.query(Listing).filter(
-        Listing.store_id == store.id,
-        Listing.archived == False,
-    ).all()
-    for listing in missing:
-        if listing.product_id and listing.product_id not in all_product_ids:
-            listing.archived = True
-            listing.updated_at = dt.now(timezone.utc)
+    # Only applies when we did a FULL scan (empty cursor at start) OR
+    # we can detect removals.  With incremental sync we skip this to
+    # avoid false positives — products that scrolled past the cursor
+    # would be incorrectly marked archived.
+    if not active_cursor and not archived_cursor:
+        missing = db.query(Listing).filter(
+            Listing.store_id == store.id,
+            Listing.archived == False,
+        ).all()
+        for listing in missing:
+            if listing.product_id and listing.product_id not in all_product_ids:
+                listing.archived = True
+                listing.updated_at = dt.now(timezone.utc)
 
     db.commit()
 
+    # Persist the new cursors for the next sync run
+    store.product_cursor_active = new_active_cursor
+    store.product_cursor_archived = new_archived_cursor
+    db.commit()
+
     # --- Pass 4: fetch detailed info via /v3/product/info/list ---
-    all_ids = [pid for pid in all_product_ids if pid]
+    # Enrich ALL products in the store with the latest detail data.
+    all_ids = list(all_product_ids)
+    if not all_ids:
+        # If incremental (no products in this batch), still refresh
+        # existing listings that are not archived.
+        all_ids = [
+            lid for (lid,) in db.query(Listing.product_id).filter(
+                Listing.store_id == store.id,
+                Listing.archived == False,
+                Listing.product_id != "",
+            ).all()
+        ]
+
     if all_ids:
         try:
             info_items = client.get_product_info_list(all_ids)
@@ -467,11 +506,45 @@ def sync_products_for_store(db: Session, store: Store) -> int:
                 if sources and isinstance(sources, list):
                     listing.sku = str(sources[0].get("sku", ""))
             listing.name = info.get("name", "")
-            images = info.get("primary_image", [])
-            listing.primary_image = images[0] if isinstance(images, list) and images else str(images) if images else ""
+            # primary_image may be a list or string
+            images_raw = info.get("primary_image", [])
+            listing.primary_image = (
+                images_raw[0]
+                if isinstance(images_raw, list) and images_raw
+                else str(images_raw) if images_raw else ""
+            )
             listing.price = str(info.get("price", ""))
             listing.old_price = str(info.get("old_price", ""))
             listing.vat = str(info.get("vat", ""))
+            # New enriched fields from /v3/product/info/list
+            barcodes = info.get("barcodes", [])
+            if isinstance(barcodes, list) and barcodes:
+                listing.barcodes = json.dumps(barcodes, ensure_ascii=False)
+            listing.description = str(info.get("description", "") or "")
+            all_images = info.get("images", [])
+            if isinstance(all_images, list):
+                listing.images = json.dumps(all_images, ensure_ascii=False)
+            listing.min_price = str(info.get("min_price", "") or "")
+            listing.volume_weight = float(info.get("volume_weight", 0) or 0)
+            listing.type_id = int(info.get("type_id", 0) or 0)
+            listing.currency_code = str(info.get("currency_code", "") or "")
+            listing.is_kgt = bool(info.get("is_kgt", False))
+            listing.is_prepayment_allowed = bool(info.get("is_prepayment_allowed", False))
+            commissions = info.get("commissions", [])
+            if isinstance(commissions, list):
+                listing.commissions_json = json.dumps(commissions, ensure_ascii=False)
+            stocks = info.get("stocks", {})
+            if isinstance(stocks, dict):
+                stock_list = stocks.get("stocks", [])
+                if isinstance(stock_list, list):
+                    listing.stock_present = sum(int(s.get("present", 0) or 0) for s in stock_list)
+                    listing.stock_reserved = sum(int(s.get("reserved", 0) or 0) for s in stock_list)
+            listing.ozon_created_at = str(info.get("created_at", "") or "")
+            # Product status
+            # status_name is human-readable (e.g. "Продается"), status is internal code (e.g. "price_sent")
+            statuses = info.get("statuses", {})
+            if isinstance(statuses, dict):
+                listing.status = str(statuses.get("status_name", "") or statuses.get("status", "") or "")
         db.commit()
 
     logger.info(

@@ -22,6 +22,8 @@ def _migrate_columns(engine):
     # Simple ALTER TABLE ADD COLUMN (no type conflict)
     simple_migrations = [
         ("stores", "seller_rating", "ALTER TABLE stores ADD COLUMN seller_rating TEXT DEFAULT ''"),
+        ("stores", "product_cursor_active", "ALTER TABLE stores ADD COLUMN product_cursor_active VARCHAR(128) DEFAULT ''"),
+        ("stores", "product_cursor_archived", "ALTER TABLE stores ADD COLUMN product_cursor_archived VARCHAR(128) DEFAULT ''"),
         ("listings", "offer_id", "ALTER TABLE listings ADD COLUMN offer_id VARCHAR(128) DEFAULT ''"),
         ("listings", "product_id", "ALTER TABLE listings ADD COLUMN product_id VARCHAR(128) DEFAULT ''"),
         ("listings", "has_fbo_stocks", "ALTER TABLE listings ADD COLUMN has_fbo_stocks BOOLEAN DEFAULT 0"),
@@ -31,6 +33,21 @@ def _migrate_columns(engine):
         ("listings", "primary_image", "ALTER TABLE listings ADD COLUMN primary_image TEXT DEFAULT ''"),
         ("listings", "old_price", "ALTER TABLE listings ADD COLUMN old_price VARCHAR(32) DEFAULT ''"),
         ("listings", "vat", "ALTER TABLE listings ADD COLUMN vat VARCHAR(16) DEFAULT ''"),
+        ("listings", "barcodes", "ALTER TABLE listings ADD COLUMN barcodes TEXT DEFAULT '[]'"),
+        ("listings", "description", "ALTER TABLE listings ADD COLUMN description TEXT DEFAULT ''"),
+        ("listings", "images", "ALTER TABLE listings ADD COLUMN images TEXT DEFAULT '[]'"),
+        ("listings", "min_price", "ALTER TABLE listings ADD COLUMN min_price VARCHAR(32) DEFAULT ''"),
+        ("listings", "status", "ALTER TABLE listings ADD COLUMN status VARCHAR(32) DEFAULT ''"),
+        ("listings", "type_id", "ALTER TABLE listings ADD COLUMN type_id INTEGER DEFAULT 0"),
+        ("listings", "category_id", "ALTER TABLE listings ADD COLUMN category_id INTEGER DEFAULT 0"),
+        ("listings", "volume_weight", "ALTER TABLE listings ADD COLUMN volume_weight REAL DEFAULT 0.0"),
+        ("listings", "currency_code", "ALTER TABLE listings ADD COLUMN currency_code VARCHAR(16) DEFAULT ''"),
+        ("listings", "is_kgt", "ALTER TABLE listings ADD COLUMN is_kgt BOOLEAN DEFAULT 0"),
+        ("listings", "is_prepayment_allowed", "ALTER TABLE listings ADD COLUMN is_prepayment_allowed BOOLEAN DEFAULT 0"),
+        ("listings", "commissions_json", "ALTER TABLE listings ADD COLUMN commissions_json TEXT DEFAULT '[]'"),
+        ("listings", "stock_present", "ALTER TABLE listings ADD COLUMN stock_present INTEGER DEFAULT 0"),
+        ("listings", "stock_reserved", "ALTER TABLE listings ADD COLUMN stock_reserved INTEGER DEFAULT 0"),
+        ("listings", "ozon_created_at", "ALTER TABLE listings ADD COLUMN ozon_created_at VARCHAR(64) DEFAULT ''"),
         ("store_finances", "paid", "ALTER TABLE store_finances ADD COLUMN paid REAL DEFAULT 0.0"),
         ("store_finances", "opening_balance", "ALTER TABLE store_finances ADD COLUMN opening_balance REAL DEFAULT 0.0"),
         ("store_finances", "currency_code", "ALTER TABLE store_finances ADD COLUMN currency_code VARCHAR(16) DEFAULT 'RUB'"),
@@ -84,7 +101,6 @@ def _migrate_columns(engine):
     # Drop obsolete columns that no longer exist in the model
     # but still exist in SQLite with NOT NULL constraints, causing insert failures.
     _drop_column_if_exists(engine, "listings", "product_name")
-    _drop_column_if_exists(engine, "listings", "status")
     _drop_column_if_exists(engine, "listings", "image_url")
     _drop_column_if_exists(engine, "listings", "archived_at")
 

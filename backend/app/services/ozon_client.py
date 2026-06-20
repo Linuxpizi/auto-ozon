@@ -521,13 +521,19 @@ class OzonClient:
     # Product
     # ------------------------------------------------------------------
 
-    def get_product_list(self, visibility: str = "ALL") -> list:
+    def get_product_list(self, visibility: str = "ALL", start_last_id: str = "") -> tuple[list, str]:
         """Get all products via POST /v3/product/list with cursor pagination.
 
-        Returns list of raw product dicts.
+        Args:
+            visibility: ALL or ARCHIVED.
+            start_last_id: Resume from a previously-persisted cursor to skip
+                already-fetched pages.
+
+        Returns (list_of_raw_product_dicts, final_last_id).
+        The final_last_id can be persisted so the next sync resumes here.
         """
         result = []
-        last_id = ""
+        last_id = start_last_id
         while True:
             body = {
                 "filter": {"visibility": visibility},
@@ -551,7 +557,7 @@ class OzonClient:
             if new_last_id == last_id:
                 break
             last_id = new_last_id
-        return result
+        return result, last_id
 
     def archive_product(self, product_ids: list[int]) -> bool:
         """Archive products. POST /v1/product/archive.

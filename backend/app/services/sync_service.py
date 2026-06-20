@@ -78,6 +78,43 @@ def sync_orders_for_store(
         for r in rows:
             image_map.setdefault(r.sku, r.primary_image or "")
 
+    # Fallback: fetch images from Ozon API for offer_ids not found in listings
+    missing_offer_ids = [
+        oid for oid in offer_ids
+        if oid not in image_map and oid
+    ]
+    if missing_offer_ids:
+        try:
+            api_images = client.get_images_by_offer_ids(missing_offer_ids)
+            image_map.update(api_images)
+            # Also cache to listings table for next time
+            for oid, img_url in api_images.items():
+                row = (
+                    db.query(Listing)
+                    .filter(Listing.store_id == store.id, Listing.offer_id == oid)
+                    .first()
+                )
+                if row:
+                    row.primary_image = img_url
+                else:
+                    db.add(Listing(store_id=store.id, offer_id=oid, primary_image=img_url))
+            db.flush()
+        except Exception as exc:
+            logger.warning("sync_orders: failed to fetch images from API: %s", exc, exc_info=True)
+
+    # Second fallback: use product_id to look up images via /v3/product/info/list
+    still_missing = [p for p in all_postings if p.product_id and not image_map.get(p.offer_id, "")]
+    if still_missing:
+        pid_set = list({p.product_id for p in still_missing})
+        try:
+            pid_images = client.get_images_by_product_ids(pid_set)
+            for p in still_missing:
+                img = pid_images.get(p.product_id, "")
+                if img:
+                    image_map[p.offer_id] = img
+        except Exception as exc:
+            logger.warning("sync_orders: product_id image fallback failed: %s", exc, exc_info=True)
+
     count = 0
     for p in all_postings:
         must_ship_by = None
@@ -96,6 +133,11 @@ def sync_orders_for_store(
 
         gmv = p.customer_price if p.customer_price > 0 else p.price * p.quantity
         image_url = image_map.get(p.offer_id, "") or image_map.get(p.sku, "")
+        if not image_url:
+            logger.error(
+                "sync_orders[%s] MISSING IMAGE: order=%s offer_id=%s product_id=%s",
+                store.name, p.order_number, p.offer_id, p.product_id,
+            )
 
         order_data = OrderCreate(
             order_number=p.order_number,
@@ -141,7 +183,7 @@ def sync_orders_for_store(
                 express_delivery=p.is_express,
                 offer_id=p.offer_id,
                 product_id=p.product_id,
-                image_url=image_url if image_url else None,
+                image_url=image_url,
                 available_actions=p.available_actions,
                 products_json=p.products_json,
             ))
@@ -264,10 +306,8 @@ def sync_monitors_for_store(db: Session, store: Store) -> bool:
         active_count = sum(
             1 for s in stock_data if s.get("present", 0) > 0 or s.get("reserved", 0) > 0
         )
-    except Exception:
-        logger.warning(
-            "sync_monitors[%s]: product_stocks not available, using zeros", store.name
-        )
+    except Exception as e:
+        logger.warning("sync_monitors[%s] failed to fetch stocks: %s", store.name, e, exc_info=True)
         total_stock = 0
         active_count = 0
 
@@ -303,7 +343,7 @@ def sync_seller_rating_for_store(db: Session, store: Store) -> bool:
         db.commit()
         logger.info("sync_seller_rating[%s]: %d ratings saved", store.name, len(rating.ratings))
     except Exception as e:
-        logger.warning("sync_seller_rating[%s] failed: %s", store.name, e)
+        logger.warning("sync_seller_rating[%s] failed: %s", store.name, e, exc_info=True)
     return True
 
 
@@ -323,13 +363,13 @@ def sync_products_for_store(db: Session, store: Store) -> int:
     try:
         active_products = client.get_product_list(visibility="ALL")
     except Exception as e:
-        logger.warning("sync_products[%s] failed to fetch active: %s", store.name, e)
+        logger.warning("sync_products[%s] failed to fetch active: %s", store.name, e, exc_info=True)
         active_products = []
 
     try:
         archived_products = client.get_product_list(visibility="ARCHIVED")
     except Exception as e:
-        logger.warning("sync_products[%s] failed to fetch archived: %s", store.name, e)
+        logger.warning("sync_products[%s] failed to fetch archived: %s", store.name, e, exc_info=True)
         archived_products = []
 
     all_product_ids = set()
@@ -403,7 +443,7 @@ def sync_products_for_store(db: Session, store: Store) -> int:
         try:
             info_items = client.get_product_info_list(all_ids)
         except Exception as e:
-            logger.warning("sync_products[%s] failed to fetch info: %s", store.name, e)
+            logger.warning("sync_products[%s] failed to fetch info: %s", store.name, e, exc_info=True)
             info_items = []
 
         info_map = {}
@@ -469,27 +509,37 @@ def run_sync_task(db: Session, task_key: str) -> str:
 
         total = 0
         for store in stores:
-            if task_key == "sync_orders":
-                total += sync_orders_for_store(db, store)
-            elif task_key == "sync_finance":
-                sync_finance_for_store(db, store)
-                total += 1
-            elif task_key == "sync_warehouses":
-                total += sync_warehouses_for_store(db, store)
-            elif task_key == "sync_monitors":
-                sync_monitors_for_store(db, store)
-                total += 1
-            elif task_key == "sync_seller_rating":
-                sync_seller_rating_for_store(db, store)
-                total += 1
-            elif task_key == "sync_products":
-                total += sync_products_for_store(db, store)
+            try:
+                if task_key == "sync_orders":
+                    total += sync_orders_for_store(db, store)
+                elif task_key == "sync_finance":
+                    sync_finance_for_store(db, store)
+                    total += 1
+                elif task_key == "sync_warehouses":
+                    total += sync_warehouses_for_store(db, store)
+                elif task_key == "sync_monitors":
+                    sync_monitors_for_store(db, store)
+                    total += 1
+                elif task_key == "sync_seller_rating":
+                    sync_seller_rating_for_store(db, store)
+                    total += 1
+                elif task_key == "sync_products":
+                    total += sync_products_for_store(db, store)
+            except Exception as e:
+                logger.error(
+                    "run_sync_task(%s) FAILED for store %s (id=%s): %s",
+                    task_key, store.name, store.id, e, exc_info=True,
+                )
+                db.rollback()
 
         clear_cache()
         logger.info("run_sync_task(%s): done, processed %d stores", task_key, total)
         mark_task_run(db, task_key, "success")
         return "success"
     except Exception as e:
-        logger.error("run_sync_task(%s) failed: %s", task_key, e)
-        mark_task_run(db, task_key, "failed")
+        logger.error("run_sync_task(%s) FAILED: %s", task_key, e, exc_info=True)
+        try:
+            mark_task_run(db, task_key, "failed")
+        except Exception:
+            logger.error("run_sync_task(%s): failed to mark task as failed", task_key, exc_info=True)
         return "failed"

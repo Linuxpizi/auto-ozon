@@ -5,10 +5,13 @@ See https://docs.ozon.ru/api/seller/zh/ for the official API reference.
 
 import hashlib
 import json
+import logging
 import time
 from dataclasses import dataclass, field
 from functools import wraps
 from typing import Any, Callable, Dict, Optional
+
+logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
 # Simple in-memory TTL cache
@@ -183,11 +186,23 @@ class OzonClient:
 
     def _request(self, method: str, path: str, json_body: Any = None) -> Any:
         url = f"{self.API_BASE}{path}"
-        with httpx.Client(timeout=self._timeout) as client:
-            resp = client.request(method, url, headers=self._headers(), json=json_body)
-        if not resp.is_success:
-            raise _classify_error(resp.status_code, resp.text)
-        return resp.json()
+        try:
+            with httpx.Client(timeout=self._timeout) as client:
+                resp = client.request(method, url, headers=self._headers(), json=json_body)
+            if not resp.is_success:
+                logger.error(
+                    "Ozon API %s %s -> %d: %s",
+                    method, path, resp.status_code, resp.text[:500],
+                )
+                raise _classify_error(resp.status_code, resp.text)
+            logger.debug("Ozon API %s %s -> 200", method, path)
+            return resp.json()
+        except httpx.TimeoutException:
+            logger.error("Ozon API %s %s -> TIMEOUT (>%ds)", method, path, self._timeout)
+            raise
+        except httpx.RequestError as exc:
+            logger.error("Ozon API %s %s -> NETWORK ERROR: %s", method, path, exc)
+            raise
 
     # ------------------------------------------------------------------
     # Public API methods
@@ -564,6 +579,44 @@ class OzonClient:
                 json_body={"product_id": batch},
             )
             result.extend(data.get("items", []))
+        return result
+
+    def get_images_by_offer_ids(self, offer_ids: list[str]) -> dict[str, str]:
+        """Look up primary_image for a batch of offer_ids via /v3/product/info.
+
+        Returns {offer_id: image_url}.
+        """
+        result: dict[str, str] = {}
+        for i in range(0, len(offer_ids), 1000):
+            batch = offer_ids[i:i + 1000]
+            data = self._request(
+                "POST", "/v3/product/info",
+                json_body={"offer_id": batch},
+            )
+            for item in data.get("result", {}).get("items", []):
+                oid = item.get("offer_id", "")
+                img = item.get("primary_image", "")
+                if oid and img:
+                    result[oid] = img
+        return result
+
+    def get_images_by_product_ids(self, product_ids: list[int]) -> dict[int, str]:
+        """Look up primary_image for a batch of product_ids via /v3/product/info/list.
+
+        Returns {product_id: image_url}.
+        """
+        result: dict[int, str] = {}
+        for i in range(0, len(product_ids), 1000):
+            batch = product_ids[i:i + 1000]
+            data = self._request(
+                "POST", "/v3/product/info/list",
+                json_body={"product_id": batch},
+            )
+            for item in data.get("result", {}).get("items", []):
+                pid = item.get("id", 0)
+                img = item.get("primary_image", "")
+                if pid and img:
+                    result[pid] = img
         return result
 
     def import_products_by_sku(self, items: list[dict]) -> dict:

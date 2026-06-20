@@ -1,3 +1,4 @@
+import logging
 from typing import List
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
@@ -7,6 +8,8 @@ from app.schemas.task_config import TaskConfigCreate, TaskConfigUpdate, TaskConf
 from app.schemas.store_sync_config import StoreSyncConfigUpdate, StoreSyncConfigRead
 from app.core.db import get_db
 from app.services.scheduler_service import register_job, remove_job, manual_trigger
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -45,7 +48,11 @@ def trigger_task(task_key: str, db: Session = Depends(get_db)):
     obj = tc_crud.get_task_config(db, task_key)
     if not obj:
         raise HTTPException(404, "任务配置不存在")
-    status = manual_trigger(task_key)
+    try:
+        status = manual_trigger(task_key)
+    except Exception as e:
+        logger.error("trigger_task(%s) failed: %s", task_key, e, exc_info=True)
+        raise HTTPException(500, detail=f"任务触发失败: {e}")
     return {"task_key": task_key, "status": status}
 
 

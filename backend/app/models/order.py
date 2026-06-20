@@ -24,7 +24,7 @@ class Order(Base):
     product_id = Column(Integer, default=0)
     product_name = Column(String(256), default="")
     products_json = Column(Text, default="[]", comment="全部商品 JSON 数组")
-    image_url = Column(Text, default="")
+    image_url = Column(Text, nullable=False, default="")
     tracking_number = Column(String(128), default="")
     quantity = Column(Integer, default=1)
     unit_price = Column(Float, default=0.0)

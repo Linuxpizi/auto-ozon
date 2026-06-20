@@ -23,9 +23,10 @@ logger = logging.getLogger(__name__)
 
 scheduler = AsyncIOScheduler()
 
-# --- Default task definitions (staggered cron schedule) ---
-# sync_orders: highest priority, runs every 30 min via interval
-# All other tasks use cron at distinct time slots to avoid overlap.
+# --- Default task definitions (staggered interval schedule) ---
+# All tasks use interval triggers with different periods so they naturally
+# drift apart and never execute at the same time. sync_orders has the
+# shortest interval (highest priority).
 
 DEFAULT_TASKS = [
     TaskConfigCreate(
@@ -39,41 +40,41 @@ DEFAULT_TASKS = [
     TaskConfigCreate(
         task_key="sync_finance",
         name="同步流水",
-        description="定时从 Ozon 拉取资金报表数据 (每小时:15)",
-        trigger_type="cron",
-        cron_expression="15 * * * *",
+        description="定时从 Ozon 拉取资金报表数据 (每55分钟)",
+        trigger_type="interval",
+        interval_seconds=3300,  # 55 min
         enabled=True,
     ),
     TaskConfigCreate(
         task_key="sync_warehouses",
         name="同步仓库",
-        description="定时从 Ozon 同步仓库列表 (每天05:00)",
-        trigger_type="cron",
-        cron_expression="0 5 * * *",
+        description="定时从 Ozon 同步仓库列表 (每一周)",
+        trigger_type="interval",
+        interval_seconds=7 * 24 * 60 * 60,  # 1 周
         enabled=False,
     ),
     TaskConfigCreate(
         task_key="sync_monitors",
         name="同步监控",
-        description="定时从 Ozon 同步商品库存快照 (每天03:00/15:00)",
-        trigger_type="cron",
-        cron_expression="0 3,15 * * *",
+        description="定时从 Ozon 同步商品库存快照 (每11小时)",
+        trigger_type="interval",
+        interval_seconds=39600,  # 11 h
         enabled=False,
     ),
     TaskConfigCreate(
         task_key="sync_seller_rating",
         name="同步卖家评级",
-        description="定时从 Ozon 同步卖家 FBS 评级指数 (每天04:00)",
-        trigger_type="cron",
-        cron_expression="0 4 * * *",
+        description="定时从 Ozon 同步卖家评级 (每23小时)",
+        trigger_type="interval",
+        interval_seconds=82800,  # 23 h
         enabled=True,
     ),
     TaskConfigCreate(
         task_key="sync_products",
         name="同步商品列表",
-        description="定时从 Ozon 同步商品列表 (每天02:00/14:00)",
-        trigger_type="cron",
-        cron_expression="0 2,14 * * *",
+        description="定时从 Ozon 同步商品列表 (每13小时)",
+        trigger_type="interval",
+        interval_seconds=46800,  # 13 h
         enabled=True,
     ),
 ]
@@ -99,9 +100,12 @@ def _build_trigger(cfg):
 
 def _job_func(task_key: str):
     """Callback for APScheduler — creates a DB session and runs sync."""
+    logger.info("Scheduled job starting: %s", task_key)
     db: Session = SessionLocal()
     try:
         run_sync_task(db, task_key)
+    except Exception as e:
+        logger.error("Scheduled job %s FAILED: %s", task_key, e, exc_info=True)
     finally:
         db.close()
 
@@ -192,9 +196,15 @@ def ensure_default_configs(db: Session) -> None:
 
 def manual_trigger(task_key: str) -> str:
     """Manually trigger a sync task immediately (runs in current thread)."""
+    logger.info("Manual trigger: %s", task_key)
     db: Session = SessionLocal()
     try:
-        return run_sync_task(db, task_key)
+        result = run_sync_task(db, task_key)
+        logger.info("Manual trigger %s -> %s", task_key, result)
+        return result
+    except Exception as e:
+        logger.error("Manual trigger %s FAILED: %s", task_key, e, exc_info=True)
+        return "failed"
     finally:
         db.close()
 

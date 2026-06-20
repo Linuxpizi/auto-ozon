@@ -35,19 +35,28 @@ export interface OrderItem {
   order_number: string;
   store_id: number;
   store_name: string;
-  account_name: string;
   is_quality_check: boolean;
   gmv: number;
   status: string;
+  substatus: string;
   shipment_number: string;
   sku: string;
+  offer_id: string;
+  product_id: number;
   product_name: string;
+  products_json: string;
   image_url: string;
   tracking_number: string;
   quantity: number;
   unit_price: number;
+  customer_price: number;
+  payout: number;
+  commission: number;
+  discount: number;
   must_ship_by: string | null;
+  in_process_at: string | null;
   express_delivery: boolean;
+  available_actions: string;
   created_at: string;
   updated_at: string;
 }
@@ -120,7 +129,7 @@ export const useAppStore = defineStore("app", () => {
       if (params?.keyword) { listQuery.keyword = params.keyword; countQuery.keyword = params.keyword; }
 
       const [list, count] = await Promise.all([
-        apiGet<OrderItem[]>("/orders", listQuery),
+        apiGet<OrderItem[]>("/orders/", listQuery),
         apiGet<{ count: number }>("/orders/count", countQuery),
       ]);
       orders.value = list;

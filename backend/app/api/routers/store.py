@@ -59,6 +59,25 @@ def delete_store(store_id: int, db: Session = Depends(get_db)):
     return {"ok": True}
 
 
+@router.post("/{store_id}/sync")
+def sync_store(store_id: int, db: Session = Depends(get_db)):
+    """Sync seller rating + warehouse info for a single store."""
+    store = store_crud.get_store(db, store_id)
+    if not store:
+        raise HTTPException(404, "店铺不存在")
+
+    from app.services.ozon_client import clear_cache
+    from app.services.sync_service import (
+        sync_seller_rating_for_store,
+        sync_warehouses_for_store,
+    )
+    clear_cache()
+    sync_seller_rating_for_store(db, store)
+    sync_warehouses_for_store(db, store)
+    db.refresh(store)
+    return store_crud.get_store(db, store_id)
+
+
 @router.post("/import", status_code=201)
 def import_stores(file: UploadFile = File(...), db: Session = Depends(get_db)):
     """Import stores from Excel (.xlsx) file."""
@@ -81,7 +100,6 @@ def import_stores(file: UploadFile = File(...), db: Session = Depends(get_db)):
 
     headers = [str(c).strip() for c in rows[0]]
     field_map = {
-        "account_name": "account_name", "所属账号": "account_name",
         "name": "name", "店铺名称": "name",
         "client_id": "client_id", "client id": "client_id",
         "api_key": "api_key", "api key": "api_key",
@@ -143,7 +161,6 @@ def import_stores(file: UploadFile = File(...), db: Session = Depends(get_db)):
                         return 0.0
 
             data = StoreCreate(
-                account_name=s("account_name"),
                 name=name,
                 client_id=client_id,
                 api_key=s("api_key"),

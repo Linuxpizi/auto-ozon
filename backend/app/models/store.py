@@ -6,7 +6,6 @@ class Store(Base):
     __tablename__ = "stores"
 
     id = Column(Integer, primary_key=True, index=True)
-    account_name = Column(String(128), default="")
     name = Column(String(128), nullable=False)
     client_id = Column(String(128), unique=True, nullable=False)
     api_key = Column(String(256), nullable=False)

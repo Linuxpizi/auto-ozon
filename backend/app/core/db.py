@@ -33,6 +33,26 @@ def _migrate_columns(engine):
         ("listings", "vat", "ALTER TABLE listings ADD COLUMN vat VARCHAR(16) DEFAULT ''"),
         ("store_finances", "paid", "ALTER TABLE store_finances ADD COLUMN paid REAL DEFAULT 0.0"),
         ("store_finances", "opening_balance", "ALTER TABLE store_finances ADD COLUMN opening_balance REAL DEFAULT 0.0"),
+        ("store_finances", "currency_code", "ALTER TABLE store_finances ADD COLUMN currency_code VARCHAR(16) DEFAULT 'RUB'"),
+        ("store_finances", "sales_fee", "ALTER TABLE store_finances ADD COLUMN sales_fee REAL DEFAULT 0.0"),
+        ("store_finances", "sales_revenue", "ALTER TABLE store_finances ADD COLUMN sales_revenue REAL DEFAULT 0.0"),
+        ("store_finances", "sales_partner", "ALTER TABLE store_finances ADD COLUMN sales_partner REAL DEFAULT 0.0"),
+        ("store_finances", "returns_amount", "ALTER TABLE store_finances ADD COLUMN returns_amount REAL DEFAULT 0.0"),
+        ("store_finances", "returns_fee", "ALTER TABLE store_finances ADD COLUMN returns_fee REAL DEFAULT 0.0"),
+        ("store_finances", "returns_revenue", "ALTER TABLE store_finances ADD COLUMN returns_revenue REAL DEFAULT 0.0"),
+        ("store_finances", "returns_partner", "ALTER TABLE store_finances ADD COLUMN returns_partner REAL DEFAULT 0.0"),
+        ("store_finances", "services_cost", "ALTER TABLE store_finances ADD COLUMN services_cost REAL DEFAULT 0.0"),
+        ("store_finances", "services_detail", "ALTER TABLE store_finances ADD COLUMN services_detail VARCHAR(1024) DEFAULT '[]'"),
+        ("orders", "product_id", "ALTER TABLE orders ADD COLUMN product_id INTEGER DEFAULT 0"),
+        ("orders", "products_json", "ALTER TABLE orders ADD COLUMN products_json TEXT DEFAULT '[]'"),
+        ("orders", "substatus", "ALTER TABLE orders ADD COLUMN substatus VARCHAR(64) DEFAULT ''"),
+        ("orders", "offer_id", "ALTER TABLE orders ADD COLUMN offer_id VARCHAR(128) DEFAULT ''"),
+        ("orders", "customer_price", "ALTER TABLE orders ADD COLUMN customer_price REAL DEFAULT 0.0"),
+        ("orders", "payout", "ALTER TABLE orders ADD COLUMN payout REAL DEFAULT 0.0"),
+        ("orders", "commission", "ALTER TABLE orders ADD COLUMN commission REAL DEFAULT 0.0"),
+        ("orders", "discount", "ALTER TABLE orders ADD COLUMN discount REAL DEFAULT 0.0"),
+        ("orders", "in_process_at", "ALTER TABLE orders ADD COLUMN in_process_at DATETIME"),
+        ("orders", "available_actions", "ALTER TABLE orders ADD COLUMN available_actions TEXT DEFAULT '[]'"),
     ]
     for table, column, sql in simple_migrations:
         columns = {c["name"] for c in inspector.get_columns(table)}
@@ -43,6 +63,18 @@ def _migrate_columns(engine):
 
     # Drop obsolete columns that still exist in SQLite with NOT NULL constraints
     _drop_column_if_exists(engine, "store_finances", "account_name")
+
+    # Drop obsolete order columns removed from model
+    _drop_column_if_exists(engine, "orders", "upper_barcode")
+    _drop_column_if_exists(engine, "orders", "lower_barcode")
+    _drop_column_if_exists(engine, "orders", "delivery_type")
+    _drop_column_if_exists(engine, "orders", "is_premium")
+    _drop_column_if_exists(engine, "orders", "payment_type")
+    _drop_column_if_exists(engine, "orders", "delivery_date_begin")
+    _drop_column_if_exists(engine, "orders", "delivery_date_end")
+    _drop_column_if_exists(engine, "orders", "is_legal")
+    _drop_column_if_exists(engine, "orders", "delivery_method")
+    _drop_column_if_exists(engine, "orders", "warehouse_name")
 
     # Columns that may exist with wrong type — fix by recreating
     _fix_column_type(engine, "listings", "sku", "VARCHAR(128)", "''")

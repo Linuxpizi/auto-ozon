@@ -66,12 +66,26 @@
         @update:page-size="onPageSizeChange"
       />
     </div>
+
+    <n-modal v-model:show="stockModalVisible" preset="card" title="修改库存" style="width: 400px;" :segmented="{ content: true }">
+      <div v-if="stockTarget" style="margin-bottom: 12px;">
+        <div style="font-size: 13px; color: var(--text-secondary); margin-bottom: 4px;">{{ stockTarget.name || stockTarget.offer_id }}</div>
+        <div style="font-size: 12px; color: var(--text-muted);">Product ID: {{ stockTarget.product_id }} | 店铺: {{ stockTarget.store_name }}</div>
+      </div>
+      <n-input-number v-model:value="stockValue" :min="0" :max="999999" placeholder="输入新库存数量" style="width: 100%;" />
+      <template #footer>
+        <n-space justify="end">
+          <n-button @click="stockModalVisible = false">取消</n-button>
+          <n-button type="primary" :loading="stockModalLoading" @click="submitStock">确认</n-button>
+        </n-space>
+      </template>
+    </n-modal>
   </div>
 </template>
 
 <script setup lang="ts">
 import { h, onMounted, ref, reactive, watch } from "vue";
-import { NH2, NButton, NDataTable, NSpace, NTag, NSelect, NInput, useMessage } from "naive-ui";
+import { NH2, NButton, NDataTable, NSpace, NTag, NSelect, NInput, NModal, NCard, NInputNumber, useMessage } from "naive-ui";
 import type { DataTableColumns } from "naive-ui";
 import { useAppStore } from "../store";
 import { apiGet, apiPost } from "../api";
@@ -88,6 +102,12 @@ const selectedIds = ref<number[]>([]);
 const page = ref(1);
 const total = ref(0);
 const pageSize = ref(20);
+
+// Stock update modal
+const stockModalVisible = ref(false);
+const stockModalLoading = ref(false);
+const stockTarget = ref<any>(null);
+const stockValue = ref<number | null>(null);
 
 const pageSizes = [
   { label: "20 条/页", value: 20 },
@@ -218,11 +238,12 @@ const columns: DataTableColumns<any> = [
     width: 120,
     fixed: "right",
     render(row) {
-      return h(NSpace, { size: 4 }, () => [
+      return h(NSpace, { size: 6 }, () => [
         !row.archived
-          ? h(NButton, { text: true, type: "warning", size: "small", onClick: () => archiveSingle(row) }, () => "归档")
+          ? h(NButton, { size: "small", onClick: () => archiveSingle(row) }, () => "归档")
           : null,
-        h(NButton, { text: true, type: "info", size: "small", onClick: () => importSingle(row) }, () => "迁移"),
+        h(NButton, { size: "small", onClick: () => importSingle(row) }, () => "迁移"),
+        h(NButton, { size: "small", type: "success", onClick: () => openStockModal(row) }, () => "改库存"),
       ]);
     },
   },
@@ -277,6 +298,27 @@ async function archiveSingle(row: any) {
     loadListings();
   } catch (e: any) {
     message.error("归档失败: " + e.message);
+  }
+}
+
+function openStockModal(row: any) {
+  stockTarget.value = row;
+  stockValue.value = null;
+  stockModalVisible.value = true;
+}
+
+async function submitStock() {
+  if (!stockTarget.value || stockValue.value === null) return;
+  stockModalLoading.value = true;
+  try {
+    await apiPost(`/listings/stock?listing_id=${stockTarget.value.id}&stock=${stockValue.value}`);
+    message.success("库存已更新");
+    stockModalVisible.value = false;
+    loadListings();
+  } catch (e: any) {
+    message.error("更新失败: " + e.message);
+  } finally {
+    stockModalLoading.value = false;
   }
 }
 

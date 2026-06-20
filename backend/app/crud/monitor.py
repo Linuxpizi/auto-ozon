@@ -35,7 +35,6 @@ def get_monitor_summary(db: Session) -> List[dict]:
         {
             "store_id": r.store_id,
             "store_name": r.store_name,
-            "account_name": r.account_name,
             "daily_remaining": r.daily_remaining,
             "total_remaining": r.total_remaining,
             "active_listings": r.active_listings,

@@ -116,6 +116,14 @@ class OzonPostingFBS:
     shipment_date: Optional[str]
     tracking_number: str
     is_express: bool
+    offer_id: str = ""
+    product_id: int = 0
+    payout: float = 0.0
+    customer_price: float = 0.0
+    commission_amount: float = 0.0
+    discount_value: float = 0.0
+    products_json: str = "[]"
+    available_actions: str = "[]"
 
 
 @dataclass
@@ -134,15 +142,12 @@ class OzonFinanceStatement:
 
 
 @dataclass
-class OzonFbsRatingInfo:
-    """Parsed response from POST /v1/rating/index/fbs/info."""
+class OzonSellerRating:
+    """Parsed seller ratings from POST /v1/seller/info."""
 
-    index: float
-    currency_code: str
-    period_from: str
-    period_to: str
-    processing_costs_sum: float
-    defects: list
+    company_name: str
+    currency: str
+    ratings: list  # list of {name, rating, current_value, past_value, value_type, status}
 
 
 class OzonClient:
@@ -221,7 +226,7 @@ class OzonClient:
         https://docs.ozon.ru/api/seller/zh/#tag/WarehouseAPI
         """
         data = self._request("POST", "/v2/warehouse/list", json_body={})
-        result = data.get("result", [])
+        result = data.get("warehouses", data.get("result", []))
         warehouses = []
         for item in result:
             warehouses.append(
@@ -255,8 +260,6 @@ class OzonClient:
             "cursor": cursor,
             "filter": {},
             "with": {
-                "barcodes": True,
-                "analytics_data": True,
                 "financial_data": True,
                 "legal_info": True,
             },
@@ -275,10 +278,33 @@ class OzonClient:
         has_next = data.get("has_next", False)
         postings = []
         for item in raw_postings:
-            products = item.get("products", [{}])
+            products = item.get("products", [])
             product = products[0] if products else {}
             price_obj = product.get("price", {})
             price = float(price_obj.get("amount", 0)) if isinstance(price_obj, dict) else float(price_obj or 0)
+
+            # Financial data for the first product
+            fin_products = (item.get("financial_data") or {}).get("products", [{}])
+            fin = fin_products[0] if fin_products else {}
+            payout = float(fin.get("payout", 0))
+            cust_price_obj = fin.get("customer_price", {})
+            if isinstance(cust_price_obj, dict):
+                customer_price = float(cust_price_obj.get("amount", 0))
+            else:
+                customer_price = float(cust_price_obj or 0)
+            comm_obj = fin.get("commission", {})
+            commission = float(comm_obj.get("amount", 0)) if isinstance(comm_obj, dict) else float(comm_obj or 0)
+            discount = float(fin.get("total_discount_value", 0))
+
+            available_actions = json.dumps(item.get("available_actions", []), ensure_ascii=False)
+            _products_json = json.dumps([
+                {
+                    "product_id": int(p.get("product_id", 0)),
+                    "quantity": int(p.get("quantity", 1)),
+                }
+                for p in products
+            ], ensure_ascii=False)
+
             postings.append(
                 OzonPostingFBS(
                     posting_number=item.get("posting_number", ""),
@@ -293,6 +319,14 @@ class OzonClient:
                     shipment_date=item.get("shipment_date"),
                     tracking_number=item.get("tracking_number", ""),
                     is_express=item.get("is_express", False),
+                    offer_id=product.get("offer_id", ""),
+                    product_id=int(product.get("product_id", 0)),
+                    payout=payout,
+                    customer_price=customer_price,
+                    commission_amount=commission,
+                    discount_value=discount,
+                    products_json=_products_json,
+                    available_actions=available_actions,
                 )
             )
         return postings, next_cursor, has_next
@@ -372,6 +406,18 @@ class OzonClient:
         services_cost = sum(
             s.get("amount", {}).get("value", 0) for s in services
         )
+        services_detail = [
+            {"name": s.get("name", ""), "amount": float(s.get("amount", {}).get("value", 0))}
+            for s in services
+            if s.get("amount", {}).get("value", 0)
+        ]
+
+        sales_details = sales.get("amount_details", {})
+        returns_details = returns.get("amount_details", {})
+        sales_revenue = float(sales_details.get("revenue", {}).get("value", 0))
+        sales_partner = float(sales_details.get("partner_programs", {}).get("value", 0))
+        returns_revenue = float(returns_details.get("revenue", {}).get("value", 0))
+        returns_partner = float(returns_details.get("partner_programs", {}).get("value", 0))
 
         opening = total.get("opening_balance", {}).get("value", 0)
         closing = total.get("closing_balance", {}).get("value", 0)
@@ -379,16 +425,31 @@ class OzonClient:
         payments = total.get("payments", [])
         paid = sum(p.get("value", 0) for p in payments)
 
+        sales_fee = float(sales.get("fee", {}).get("value", 0))
+        returns_fee = float(returns.get("fee", {}).get("value", 0))
+
+        currency_code = (
+            total.get("closing_balance", {}).get("currency_code", "")
+            or sales.get("amount", {}).get("currency_code", "")
+            or "RUB"
+        )
+
         return {
             "opening_balance": float(opening),
             "closing_balance": float(closing),
             "accrued": float(accrued),
             "paid": float(paid),
             "sales_amount": float(sales_amount),
-            "sales_fee": float(sales.get("fee", {}).get("value", 0)),
+            "sales_fee": sales_fee,
+            "sales_revenue": sales_revenue,
+            "sales_partner": sales_partner,
             "returns_amount": float(returns_amount),
-            "returns_fee": float(returns.get("fee", {}).get("value", 0)),
+            "returns_fee": returns_fee,
+            "returns_revenue": returns_revenue,
+            "returns_partner": returns_partner,
             "services_cost": float(services_cost),
+            "services_detail": services_detail,
+            "currency_code": currency_code,
         }
 
     def get_product_stocks(self) -> list[dict]:
@@ -430,19 +491,15 @@ class OzonClient:
         return result
 
     @_cached(ttl=3600)
-    def get_seller_rating(self) -> OzonFbsRatingInfo:
-        """Get seller FBS rating index.
-
-        POST /v1/rating/index/fbs/info
-        """
-        data = self._request("POST", "/v1/rating/index/fbs/info", json_body={})
-        return OzonFbsRatingInfo(
-            index=float(data.get("index", 0)),
-            currency_code=data.get("currency_code", ""),
-            period_from=data.get("period_from", ""),
-            period_to=data.get("period_to", ""),
-            processing_costs_sum=float(data.get("processing_costs_sum", 0)),
-            defects=data.get("defects", []),
+    def get_seller_rating(self) -> OzonSellerRating:
+        """Get seller ratings from POST /v1/seller/info."""
+        data = self._request("POST", "/v1/seller/info", json_body={})
+        company = data.get("company", {})
+        ratings = data.get("ratings", [])
+        return OzonSellerRating(
+            company_name=company.get("name", ""),
+            currency=company.get("currency", ""),
+            ratings=ratings,
         )
 
     # ------------------------------------------------------------------
@@ -517,3 +574,52 @@ class OzonClient:
         """
         data = self._request("POST", "/v3/product/import", json_body={"items": items})
         return data
+
+    def update_stocks(self, stock_items: list[dict]) -> dict:
+        """Update product stock quantities.
+
+        POST /v2/products/stocks
+        https://docs.ozon.ru/api/seller/zh/#operation/ProductAPI_ProductsStocksV2
+
+        Args:
+            stock_items: list of dicts with keys: product_id, stock, warehouse_id.
+        """
+        data = self._request("POST", "/v2/products/stocks", json_body={"stocks": stock_items})
+        return data
+
+    # ------------------------------------------------------------------
+    # FBS Ship
+    # ------------------------------------------------------------------
+
+    def ship_fbs_posting(
+        self,
+        posting_number: str,
+        packages: list[dict],
+    ) -> dict:
+        """Ship (prepare) an FBS posting.
+
+        POST /v4/posting/fbs/ship
+        https://docs.ozon.ru/api/seller/zh/#operation/PostingAPI_ShipFbsPostingV4
+
+        Note: HTTP 200 does NOT guarantee success.
+        Check via /v3/posting/fbs/get — if substatus == 'ship_failed', retry.
+        """
+        payload = {
+            "posting_number": posting_number,
+            "packages": packages,
+            "with": {"additional_data": True},
+        }
+        return self._request("POST", "/v4/posting/fbs/ship", json_body=payload)
+
+    # ------------------------------------------------------------------
+    # FBS Cancel
+    # ------------------------------------------------------------------
+
+    def cancel_fbs_posting(self, posting_number: str) -> dict:
+        """Cancel an FBS posting.
+
+        POST /v3/posting/fbs/cancel
+        https://docs.ozon.ru/api/seller/zh/#operation/PostingAPI_CancelPostingV3
+        """
+        payload = {"posting_number": posting_number}
+        return self._request("POST", "/v3/posting/fbs/cancel", json_body=payload)

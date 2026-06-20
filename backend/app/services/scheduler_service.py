@@ -23,13 +23,15 @@ logger = logging.getLogger(__name__)
 
 scheduler = AsyncIOScheduler()
 
-# --- Default task definitions ---
+# --- Default task definitions (staggered cron schedule) ---
+# sync_orders: highest priority, runs every 30 min via interval
+# All other tasks use cron at distinct time slots to avoid overlap.
 
 DEFAULT_TASKS = [
     TaskConfigCreate(
         task_key="sync_orders",
         name="同步订单",
-        description="定时从 Ozon 拉取 FBS 订单数据",
+        description="定时从 Ozon 拉取 FBS 订单数据 (每30分钟)",
         trigger_type="interval",
         interval_seconds=1800,  # 30 min
         enabled=True,
@@ -37,41 +39,41 @@ DEFAULT_TASKS = [
     TaskConfigCreate(
         task_key="sync_finance",
         name="同步流水",
-        description="定时从 Ozon 拉取资金报表数据",
-        trigger_type="interval",
-        interval_seconds=3600,  # 60 min
+        description="定时从 Ozon 拉取资金报表数据 (每小时:15)",
+        trigger_type="cron",
+        cron_expression="15 * * * *",
         enabled=True,
     ),
     TaskConfigCreate(
         task_key="sync_warehouses",
         name="同步仓库",
-        description="定时从 Ozon 同步仓库列表",
-        trigger_type="interval",
-        interval_seconds=86400,  # 24 hours
+        description="定时从 Ozon 同步仓库列表 (每天05:00)",
+        trigger_type="cron",
+        cron_expression="0 5 * * *",
         enabled=False,
     ),
     TaskConfigCreate(
         task_key="sync_monitors",
         name="同步监控",
-        description="定时从 Ozon 同步商品库存快照到监控报表",
-        trigger_type="interval",
-        interval_seconds=43200,  # 12 hours
+        description="定时从 Ozon 同步商品库存快照 (每天03:00/15:00)",
+        trigger_type="cron",
+        cron_expression="0 3,15 * * *",
         enabled=False,
     ),
     TaskConfigCreate(
         task_key="sync_seller_rating",
         name="同步卖家评级",
-        description="定时从 Ozon 同步卖家 FBS 评级指数",
-        trigger_type="interval",
-        interval_seconds=86400,  # 24 hours
+        description="定时从 Ozon 同步卖家 FBS 评级指数 (每天04:00)",
+        trigger_type="cron",
+        cron_expression="0 4 * * *",
         enabled=True,
     ),
     TaskConfigCreate(
         task_key="sync_products",
         name="同步商品列表",
-        description="定时从 Ozon 同步所有店铺商品列表",
-        trigger_type="interval",
-        interval_seconds=43200,  # 12 hours
+        description="定时从 Ozon 同步商品列表 (每天02:00/14:00)",
+        trigger_type="cron",
+        cron_expression="0 2,14 * * *",
         enabled=True,
     ),
 ]
@@ -122,6 +124,9 @@ def register_job(cfg) -> None:
             name=cfg.name,
             args=[job_id],
             replace_existing=True,
+            misfire_grace_time=300,
+            coalesce=True,
+            max_instances=1,
         )
         logger.info("Scheduler: added job %s", job_id)
 
@@ -148,17 +153,41 @@ def reload_all_jobs(db: Session) -> None:
 
 
 def ensure_default_configs(db: Session) -> None:
-    """Create default task configs if the table is empty, or add missing ones."""
+    """Create default task configs if the table is empty, or add missing ones.
+
+    Also updates existing entries whose schedule parameters differ from defaults
+    (e.g. migrating from interval to cron triggers).
+    """
     existing = list_task_configs(db)
-    existing_keys = {c.task_key for c in existing}
+    existing_map = {c.task_key: c for c in existing}
     added = 0
+    updated = 0
     for cfg in DEFAULT_TASKS:
-        if cfg.task_key not in existing_keys:
+        if cfg.task_key not in existing_map:
             create_task_config(db, cfg)
             added += 1
-    if added:
+        else:
+            obj = existing_map[cfg.task_key]
+            changed = False
+            if obj.trigger_type != cfg.trigger_type:
+                obj.trigger_type = cfg.trigger_type
+                changed = True
+            if cfg.trigger_type == "cron" and obj.cron_expression != cfg.cron_expression:
+                obj.cron_expression = cfg.cron_expression
+                changed = True
+            if cfg.trigger_type == "interval" and obj.interval_seconds != cfg.interval_seconds:
+                obj.interval_seconds = cfg.interval_seconds
+                changed = True
+            if changed:
+                obj.name = cfg.name
+                obj.description = cfg.description
+                updated += 1
+    if added or updated:
         db.commit()
-        logger.info("Scheduler: added %d missing default task configs", added)
+        if added:
+            logger.info("Scheduler: added %d missing default task configs", added)
+        if updated:
+            logger.info("Scheduler: updated %d default task configs to new schedule", updated)
 
 
 def manual_trigger(task_key: str) -> str:

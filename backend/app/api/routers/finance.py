@@ -1,23 +1,103 @@
 from typing import List, Optional
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
+from sqlalchemy import func
 from app.crud import finance as finance_crud
 from app.schemas.finance import StoreFinanceCreate, StoreFinanceUpdate, StoreFinanceRead, FinanceCashFlowRead
 from app.core.db import get_db
 from app.services.sync_service import run_sync_task
 from app.services.ozon_client import clear_cache
+from app.models.finance import StoreFinance, FinanceCashFlow
 
 router = APIRouter()
 
 
+# --- Static-path routes first (before /{finance_id}) ---
+
 @router.get("/cashflows", response_model=List[FinanceCashFlowRead])
 def list_cash_flows(
     store_id: Optional[int] = None,
-    limit: int = 50,
+    limit: int = 200,
     db: Session = Depends(get_db),
 ):
     return finance_crud.list_cash_flows(db, store_id=store_id, limit=limit)
 
+
+@router.get("/summary")
+def finance_summary(
+    store_id: Optional[int] = None,
+    db: Session = Depends(get_db),
+):
+    """Return aggregated totals across all stores."""
+    q = db.query(
+        func.sum(StoreFinance.balance).label("balance"),
+        func.sum(StoreFinance.total_income).label("income"),
+        func.sum(StoreFinance.sales_fee).label("sales_fee"),
+        func.sum(StoreFinance.sales_revenue).label("sales_revenue"),
+        func.sum(StoreFinance.returns_amount).label("returns_amount"),
+        func.sum(StoreFinance.returns_fee).label("returns_fee"),
+        func.sum(StoreFinance.services_cost).label("services_cost"),
+        func.sum(StoreFinance.total_expense).label("expense"),
+        func.sum(StoreFinance.paid).label("paid"),
+        func.sum(StoreFinance.pending_amount).label("pending"),
+        func.sum(StoreFinance.opening_balance).label("opening"),
+    )
+    if store_id is not None:
+        q = q.filter(StoreFinance.store_id == store_id)
+    row = q.one()
+    return {
+        "balance": float(row.balance or 0),
+        "income": float(row.income or 0),
+        "sales_fee": float(row.sales_fee or 0),
+        "sales_revenue": float(row.sales_revenue or 0),
+        "returns_amount": float(row.returns_amount or 0),
+        "returns_fee": float(row.returns_fee or 0),
+        "services_cost": float(row.services_cost or 0),
+        "expense": float(row.expense or 0),
+        "paid": float(row.paid or 0),
+        "pending": float(row.pending or 0),
+        "opening": float(row.opening or 0),
+    }
+
+
+@router.get("/cashflow-summary")
+def cashflow_summary(
+    store_id: Optional[int] = None,
+    db: Session = Depends(get_db),
+):
+    """Return aggregated totals for cash-flow statements."""
+    q = db.query(
+        func.sum(FinanceCashFlow.orders_amount).label("orders"),
+        func.sum(FinanceCashFlow.returns_amount).label("returns"),
+        func.sum(FinanceCashFlow.commission_amount).label("commission"),
+        func.sum(FinanceCashFlow.services_amount).label("services"),
+        func.sum(FinanceCashFlow.delivery_amount).label("delivery"),
+        func.count(FinanceCashFlow.id).label("period_count"),
+    )
+    if store_id is not None:
+        q = q.filter(FinanceCashFlow.store_id == store_id)
+    row = q.one()
+    return {
+        "orders": float(row.orders or 0),
+        "returns": float(row.returns or 0),
+        "commission": float(row.commission or 0),
+        "services": float(row.services or 0),
+        "delivery": float(row.delivery or 0),
+        "period_count": int(row.period_count or 0),
+    }
+
+
+@router.post("/sync")
+def sync_all_finances(db: Session = Depends(get_db)):
+    """从 Ozon 同步所有店铺的资金流水数据。"""
+    clear_cache()
+    result = run_sync_task(db, "sync_finance")
+    if result == "failed":
+        raise HTTPException(500, detail="资金同步失败，请检查 Ozon API 凭证和网络连接")
+    return {"status": result}
+
+
+# --- Parameterized routes last ---
 
 @router.get("/", response_model=List[StoreFinanceRead])
 def list_finances(
@@ -57,28 +137,9 @@ def sync_finance(store_id: int, data: StoreFinanceUpdate, db: Session = Depends(
     return finance_crud.upsert_finance(db, store_id, data)
 
 
-@router.post("/sync")
-def sync_all_finances(db: Session = Depends(get_db)):
-    """从 Ozon 同步所有店铺的资金流水数据。"""
-    clear_cache()
-    result = run_sync_task(db, "sync_finance")
-    if result == "failed":
-        raise HTTPException(500, detail="资金同步失败，请检查 Ozon API 凭证和网络连接")
-    return {"status": result}
-
-
 @router.delete("/{finance_id}")
 def delete_finance(finance_id: int, db: Session = Depends(get_db)):
     ok = finance_crud.delete_finance(db, finance_id)
     if not ok:
         raise HTTPException(404, "资金记录不存在")
     return {"ok": True}
-
-
-@router.get("/cashflows", response_model=List[FinanceCashFlowRead])
-def list_cash_flows(
-    store_id: Optional[int] = None,
-    limit: int = 50,
-    db: Session = Depends(get_db),
-):
-    return finance_crud.list_cash_flows(db, store_id=store_id, limit=limit)

@@ -1,5 +1,6 @@
 from typing import List, Optional
 from fastapi import APIRouter, Depends, HTTPException, Query
+from pydantic import BaseModel
 from sqlalchemy.orm import Session
 from app.crud import listing as listing_crud
 from app.schemas.listing import ListingCreate, ListingUpdate, ListingRead
@@ -96,6 +97,31 @@ def archive_on_ozon(listing_ids: List[int], db: Session = Depends(get_db)):
 
     listing_crud.archive_listings_bulk(db, listing_ids)
     return {"archived_on_ozon": archived_count}
+
+
+@router.post("/stock")
+def update_stock(
+    listing_id: int,
+    stock: int,
+    db: Session = Depends(get_db),
+):
+    listing = db.query(listing_crud.Listing).filter(listing_crud.Listing.id == listing_id).first()
+    if not listing:
+        raise HTTPException(status_code=404, detail="Listing not found")
+    if not listing.product_id:
+        raise HTTPException(status_code=400, detail="Product ID is empty")
+
+    from app.models.store import Store
+    store = db.query(Store).filter(Store.id == listing.store_id).first()
+    if not store:
+        raise HTTPException(status_code=404, detail="Store not found")
+
+    client = OzonClient(store.client_id, store.api_key)
+    warehouse_id = int(store.warehouse_id) if store.warehouse_id else 0
+    result = client.update_stocks([
+        {"product_id": int(listing.product_id), "stock": stock, "warehouse_id": warehouse_id}
+    ])
+    return result
 
 
 @router.post("/import")

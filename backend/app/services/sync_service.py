@@ -14,10 +14,11 @@ from sqlalchemy.orm import Session
 
 from app.services.ozon_client import OzonClient, clear_cache
 from app.models.store import Store
+from app.models.listing import Listing
 from app.crud import order as order_crud
 from app.crud import finance as finance_crud
 from app.crud import monitor as monitor_crud
-from app.schemas.order import OrderCreate
+from app.schemas.order import OrderCreate, OrderUpdate
 from app.schemas.finance import StoreFinanceUpdate, FinanceCashFlowBase
 from app.schemas.monitor import StoreMonitorCreate
 from app.crud.task_config import mark_task_run
@@ -30,7 +31,7 @@ def sync_orders_for_store(
 ) -> int:
     """Fetch FBS postings from Ozon and upsert into local orders table.
 
-    Returns count of new orders imported.
+    Returns count of new + updated orders.
     """
     client = OzonClient(client_id=store.client_id, api_key=store.api_key)
     if not since:
@@ -48,39 +49,106 @@ def sync_orders_for_store(
             cutoff_to=(datetime.now(timezone.utc) + timedelta(days=5))
             .isoformat(timespec="milliseconds")
             .replace("+00:00", "Z"),
-            statuses=["awaiting_packaging", "awaiting_deliver", "delivering"],
+            statuses=["awaiting_registration", "acceptance_in_progress", "awaiting_approve",
+                      "awaiting_packaging", "awaiting_deliver", "delivering",
+                      "arbitration", "client_arbitration", "driver_pickup", "not_accepted"],
             limit=100,
             cursor=cursor,
         )
         all_postings.extend(postings)
         if not has_next:
             break
+    # Batch-lookup images from listings table (by offer_id, fallback to sku)
+    image_map: dict[str, str] = {}
+    offer_ids = {p.offer_id for p in all_postings if p.offer_id}
+    sku_set = {p.sku for p in all_postings if p.sku and not p.offer_id}
+    if offer_ids:
+        rows = (
+            db.query(Listing.offer_id, Listing.primary_image)
+            .filter(Listing.store_id == store.id, Listing.offer_id.in_(offer_ids))
+            .all()
+        )
+        image_map = {r.offer_id: r.primary_image or "" for r in rows if r.primary_image}
+    if sku_set:
+        rows = (
+            db.query(Listing.sku, Listing.primary_image)
+            .filter(Listing.store_id == store.id, Listing.sku.in_(sku_set), Listing.primary_image != "")
+            .all()
+        )
+        for r in rows:
+            image_map.setdefault(r.sku, r.primary_image or "")
+
     count = 0
     for p in all_postings:
-        existing = order_crud.get_order_by_number(db, p.order_number)
-        if existing:
-            continue
+        must_ship_by = None
+        if p.shipment_date:
+            try:
+                must_ship_by = datetime.fromisoformat(p.shipment_date.replace("Z", "+00:00"))
+            except (ValueError, TypeError):
+                pass
+
+        in_process_at = None
+        if p.in_process_at:
+            try:
+                in_process_at = datetime.fromisoformat(p.in_process_at.replace("Z", "+00:00"))
+            except (ValueError, TypeError):
+                pass
+
+        gmv = p.customer_price if p.customer_price > 0 else p.price * p.quantity
+        image_url = image_map.get(p.offer_id, "") or image_map.get(p.sku, "")
+
         order_data = OrderCreate(
             order_number=p.order_number,
             store_id=store.id,
             store_name=store.name,
-            account_name=store.account_name,
             is_quality_check=_is_quality_check(p.order_number),
-            gmv=p.price * p.quantity,
+            gmv=gmv,
             status=p.status,
+            substatus=p.substatus,
             shipment_number=p.posting_number,
             sku=p.sku,
+            offer_id=p.offer_id,
+            product_id=p.product_id,
             product_name=p.product_name,
-            image_url="",
+            image_url=image_url,
             tracking_number=p.tracking_number,
             quantity=p.quantity,
             unit_price=p.price,
-            must_ship_by=None,
+            customer_price=p.customer_price,
+            payout=p.payout,
+            commission=p.commission_amount,
+            discount=p.discount_value,
+            must_ship_by=must_ship_by,
+            in_process_at=in_process_at,
             express_delivery=p.is_express,
+            available_actions=p.available_actions,
+            products_json=p.products_json,
         )
-        order_crud.create_order(db, order_data)
+        existing = order_crud.get_order_by_number(db, p.order_number)
+        if existing:
+            order_crud.update_order(db, existing.id, OrderUpdate(
+                status=p.status,
+                substatus=p.substatus,
+                shipment_number=p.posting_number,
+                tracking_number=p.tracking_number,
+                must_ship_by=must_ship_by,
+                in_process_at=in_process_at,
+                customer_price=p.customer_price,
+                payout=p.payout,
+                commission=p.commission_amount,
+                discount=p.discount_value,
+                gmv=gmv,
+                express_delivery=p.is_express,
+                offer_id=p.offer_id,
+                product_id=p.product_id,
+                image_url=image_url if image_url else None,
+                available_actions=p.available_actions,
+                products_json=p.products_json,
+            ))
+        else:
+            order_crud.create_order(db, order_data)
         count += 1
-    logger.info("sync_orders[%s]: %d new orders", store.name, count)
+    logger.info("sync_orders[%s]: %d orders processed", store.name, count)
     return count
 
 
@@ -111,7 +179,7 @@ def sync_finance_for_store(db: Session, store: Store) -> dict:
     cf_statements, _ = client.get_finance_statement(
         date_from=(now_utc - timedelta(days=90)).strftime("%Y-%m-%d"),
         date_to=now_utc.strftime("%Y-%m-%d"),
-        with_details=False,
+        with_details=True,
     )
     for stmt in cf_statements:
         cash_flow_data = FinanceCashFlowBase(
@@ -130,11 +198,27 @@ def sync_finance_for_store(db: Session, store: Store) -> dict:
         finance_crud.upsert_cash_flow(db, store.id, store.name, cash_flow_data)
 
     if latest_balance:
+        import json as _json
+        total_expense = (
+            latest_balance["sales_fee"]
+            + latest_balance["returns_fee"]
+            + latest_balance["services_cost"]
+        )
         update = StoreFinanceUpdate(
+            currency_code=latest_balance["currency_code"],
             opening_balance=latest_balance["opening_balance"],
             balance=latest_balance["closing_balance"],
             total_income=latest_balance["sales_amount"],
-            total_expense=latest_balance["sales_fee"] + latest_balance["services_cost"],
+            sales_fee=latest_balance["sales_fee"],
+            sales_revenue=latest_balance["sales_revenue"],
+            sales_partner=latest_balance["sales_partner"],
+            returns_amount=latest_balance["returns_amount"],
+            returns_fee=latest_balance["returns_fee"],
+            returns_revenue=latest_balance["returns_revenue"],
+            returns_partner=latest_balance["returns_partner"],
+            services_cost=latest_balance["services_cost"],
+            services_detail=_json.dumps(latest_balance["services_detail"], ensure_ascii=False),
+            total_expense=total_expense,
             pending_amount=latest_balance["accrued"],
             paid=latest_balance["paid"],
         )
@@ -150,13 +234,14 @@ def sync_finance_for_store(db: Session, store: Store) -> dict:
 
 
 def sync_warehouses_for_store(db: Session, store: Store) -> int:
-    """Fetch warehouse list from Ozon.
-
-    Currently just validates Ozon API connectivity.
-    Returns count of warehouses.
-    """
+    """Fetch warehouse list from Ozon and save first warehouse to store."""
     client = OzonClient(client_id=store.client_id, api_key=store.api_key)
     warehouses = client.get_warehouses()
+    if warehouses:
+        wh = warehouses[0]
+        store.warehouse_id = str(wh.warehouse_id)
+        store.warehouse_status = wh.status
+        db.commit()
     logger.info("sync_warehouses[%s]: %d warehouses", store.name, len(warehouses))
     return len(warehouses)
 
@@ -189,7 +274,6 @@ def sync_monitors_for_store(db: Session, store: Store) -> bool:
     snapshot = StoreMonitorCreate(
         store_id=store.id,
         store_name=store.name,
-        account_name=store.account_name,
         daily_remaining=0,
         total_remaining=total_stock,
         active_listings=active_count,
@@ -206,21 +290,18 @@ def sync_monitors_for_store(db: Session, store: Store) -> bool:
 
 
 def sync_seller_rating_for_store(db: Session, store: Store) -> bool:
-    """Fetch FBS seller rating index from Ozon and store as JSON on the Store."""
+    """Fetch seller ratings from Ozon /v1/seller/info and store as JSON on the Store."""
     client = OzonClient(client_id=store.client_id, api_key=store.api_key)
     try:
         rating = client.get_seller_rating()
         payload = {
-            "index": rating.index,
-            "currency_code": rating.currency_code,
-            "period_from": rating.period_from,
-            "period_to": rating.period_to,
-            "processing_costs_sum": rating.processing_costs_sum,
-            "defects": rating.defects,
+            "company_name": rating.company_name,
+            "currency": rating.currency,
+            "ratings": rating.ratings,
         }
         store.seller_rating = json.dumps(payload, ensure_ascii=False)
         db.commit()
-        logger.info("sync_seller_rating[%s]: index=%.2f", store.name, rating.index)
+        logger.info("sync_seller_rating[%s]: %d ratings saved", store.name, len(rating.ratings))
     except Exception as e:
         logger.warning("sync_seller_rating[%s] failed: %s", store.name, e)
     return True
@@ -273,7 +354,6 @@ def sync_products_for_store(db: Session, store: Store) -> int:
             db.add(Listing(
                 store_id=store.id,
                 store_name=store.name,
-                account_name=store.account_name,
                 offer_id=p.get("offer_id", ""),
                 product_id=product_id,
                 has_fbo_stocks=p.get("has_fbo_stocks", False),
@@ -299,7 +379,6 @@ def sync_products_for_store(db: Session, store: Store) -> int:
             db.add(Listing(
                 store_id=store.id,
                 store_name=store.name,
-                account_name=store.account_name,
                 offer_id=p.get("offer_id", ""),
                 product_id=product_id,
                 archived=True,

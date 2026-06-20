@@ -54,7 +54,6 @@ def create_listing(db: Session, data: ListingCreate) -> Listing:
     obj = Listing(
         store_id=data.store_id,
         store_name=store.name if store else "",
-        account_name=store.account_name if store else "",
         offer_id=data.offer_id,
         product_id=data.product_id,
         has_fbo_stocks=data.has_fbo_stocks,

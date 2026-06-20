@@ -12,7 +12,8 @@
     </div>
 
     <div class="card">
-      <StoreList :stores="appStore.stores" @edit-store="openEdit" @delete-store="handleDelete" />
+      <StoreList :stores="appStore.stores" @edit-store="openEdit" @delete-store="handleDelete"
+      @sync-store="handleSync" />
       <div v-if="appStore.storeTotal > 0"
         class="pagination-footer">
         <n-select :value="appStore.storePageSize" :options="pageSizes" size="small" style="width: 120px;"
@@ -48,7 +49,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from "vue";
 import { NH2, NInput, NButton, NPagination, NModal, NUpload, NSelect } from "naive-ui";
-import { apiDelete, apiUrl } from "../api";
+import { apiDelete, apiPost, apiUrl } from "../api";
 import { useAppStore } from "../store";
 import type { StoreItem } from "../store";
 import StoreForm from "../components/StoreForm.vue";
@@ -117,6 +118,18 @@ async function handleDelete(id: number) {
   } catch (error) {
     console.error("Failed to delete store", error);
     alert("删除店铺失败，请稍后重试。");
+  }
+}
+
+async function handleSync(id: number, done: () => void) {
+  try {
+    await apiPost(`/stores/${id}/sync`);
+    await refreshStores();
+  } catch (error: any) {
+    console.error("Failed to sync store", error);
+    alert(error?.message || "同步失败");
+  } finally {
+    done();
   }
 }
 

@@ -46,7 +46,9 @@ def upsert_finance(db: Session, store_id: int, data: StoreFinanceUpdate, store_n
         for key, val in update_data.items():
             setattr(obj, key, val)
     else:
-        obj = StoreFinance(store_id=store_id, store_name=store_name, **data.model_dump(exclude_unset=True))
+        payload = data.model_dump(exclude_unset=True)
+        payload.setdefault("currency_code", data.currency_code or "RUB")
+        obj = StoreFinance(store_id=store_id, store_name=store_name, **payload)
         db.add(obj)
     db.commit()
     db.refresh(obj)

@@ -6,7 +6,6 @@ from typing import Optional
 class ListingBase(BaseModel):
     store_id: int
     store_name: str
-    account_name: str
     offer_id: str = ""
     product_id: str = ""
     sku: str = ""

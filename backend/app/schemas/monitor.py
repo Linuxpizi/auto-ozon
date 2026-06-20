@@ -6,7 +6,6 @@ from typing import Optional
 class StoreMonitorBase(BaseModel):
     store_id: int
     store_name: str
-    account_name: str
     daily_remaining: int = 0
     total_remaining: int = 0
     active_listings: int = 0

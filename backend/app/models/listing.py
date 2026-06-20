@@ -8,7 +8,6 @@ class Listing(Base):
     id = Column(Integer, primary_key=True, index=True)
     store_id = Column(Integer, ForeignKey("stores.id", ondelete="CASCADE"), nullable=False)
     store_name = Column(String(128), nullable=False)
-    account_name = Column(String(128), nullable=False)
     offer_id = Column(String(128), default="")
     product_id = Column(String(128), default="")
     sku = Column(String(128), default="")

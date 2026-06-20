@@ -51,10 +51,10 @@
                 <span v-else style="color: var(--text-muted);">-</span>
               </td>
               <td>
-                <n-space :size="4">
-                  <n-button text type="primary" size="small" @click="toggleTask(task)">{{ task.enabled ? '暂停' : '启用'
+                <n-space :size="6">
+                  <n-button size="small" @click="toggleTask(task)">{{ task.enabled ? '暂停' : '启用'
                     }}</n-button>
-                  <n-button text type="primary" size="small" :loading="triggering === task.task_key"
+                  <n-button size="small" type="primary" :loading="triggering === task.task_key"
                     @click="triggerTask(task)">
                     {{ triggering === task.task_key ? '触发中...' : '立即执行' }}
                   </n-button>

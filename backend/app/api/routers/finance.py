@@ -46,17 +46,17 @@ def finance_summary(
         q = q.filter(StoreFinance.store_id == store_id)
     row = q.one()
     return {
-        "balance": float(row.balance or 0),
-        "income": float(row.income or 0),
-        "sales_fee": float(row.sales_fee or 0),
-        "sales_revenue": float(row.sales_revenue or 0),
-        "returns_amount": float(row.returns_amount or 0),
-        "returns_fee": float(row.returns_fee or 0),
-        "services_cost": float(row.services_cost or 0),
-        "expense": float(row.expense or 0),
-        "paid": float(row.paid or 0),
-        "pending": float(row.pending or 0),
-        "opening": float(row.opening or 0),
+        "balance": round(float(row.balance or 0), 2),
+        "income": round(float(row.income or 0), 2),
+        "sales_fee": round(float(row.sales_fee or 0), 2),
+        "sales_revenue": round(float(row.sales_revenue or 0), 2),
+        "returns_amount": round(float(row.returns_amount or 0), 2),
+        "returns_fee": round(float(row.returns_fee or 0), 2),
+        "services_cost": round(float(row.services_cost or 0), 2),
+        "expense": round(float(row.expense or 0), 2),
+        "paid": round(float(row.paid or 0), 2),
+        "pending": round(float(row.pending or 0), 2),
+        "opening": round(float(row.opening or 0), 2),
     }
 
 
@@ -78,11 +78,11 @@ def cashflow_summary(
         q = q.filter(FinanceCashFlow.store_id == store_id)
     row = q.one()
     return {
-        "orders": float(row.orders or 0),
-        "returns": float(row.returns or 0),
-        "commission": float(row.commission or 0),
-        "services": float(row.services or 0),
-        "delivery": float(row.delivery or 0),
+        "orders": round(float(row.orders or 0), 2),
+        "returns": round(float(row.returns or 0), 2),
+        "commission": round(float(row.commission or 0), 2),
+        "services": round(float(row.services or 0), 2),
+        "delivery": round(float(row.delivery or 0), 2),
         "period_count": int(row.period_count or 0),
     }
 

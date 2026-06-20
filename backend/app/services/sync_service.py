@@ -340,6 +340,8 @@ def sync_seller_rating_for_store(db: Session, store: Store) -> bool:
             "ratings": rating.ratings,
         }
         store.seller_rating = json.dumps(payload, ensure_ascii=False)
+        if rating.currency:
+            store.contract_currency = rating.currency
         db.commit()
         logger.info("sync_seller_rating[%s]: %d ratings saved", store.name, len(rating.ratings))
     except Exception as e:

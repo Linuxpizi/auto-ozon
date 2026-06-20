@@ -16,7 +16,7 @@ def dashboard_summary(db: Session = Depends(get_db)):
         "total_orders": total_orders,
         "quality_check_orders": quality_check_orders,
         "real_orders": total_orders - quality_check_orders,
-        "total_gmv": total_gmv,
-        "quality_check_gmv": quality_check_gmv,
-        "real_gmv": total_gmv - quality_check_gmv,
+        "total_gmv": round(total_gmv, 2),
+        "quality_check_gmv": round(quality_check_gmv, 2),
+        "real_gmv": round(total_gmv - quality_check_gmv, 2),
     }

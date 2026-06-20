@@ -37,27 +37,33 @@
       <template v-else>
         <!-- 汇总卡片 -->
         <div class="card" style="margin-bottom: 20px;">
-          <n-h3 prefix="bar" style="margin: 0 0 16px;">余额概览</n-h3>
-          <n-grid :cols="6" :x-gap="16" responsive="screen" :item-responsive="true">
-            <n-gi span="6 m:2">
-              <n-statistic label="总可用余额" :value="totalBalance" :precision="2" />
-            </n-gi>
-            <n-gi span="6 m:2">
-              <n-statistic label="总收入" :value="totalIncome" :precision="2" />
-            </n-gi>
-            <n-gi span="6 m:2">
-              <n-statistic label="总佣金" :value="totalSalesFee" :precision="2" />
-            </n-gi>
-            <n-gi span="6 m:2">
-              <n-statistic label="总支出" :value="totalExpense" :precision="2" />
-            </n-gi>
-            <n-gi span="6 m:2">
-              <n-statistic label="总已打款" :value="totalPaid" :precision="2" />
-            </n-gi>
-            <n-gi span="6 m:2">
-              <n-statistic label="总待结算" :value="totalPending" :precision="2" />
-            </n-gi>
-          </n-grid>
+          <template v-for="code in currencyKeys" :key="code">
+            <n-h3 prefix="bar" style="margin: 0 0 12px;">
+              余额概览
+              <n-tag size="small" :bordered="false" type="info" style="margin-left: 8px;">{{ currencySymbol(code) }} {{ code }}</n-tag>
+              <span style="font-size: 12px; color: var(--text-secondary); font-weight: 400; margin-left: 8px;">({{ financeByCurrency[code].count }} 家店铺)</span>
+            </n-h3>
+            <n-grid :cols="6" :x-gap="16" responsive="screen" :item-responsive="true" style="margin-bottom: 20px;">
+              <n-gi span="6 m:2">
+                <n-statistic label="总可用余额" :value="financeByCurrency[code].balance" :precision="2" />
+              </n-gi>
+              <n-gi span="6 m:2">
+                <n-statistic label="总收入" :value="financeByCurrency[code].income" :precision="2" />
+              </n-gi>
+              <n-gi span="6 m:2">
+                <n-statistic label="总佣金" :value="financeByCurrency[code].sales_fee" :precision="2" />
+              </n-gi>
+              <n-gi span="6 m:2">
+                <n-statistic label="总支出" :value="financeByCurrency[code].expense" :precision="2" />
+              </n-gi>
+              <n-gi span="6 m:2">
+                <n-statistic label="总已打款" :value="financeByCurrency[code].paid" :precision="2" />
+              </n-gi>
+              <n-gi span="6 m:2">
+                <n-statistic label="总待结算" :value="financeByCurrency[code].pending" :precision="2" />
+              </n-gi>
+            </n-grid>
+          </template>
         </div>
 
         <!-- 简要列表 -->
@@ -239,13 +245,13 @@
               <tr v-for="item in filteredCashFlows" :key="item.id">
                 <td>{{ item.store_name }}</td>
                 <td style="font-size: 12px; color: var(--text-secondary);">{{ item.period_begin.slice(0, 10) }} ~ {{ item.period_end.slice(0, 10) }}</td>
-                <td style="color: var(--success); font-weight: 600;">₽ {{ item.orders_amount.toFixed(2) }}</td>
+                <td style="color: var(--success); font-weight: 600;">{{ currencySymbol(item.currency_code) }} {{ item.orders_amount.toFixed(2) }}</td>
                 <td :style="{ color: item.returns_amount < 0 ? 'var(--danger)' : 'var(--text-secondary)', fontWeight: 600 }">
-                  ₽ {{ item.returns_amount.toFixed(2) }}
+                  {{ currencySymbol(item.currency_code) }} {{ item.returns_amount.toFixed(2) }}
                 </td>
-                <td style="color: var(--danger);">₽ {{ item.commission_amount.toFixed(2) }}</td>
-                <td style="color: var(--danger);">₽ {{ item.services_amount.toFixed(2) }}</td>
-                <td style="color: var(--danger);">₽ {{ item.delivery_amount.toFixed(2) }}</td>
+                <td style="color: var(--danger);">{{ currencySymbol(item.currency_code) }} {{ item.commission_amount.toFixed(2) }}</td>
+                <td style="color: var(--danger);">{{ currencySymbol(item.currency_code) }} {{ item.services_amount.toFixed(2) }}</td>
+                <td style="color: var(--danger);">{{ currencySymbol(item.currency_code) }} {{ item.delivery_amount.toFixed(2) }}</td>
                 <td>{{ item.currency_code }}</td>
               </tr>
             </tbody>
@@ -357,19 +363,41 @@ const filteredCashFlows = computed(() => {
   return cashFlows.value.filter(c => c.store_id === filterStoreId.value);
 });
 
-const totalBalance = computed(() => filteredFinances.value.reduce((s, f) => s + f.balance, 0));
-const totalIncome = computed(() => filteredFinances.value.reduce((s, f) => s + f.total_income, 0));
-const totalSalesFee = computed(() => filteredFinances.value.reduce((s, f) => s + f.sales_fee, 0));
-const totalExpense = computed(() => filteredFinances.value.reduce((s, f) => s + f.total_expense, 0));
-const totalPaid = computed(() => filteredFinances.value.reduce((s, f) => s + f.paid, 0));
-const totalPending = computed(() => filteredFinances.value.reduce((s, f) => s + f.pending_amount, 0));
-const totalOpening = computed(() => filteredFinances.value.reduce((s, f) => s + f.opening_balance, 0));
+const round2 = (n: number) => Math.round(n * 100) / 100;
 
-const cfTotalOrders = computed(() => filteredCashFlows.value.reduce((s, c) => s + c.orders_amount, 0));
-const cfTotalReturns = computed(() => filteredCashFlows.value.reduce((s, c) => s + c.returns_amount, 0));
-const cfTotalCommission = computed(() => filteredCashFlows.value.reduce((s, c) => s + c.commission_amount, 0));
-const cfTotalServices = computed(() => filteredCashFlows.value.reduce((s, c) => s + c.services_amount, 0));
-const cfTotalDelivery = computed(() => filteredCashFlows.value.reduce((s, c) => s + c.delivery_amount, 0));
+const financeByCurrency = computed(() => {
+  const map: Record<string, { balance: number; income: number; sales_fee: number; expense: number; paid: number; pending: number; count: number }> = {};
+  for (const f of filteredFinances.value) {
+    const c = f.currency_code || "RUB";
+    if (!map[c]) map[c] = { balance: 0, income: 0, sales_fee: 0, expense: 0, paid: 0, pending: 0, count: 0 };
+    map[c].balance = round2(map[c].balance + f.balance);
+    map[c].income = round2(map[c].income + f.total_income);
+    map[c].sales_fee = round2(map[c].sales_fee + f.sales_fee);
+    map[c].expense = round2(map[c].expense + f.total_expense);
+    map[c].paid = round2(map[c].paid + f.paid);
+    map[c].pending = round2(map[c].pending + f.pending_amount);
+    map[c].count++;
+  }
+  return map;
+});
+
+const cfByCurrency = computed(() => {
+  const map: Record<string, { orders: number; returns: number; commission: number; services: number; delivery: number; count: number }> = {};
+  for (const c of filteredCashFlows.value) {
+    const code = c.currency_code || "RUB";
+    if (!map[code]) map[code] = { orders: 0, returns: 0, commission: 0, services: 0, delivery: 0, count: 0 };
+    map[code].orders = round2(map[code].orders + c.orders_amount);
+    map[code].returns = round2(map[code].returns + c.returns_amount);
+    map[code].commission = round2(map[code].commission + c.commission_amount);
+    map[code].services = round2(map[code].services + c.services_amount);
+    map[code].delivery = round2(map[code].delivery + c.delivery_amount);
+    map[code].count++;
+  }
+  return map;
+});
+
+const currencyKeys = computed(() => Object.keys(financeByCurrency.value));
+const cfCurrencyKeys = computed(() => Object.keys(cfByCurrency.value));
 
 function parseServicesDetail(raw: string): ServiceDetailItem[] {
   try { return JSON.parse(raw || "[]"); } catch { return []; }

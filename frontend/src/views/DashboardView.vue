@@ -36,9 +36,9 @@ const stats = reactive([
   { label: "总订单", value: 0, icon: "📦", bg: "var(--accent-light)" },
   { label: "质检单", value: 0, icon: "🔍", bg: "var(--accent-light)" },
   { label: "真实订单", value: 0, icon: "✅", bg: "var(--accent-light)" },
-  { label: "总 GMV", value: 0, icon: "💰", bg: "var(--accent-light)", prefix: "¥" },
-  { label: "质检单 GMV", value: 0, icon: "📊", bg: "var(--accent-light)", prefix: "¥" },
-  { label: "真实 GMV", value: 0, icon: "📈", bg: "var(--accent-light)", prefix: "¥" },
+  { label: "总 GMV", value: 0, icon: "💰", bg: "var(--accent-light)", prefix: "₽" },
+  { label: "质检单 GMV", value: 0, icon: "📊", bg: "var(--accent-light)", prefix: "₽" },
+  { label: "真实 GMV", value: 0, icon: "📈", bg: "var(--accent-light)", prefix: "₽" },
 ]);
 
 async function loadSummary() {

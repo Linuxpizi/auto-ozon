@@ -767,3 +767,288 @@ class OzonClient:
             processing_costs_sum=result.get("processing_costs_sum", 0),
             defects=result.get("defects", []),
         )
+
+    # ------------------------------------------------------------------
+    # Intelligence: Pricing Strategy
+    # ------------------------------------------------------------------
+
+    def get_pricing_strategies(self, page: int = 1, limit: int = 50) -> dict:
+        """Get all pricing strategies.
+
+        POST /v1/pricing-strategy/list
+        """
+        data = self._request(
+            "POST", "/v1/pricing-strategy/list",
+            json_body={"page": page, "limit": limit},
+        )
+        return data.get("result", {})
+
+    def get_pricing_strategy_info(self, strategy_id: str) -> dict:
+        """Get pricing strategy details including competitors.
+
+        POST /v1/pricing-strategy/info
+        """
+        data = self._request(
+            "POST",
+            "/v1/pricing-strategy/info",
+            json_body={"strategy_id": strategy_id},
+        )
+        return data.get("result", data)
+
+    def create_pricing_strategy(self, strategy_name: str, competitors: list[dict] | None = None) -> dict:
+        """Create a new pricing strategy.
+
+        POST /v1/pricing-strategy/create
+        """
+        payload: dict[str, Any] = {"strategy_name": strategy_name}
+        if competitors:
+            payload["competitors"] = competitors
+        data = self._request("POST", "/v1/pricing-strategy/create", json_body=payload)
+        return data.get("result", data)
+
+    def update_pricing_strategy(
+        self,
+        strategy_id: str,
+        name: str | None = None,
+        competitors: list[dict] | None = None,
+    ) -> dict:
+        """Update pricing strategy name and competitors.
+
+        POST /v1/pricing-strategy/update
+        """
+        payload: dict[str, Any] = {"strategy_id": strategy_id}
+        if name is not None:
+            payload["strategy_name"] = name
+        if competitors is not None:
+            payload["competitors"] = competitors
+        data = self._request("POST", "/v1/pricing-strategy/update", json_body=payload)
+        return data.get("result", data)
+
+    def delete_pricing_strategy(self, strategy_id: str) -> dict:
+        """Delete a pricing strategy.
+
+        POST /v1/pricing-strategy/delete
+        """
+        data = self._request(
+            "POST", "/v1/pricing-strategy/delete",
+            json_body={"strategy_id": strategy_id},
+        )
+        return data
+
+    def set_pricing_strategy_status(self, strategy_id: str, is_active: bool) -> dict:
+        """Enable or disable a pricing strategy.
+
+        POST /v1/pricing-strategy/status
+        """
+        data = self._request(
+            "POST", "/v1/pricing-strategy/status",
+            json_body={"strategy_id": strategy_id, "is_active": is_active},
+        )
+        return data
+
+    def get_pricing_competitors(self, page: int = 1, limit: int = 50) -> dict:
+        """Get available competitors list.
+
+        POST /v1/pricing-strategy/competitors/list
+        """
+        data = self._request(
+            "POST", "/v1/pricing-strategy/competitors/list",
+            json_body={"page": page, "limit": limit},
+        )
+        return data.get("result", {})
+
+    def get_pricing_strategy_products(self, strategy_id: str) -> dict:
+        """Get products bound to a pricing strategy.
+
+        POST /v1/pricing-strategy/products/list
+        """
+        data = self._request(
+            "POST", "/v1/pricing-strategy/products/list",
+            json_body={"strategy_id": strategy_id},
+        )
+        return data.get("result", {})
+
+    def add_products_to_pricing_strategy(self, strategy_id: str, product_ids: list[str]) -> dict:
+        """Bind products to a pricing strategy.
+
+        POST /v1/pricing-strategy/products/add
+        """
+        data = self._request(
+            "POST", "/v1/pricing-strategy/products/add",
+            json_body={"strategy_id": strategy_id, "product_id": product_ids},
+        )
+        return data
+
+    def delete_products_from_pricing_strategy(self, strategy_id: str, product_ids: list[str]) -> dict:
+        """Remove products from a pricing strategy.
+
+        POST /v1/pricing-strategy/products/delete
+        """
+        data = self._request(
+            "POST", "/v1/pricing-strategy/products/delete",
+            json_body={"strategy_id": strategy_id, "product_id": product_ids},
+        )
+        return data
+
+    def get_competitor_product_price(self, product_id: int) -> dict:
+        """Get competitor price for a specific product.
+
+        POST /v1/pricing-strategy/product/info
+        """
+        data = self._request(
+            "POST", "/v1/pricing-strategy/product/info",
+            json_body={"product_id": product_id},
+        )
+        return data.get("result", data)
+
+    def get_strategy_ids_by_product_ids(self, product_ids: list[str]) -> dict:
+        """Check which strategies are bound to given products.
+
+        POST /v1/pricing-strategy/strategy-ids-by-product-ids
+        """
+        data = self._request(
+            "POST", "/v1/pricing-strategy/strategy-ids-by-product-ids",
+            json_body={"product_id": product_ids},
+        )
+        return data.get("result", data)
+
+    # ------------------------------------------------------------------
+    # Intelligence: Platform Promotions (Promos)
+    # ------------------------------------------------------------------
+
+    def get_platform_actions(self) -> list[dict]:
+        """Get available Ozon platform promotions.
+
+        GET /v1/actions
+        """
+        data = self._request("GET", "/v1/actions")
+        return data.get("result", [])
+
+    def get_platform_action_products(
+        self, action_id: int, limit: int = 100, last_id: str = "",
+    ) -> dict:
+        """Get products in a platform promotion.
+
+        POST /v1/actions/products
+        """
+        payload: dict[str, Any] = {
+            "action_id": action_id,
+            "limit": limit,
+            "offset": 0,
+        }
+        if last_id:
+            payload["last_id"] = last_id
+            del payload["offset"]
+        data = self._request("POST", "/v1/actions/products", json_body=payload)
+        return data.get("result", data)
+
+    def activate_products_in_action(
+        self, action_id: int, products: list[dict],
+    ) -> dict:
+        """Add products to a platform promotion.
+
+        POST /v1/actions/products/activate
+
+        Args:
+            products: list of dicts with keys: product_id, action_price, stock.
+        """
+        data = self._request(
+            "POST", "/v1/actions/products/activate",
+            json_body={"action_id": action_id, "products": products},
+        )
+        return data
+
+    def deactivate_products_in_action(
+        self, action_id: int, product_ids: list[int],
+    ) -> dict:
+        """Remove products from a platform promotion.
+
+        POST /v1/actions/products/deactivate
+        """
+        data = self._request(
+            "POST", "/v1/actions/products/deactivate",
+            json_body={"action_id": action_id, "product_ids": product_ids},
+        )
+        return data
+
+    # ------------------------------------------------------------------
+    # Intelligence: Seller Actions (Seller Promotions)
+    # ------------------------------------------------------------------
+
+    def get_seller_actions(self) -> dict:
+        """Get seller-created promotions.
+
+        POST /v1/seller-actions/list
+        """
+        data = self._request("POST", "/v1/seller-actions/list", json_body={})
+        return data.get("result", {})
+
+    def create_seller_action(self, action_params: dict) -> dict:
+        """Create a seller promotion.
+
+        POST /v1/seller-actions/create
+
+        Args:
+            action_params: dict with keys like title, date_start, date_end,
+                discount_type, discount_value, budget, etc.
+        """
+        data = self._request(
+            "POST", "/v1/seller-actions/create",
+            json_body={"action_parameters": action_params},
+        )
+        return data
+
+    def update_seller_action(self, action_id: int, action_params: dict) -> dict:
+        """Update a seller promotion.
+
+        PUT /v1/seller-actions/{action_id}
+        """
+        data = self._request(
+            "PUT", f"/v1/seller-actions/{action_id}",
+            json_body={"action_parameters": action_params},
+        )
+        return data
+
+    def delete_seller_action(self, action_id: int) -> dict:
+        """Delete a seller promotion.
+
+        DELETE /v1/seller-actions/{action_id}
+        """
+        data = self._request("DELETE", f"/v1/seller-actions/{action_id}")
+        return data
+
+    def get_seller_action_products(self, action_id: int) -> dict:
+        """Get products in a seller promotion.
+
+        POST /v1/seller-actions/products/list
+        """
+        data = self._request(
+            "POST", "/v1/seller-actions/products/list",
+            json_body={"action_id": action_id},
+        )
+        return data.get("result", data)
+
+    def add_products_to_seller_action(self, action_id: int, products: list[dict]) -> dict:
+        """Add products to a seller promotion.
+
+        POST /v1/seller-actions/products/add
+
+        Args:
+            products: list of dicts with keys: product_id, action_price, stock.
+        """
+        data = self._request(
+            "POST", "/v1/seller-actions/products/add",
+            json_body={"action_id": action_id, "products": products},
+        )
+        return data
+
+    def delete_products_from_seller_action(self, action_id: int, product_ids: list[int]) -> dict:
+        """Remove products from a seller promotion.
+
+        POST /v1/seller-actions/products/delete
+        """
+        data = self._request(
+            "POST", "/v1/seller-actions/products/delete",
+            json_body={"action_id": action_id, "product_ids": product_ids},
+        )
+        return data

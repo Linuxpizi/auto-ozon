@@ -29,7 +29,7 @@ def get_orders(
             | Order.sku.ilike(like)
             | Order.store_name.ilike(like)
         )
-    q = q.order_by(Order.created_at.desc())
+    q = q.order_by(Order.in_process_at.desc().nullslast(), Order.created_at.desc())
     return q.offset(skip).limit(limit).all()
 
 

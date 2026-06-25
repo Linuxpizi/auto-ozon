@@ -21,6 +21,7 @@ class Store(Base):
     auto_delete = Column(Boolean, default=False)
     notes = Column(Text, default="")
     seller_rating = Column(Text, default="")
+    fbs_error_index = Column(Text, default="")
     # Pagination cursors for incremental sync (persist Ozon last_id)
     product_cursor_active = Column(String(128), default="", comment="last_id for active products sync")
     product_cursor_archived = Column(String(128), default="", comment="last_id for archived products sync")

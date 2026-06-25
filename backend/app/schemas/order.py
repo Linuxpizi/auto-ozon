@@ -16,6 +16,7 @@ class OrderBase(BaseModel):
     offer_id: str = ""
     product_id: int = 0
     product_name: str = ""
+    currency_code: str = ""
     products_json: str = "[]"
     image_url: str = ""
     tracking_number: str = ""
@@ -48,6 +49,7 @@ class OrderUpdate(BaseModel):
     offer_id: Optional[str] = None
     product_id: Optional[int] = None
     product_name: Optional[str] = None
+    currency_code: Optional[str] = None
     products_json: Optional[str] = None
     image_url: Optional[str] = None
     tracking_number: Optional[str] = None

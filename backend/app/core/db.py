@@ -22,6 +22,7 @@ def _migrate_columns(engine):
     # Simple ALTER TABLE ADD COLUMN (no type conflict)
     simple_migrations = [
         ("stores", "seller_rating", "ALTER TABLE stores ADD COLUMN seller_rating TEXT DEFAULT ''"),
+        ("stores", "fbs_error_index", "ALTER TABLE stores ADD COLUMN fbs_error_index TEXT DEFAULT ''"),
         ("stores", "product_cursor_active", "ALTER TABLE stores ADD COLUMN product_cursor_active VARCHAR(128) DEFAULT ''"),
         ("stores", "product_cursor_archived", "ALTER TABLE stores ADD COLUMN product_cursor_archived VARCHAR(128) DEFAULT ''"),
         ("listings", "offer_id", "ALTER TABLE listings ADD COLUMN offer_id VARCHAR(128) DEFAULT ''"),
@@ -70,6 +71,7 @@ def _migrate_columns(engine):
         ("orders", "discount", "ALTER TABLE orders ADD COLUMN discount REAL DEFAULT 0.0"),
         ("orders", "in_process_at", "ALTER TABLE orders ADD COLUMN in_process_at DATETIME"),
         ("orders", "available_actions", "ALTER TABLE orders ADD COLUMN available_actions TEXT DEFAULT '[]'"),
+        ("orders", "currency_code", "ALTER TABLE orders ADD COLUMN currency_code VARCHAR(16) DEFAULT ''"),
     ]
     for table, column, sql in simple_migrations:
         columns = {c["name"] for c in inspector.get_columns(table)}

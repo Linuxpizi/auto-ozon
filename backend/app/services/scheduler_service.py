@@ -77,6 +77,14 @@ DEFAULT_TASKS = [
         interval_seconds=46800,  # 13 h
         enabled=True,
     ),
+    TaskConfigCreate(
+        task_key="sync_fbs_error_index",
+        name="同步FBS错误指数",
+        description="定时从 Ozon 同步 FBS 错误指数 (每23小时)",
+        trigger_type="interval",
+        interval_seconds=82800,  # 23 h
+        enabled=True,
+    ),
 ]
 
 

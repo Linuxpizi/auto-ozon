@@ -28,6 +28,7 @@ export interface StoreItem {
   auto_delete: boolean;
   notes: string;
   seller_rating: string;
+  fbs_error_index: string;
 }
 
 export interface OrderItem {
@@ -44,6 +45,7 @@ export interface OrderItem {
   offer_id: string;
   product_id: number;
   product_name: string;
+  currency_code: string;
   products_json: string;
   image_url: string;
   tracking_number: string;

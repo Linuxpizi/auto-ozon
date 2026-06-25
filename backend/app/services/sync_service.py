@@ -45,13 +45,10 @@ def sync_orders_for_store(
     cursor = ""
     while True:
         postings, cursor, has_next = client.get_fbs_postings(
-            cutoff_from=since,
-            cutoff_to=(datetime.now(timezone.utc) + timedelta(days=5))
+            since=since,
+            to=(datetime.now(timezone.utc) + timedelta(days=7))
             .isoformat(timespec="milliseconds")
             .replace("+00:00", "Z"),
-            statuses=["awaiting_registration", "acceptance_in_progress", "awaiting_approve",
-                      "awaiting_packaging", "awaiting_deliver", "delivering",
-                      "arbitration", "client_arbitration", "driver_pickup", "not_accepted"],
             limit=100,
             cursor=cursor,
         )
@@ -131,7 +128,8 @@ def sync_orders_for_store(
             except (ValueError, TypeError):
                 pass
 
-        gmv = p.customer_price if p.customer_price > 0 else p.price * p.quantity
+        # p.price is already the total order value (sum of unit_price × qty for all products)
+        gmv = p.customer_price if p.customer_price > 0 else p.price
         image_url = image_map.get(p.offer_id, "") or image_map.get(p.sku, "")
         if not image_url:
             logger.error(
@@ -165,27 +163,33 @@ def sync_orders_for_store(
             express_delivery=p.is_express,
             available_actions=p.available_actions,
             products_json=p.products_json,
+            currency_code=p.currency_code,
         )
         existing = order_crud.get_order_by_number(db, p.order_number)
         if existing:
             order_crud.update_order(db, existing.id, OrderUpdate(
                 status=p.status,
                 substatus=p.substatus,
+                sku=p.sku,
+                offer_id=p.offer_id,
+                product_id=p.product_id,
+                product_name=p.product_name,
                 shipment_number=p.posting_number,
                 tracking_number=p.tracking_number,
-                must_ship_by=must_ship_by,
-                in_process_at=in_process_at,
+                quantity=p.quantity,
+                unit_price=p.price,
                 customer_price=p.customer_price,
                 payout=p.payout,
                 commission=p.commission_amount,
                 discount=p.discount_value,
                 gmv=gmv,
+                must_ship_by=must_ship_by,
+                in_process_at=in_process_at,
                 express_delivery=p.is_express,
-                offer_id=p.offer_id,
-                product_id=p.product_id,
                 image_url=image_url,
                 available_actions=p.available_actions,
                 products_json=p.products_json,
+                currency_code=p.currency_code,
             ))
         else:
             order_crud.create_order(db, order_data)
@@ -346,6 +350,27 @@ def sync_seller_rating_for_store(db: Session, store: Store) -> bool:
         logger.info("sync_seller_rating[%s]: %d ratings saved", store.name, len(rating.ratings))
     except Exception as e:
         logger.warning("sync_seller_rating[%s] failed: %s", store.name, e, exc_info=True)
+    return True
+
+
+def sync_fbs_error_index_for_store(db: Session, store: Store) -> bool:
+    """Fetch FBS error index from Ozon and store as JSON on the Store."""
+    client = OzonClient(client_id=store.client_id, api_key=store.api_key)
+    try:
+        info = client.get_fbs_error_index()
+        payload = {
+            "index": info.index,
+            "currency_code": info.currency_code,
+            "period_from": info.period_from,
+            "period_to": info.period_to,
+            "processing_costs_sum": info.processing_costs_sum,
+            "defects": info.defects,
+        }
+        store.fbs_error_index = json.dumps(payload, ensure_ascii=False)
+        db.commit()
+        logger.info("sync_fbs_error_index[%s]: index=%.2f", store.name, info.index)
+    except Exception as e:
+        logger.warning("sync_fbs_error_index[%s] failed: %s", store.name, e, exc_info=True)
     return True
 
 
@@ -597,6 +622,9 @@ def run_sync_task(db: Session, task_key: str) -> str:
                     total += 1
                 elif task_key == "sync_seller_rating":
                     sync_seller_rating_for_store(db, store)
+                    total += 1
+                elif task_key == "sync_fbs_error_index":
+                    sync_fbs_error_index_for_store(db, store)
                     total += 1
                 elif task_key == "sync_products":
                     total += sync_products_for_store(db, store)

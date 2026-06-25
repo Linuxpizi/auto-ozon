@@ -23,6 +23,7 @@ class Order(Base):
     offer_id = Column(String(128), default="")
     product_id = Column(Integer, default=0)
     product_name = Column(String(256), default="")
+    currency_code = Column(String(16), default="", comment="订单币种，如 RUB")
     products_json = Column(Text, default="[]", comment="全部商品 JSON 数组")
     image_url = Column(Text, nullable=False, default="")
     tracking_number = Column(String(128), default="")

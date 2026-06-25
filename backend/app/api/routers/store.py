@@ -74,6 +74,8 @@ def sync_store(store_id: int, db: Session = Depends(get_db)):
     clear_cache()
     sync_seller_rating_for_store(db, store)
     sync_warehouses_for_store(db, store)
+    from app.services.sync_service import sync_fbs_error_index_for_store
+    sync_fbs_error_index_for_store(db, store)
     db.refresh(store)
     return store_crud.get_store(db, store_id)
 

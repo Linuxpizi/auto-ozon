@@ -21,18 +21,19 @@ _CACHE: Dict[str, tuple[float, Any]] = {}
 CACHE_TTL = 300  # 5 minutes default
 
 
-def _cache_key(method_name: str, args: tuple, kwargs: dict) -> str:
-    raw = f"{method_name}:{args}:{json.dumps(kwargs, sort_keys=True)}"
+def _cache_key(method_name: str, args: tuple, kwargs: dict, client_id: str = "") -> str:
+    raw = f"{method_name}:{client_id}:{args}:{json.dumps(kwargs, sort_keys=True)}"
     return hashlib.md5(raw.encode()).hexdigest()
 
 
 def _cached(ttl: int = CACHE_TTL) -> Callable:
-    """Decorator: cache return value keyed by (class method name + args)."""
+    """Decorator: cache return value keyed by (client_id + method name + args)."""
 
     def decorator(fn: Callable) -> Callable:
         @wraps(fn)
         def wrapper(self, *args, **kwargs):
-            key = _cache_key(fn.__name__, args, kwargs)
+            client_id = getattr(self, "_client_id", "") or ""
+            key = _cache_key(fn.__name__, args, kwargs, client_id=client_id)
             now = time.time()
             entry = _CACHE.get(key)
             if entry and (now - entry[0]) < ttl:
@@ -105,7 +106,7 @@ class OzonWarehouse:
 
 @dataclass
 class OzonPostingFBS:
-    """An FBS posting from POST /v4/posting/fbs/unfulfilled/list."""
+    """An FBS posting from POST /v4/posting/fbs/list."""
 
     posting_number: str
     order_number: str
@@ -125,6 +126,7 @@ class OzonPostingFBS:
     customer_price: float = 0.0
     commission_amount: float = 0.0
     discount_value: float = 0.0
+    currency_code: str = ""
     products_json: str = "[]"
     available_actions: str = "[]"
 
@@ -142,6 +144,18 @@ class OzonFinanceStatement:
     period_id: int
     period_begin: str
     period_end: str
+
+
+@dataclass
+class OzonFbsErrorIndex:
+    """Parsed response from POST /v1/rating/index/fbs/info."""
+
+    index: float
+    currency_code: str
+    period_from: str
+    period_to: str
+    processing_costs_sum: float
+    defects: list  # list of {date, index_by_date, processing_costs_sum_by_date}
 
 
 @dataclass
@@ -256,17 +270,22 @@ class OzonClient:
 
     def get_fbs_postings(
         self,
-        cutoff_from: Optional[str] = None,
-        cutoff_to: Optional[str] = None,
+        since: Optional[str] = None,
+        to: Optional[str] = None,
         statuses: Optional[list[str]] = None,
         limit: int = 100,
         cursor: str = "",
     ) -> tuple[list[OzonPostingFBS], str, bool]:
-        """Get unfulfilled FBS postings.
+        """Get all FBS postings.
 
-        POST /v4/posting/fbs/unfulfilled/list
+        POST /v4/posting/fbs/list
         https://docs.ozon.ru/api/seller/zh/#tag/FBS
 
+        Unlike the deprecated /v4/posting/fbs/unfulfilled/list,
+        this endpoint returns orders in ALL statuses including
+        cancelled ones.
+
+        ``since`` and ``to`` are required by this endpoint.
         Returns (postings, next_cursor, has_next).
         """
         payload: dict[str, Any] = {
@@ -279,14 +298,14 @@ class OzonClient:
                 "legal_info": True,
             },
         }
-        if cutoff_from:
-            payload["filter"]["cutoff_from"] = cutoff_from
-        if cutoff_to:
-            payload["filter"]["cutoff_to"] = cutoff_to
+        if since:
+            payload["filter"]["since"] = since
+        if to:
+            payload["filter"]["to"] = to
         if statuses:
             payload["filter"]["statuses"] = statuses
         data = self._request(
-            "POST", "/v4/posting/fbs/unfulfilled/list", json_body=payload
+            "POST", "/v4/posting/fbs/list", json_body=payload
         )
         raw_postings = data.get("postings", [])
         next_cursor = data.get("cursor", "")
@@ -294,31 +313,73 @@ class OzonClient:
         postings = []
         for item in raw_postings:
             products = item.get("products", [])
-            product = products[0] if products else {}
-            price_obj = product.get("price", {})
-            price = float(price_obj.get("amount", 0)) if isinstance(price_obj, dict) else float(price_obj or 0)
 
-            # Financial data for the first product
-            fin_products = (item.get("financial_data") or {}).get("products", [{}])
-            fin = fin_products[0] if fin_products else {}
-            payout = float(fin.get("payout", 0))
-            cust_price_obj = fin.get("customer_price", {})
-            if isinstance(cust_price_obj, dict):
-                customer_price = float(cust_price_obj.get("amount", 0))
-            else:
-                customer_price = float(cust_price_obj or 0)
-            comm_obj = fin.get("commission", {})
-            commission = float(comm_obj.get("amount", 0)) if isinstance(comm_obj, dict) else float(comm_obj or 0)
-            discount = float(fin.get("total_discount_value", 0))
+            # --- aggregate across ALL products in this posting -------------------
+            total_price = 0.0      # sum of (unit_price × quantity) for all products
+            total_quantity = 0
+            total_payout = 0.0
+            total_customer_price = 0.0
+            total_commission = 0.0
+            total_discount = 0.0
+
+            # Currency code from the price object
+            currency_code = ""
+
+            # Use the first product for single-product display fields
+            first_product = products[0] if products else {}
+
+            fin_products = (item.get("financial_data") or {}).get("products", [])
+            # Build a lookup by product_id for financial data
+            fin_by_pid: dict[int, dict] = {}
+            for fp in fin_products:
+                fin_by_pid[int(fp.get("product_id", 0))] = fp
+
+            _products_json_items: list[dict] = []
+            for p in products:
+                # Per-unit price from the products[].price.amount field
+                p_price_obj = p.get("price", {})
+                if isinstance(p_price_obj, dict):
+                    unit_price = float(p_price_obj.get("amount", 0))
+                    if not currency_code:
+                        currency_code = str(p_price_obj.get("currency", ""))
+                else:
+                    unit_price = float(p_price_obj or 0)
+                qty = int(p.get("quantity", 1))
+                total_price += unit_price * qty
+                total_quantity += qty
+
+                # Accumulate financial data for this product
+                pid = int(p.get("product_id", 0))
+                fin = fin_by_pid.get(pid, {})
+                total_payout += float(fin.get("payout", 0))
+                cp_obj = fin.get("customer_price", {})
+                if isinstance(cp_obj, dict):
+                    total_customer_price += float(cp_obj.get("amount", 0))
+                else:
+                    total_customer_price += float(cp_obj or 0)
+                co_obj = fin.get("commission", {})
+                if isinstance(co_obj, dict):
+                    total_commission += float(co_obj.get("amount", 0))
+                else:
+                    total_commission += float(co_obj or 0)
+                total_discount += float(fin.get("total_discount_value", 0))
+
+                _products_json_items.append({
+                    "product_id": pid,
+                    "sku": str(p.get("sku", "")),
+                    "offer_id": p.get("offer_id", ""),
+                    "name": p.get("name", ""),
+                    "quantity": qty,
+                    "unit_price": unit_price,
+                })
+
+            # If no products array, fall back to first product (legacy compat)
+            if not products:
+                total_price = 0.0
+                total_quantity = 0
 
             available_actions = json.dumps(item.get("available_actions", []), ensure_ascii=False)
-            _products_json = json.dumps([
-                {
-                    "product_id": int(p.get("product_id", 0)),
-                    "quantity": int(p.get("quantity", 1)),
-                }
-                for p in products
-            ], ensure_ascii=False)
+            _products_json = json.dumps(_products_json_items, ensure_ascii=False)
 
             postings.append(
                 OzonPostingFBS(
@@ -326,20 +387,21 @@ class OzonClient:
                     order_number=item.get("order_number", ""),
                     status=item.get("status", ""),
                     substatus=item.get("substatus", ""),
-                    sku=str(product.get("sku", "")),
-                    product_name=product.get("name", ""),
-                    price=price,
-                    quantity=int(product.get("quantity", 1)),
+                    sku=str(first_product.get("sku", "")),
+                    product_name=first_product.get("name", ""),
+                    price=total_price,
+                    quantity=total_quantity,
                     in_process_at=item.get("in_process_at"),
                     shipment_date=item.get("shipment_date"),
                     tracking_number=item.get("tracking_number", ""),
                     is_express=item.get("is_express", False),
-                    offer_id=product.get("offer_id", ""),
-                    product_id=int(product.get("product_id", 0)),
-                    payout=payout,
-                    customer_price=customer_price,
-                    commission_amount=commission,
-                    discount_value=discount,
+                    offer_id=first_product.get("offer_id", ""),
+                    product_id=int(first_product.get("product_id", 0)),
+                    payout=total_payout,
+                    customer_price=total_customer_price,
+                    commission_amount=total_commission,
+                    discount_value=total_discount,
+                    currency_code=currency_code,
                     products_json=_products_json,
                     available_actions=available_actions,
                 )
@@ -509,8 +571,9 @@ class OzonClient:
     def get_seller_rating(self) -> OzonSellerRating:
         """Get seller ratings from POST /v1/seller/info."""
         data = self._request("POST", "/v1/seller/info", json_body={})
-        company = data.get("company", {})
-        ratings = data.get("ratings", [])
+        result = data.get("result", data)
+        company = result.get("company", {})
+        ratings = result.get("ratings", [])
         return OzonSellerRating(
             company_name=company.get("name", ""),
             currency=company.get("currency", ""),
@@ -588,7 +651,7 @@ class OzonClient:
         return result
 
     def get_images_by_offer_ids(self, offer_ids: list[str]) -> dict[str, str]:
-        """Look up primary_image for a batch of offer_ids via /v3/product/info.
+        """Look up primary_image for a batch of offer_ids via /v3/product/info/list.
 
         Returns {offer_id: image_url}.
         """
@@ -596,7 +659,7 @@ class OzonClient:
         for i in range(0, len(offer_ids), 1000):
             batch = offer_ids[i:i + 1000]
             data = self._request(
-                "POST", "/v3/product/info",
+                "POST", "/v3/product/info/list",
                 json_body={"offer_id": batch},
             )
             for item in data.get("result", {}).get("items", []):
@@ -682,3 +745,25 @@ class OzonClient:
         """
         payload = {"posting_number": posting_number}
         return self._request("POST", "/v3/posting/fbs/cancel", json_body=payload)
+
+    # ------------------------------------------------------------------
+    # Rating / Error Index
+    # ------------------------------------------------------------------
+
+    @_cached(ttl=3600)
+    def get_fbs_error_index(self) -> OzonFbsErrorIndex:
+        """Get FBS error index.
+
+        POST /v1/rating/index/fbs/info
+        https://docs.ozon.ru/api/seller/zh/#tag/Rating
+        """
+        data = self._request("POST", "/v1/rating/index/fbs/info", json_body={})
+        result = data.get("result", data)
+        return OzonFbsErrorIndex(
+            index=result.get("index", 0),
+            currency_code=result.get("currency_code", ""),
+            period_from=result.get("period_from", ""),
+            period_to=result.get("period_to", ""),
+            processing_costs_sum=result.get("processing_costs_sum", 0),
+            defects=result.get("defects", []),
+        )

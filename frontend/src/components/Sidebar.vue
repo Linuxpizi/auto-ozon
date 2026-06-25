@@ -53,6 +53,7 @@ const menuOptions: MenuOption[] = [
   { label: "订单管理", key: "Orders", icon: renderIcon("📦") },
   { label: "店铺流水", key: "StoreFinance", icon: renderIcon("💰") },
   { label: "商品管理", key: "ProductManagement", icon: renderIcon("📋") },
+  { label: "精铺管理", key: "PrecisionListing", icon: renderIcon("🎯") },
   { type: "divider", key: "d1" },
   { label: "定时任务", key: "TaskConfig", icon: renderIcon("⚙️") },
 ];

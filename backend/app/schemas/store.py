@@ -18,6 +18,7 @@ class StoreBase(BaseModel):
     auto_delete: bool = False
     notes: str = ""
     seller_rating: str = ""
+    fbs_error_index: str = ""
 
 
 class StoreCreate(StoreBase):
@@ -40,6 +41,7 @@ class StoreUpdate(BaseModel):
     auto_delete: Optional[bool] = None
     notes: Optional[str] = None
     seller_rating: Optional[str] = None
+    fbs_error_index: Optional[str] = None
 
 
 class StoreRead(StoreBase):

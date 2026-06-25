@@ -11,6 +11,7 @@
         <tr>
           <th>图片 / 货件号 / SKU</th>
           <th>订单号</th>
+          <th>创建日期</th>
           <th>状态</th>
           <th>必须发货 / 商品名称</th>
           <th>运单号 / 数量 / 成交价</th>
@@ -32,6 +33,7 @@
             </div>
           </td>
           <td style="white-space: nowrap;">{{ order.order_number }}</td>
+          <td style="white-space: nowrap; font-size: 12px; color: var(--text-secondary);">{{ formatDateTime(order.in_process_at) }}</td>
           <td>
             <n-tag :type="statusType(order.status)" size="small" round>
               {{ statusLabel(order.status) }}
@@ -48,7 +50,7 @@
           </td>
           <td>
             <div>{{ order.tracking_number || '-' }}</div>
-            <div style="font-size: 12px; color: var(--text-secondary);">x{{ order.quantity }} / ¥{{ displayPrice(order).toFixed(2) }}</div>
+            <div style="font-size: 12px; color: var(--text-secondary);">{{ totalQuantity(order) }}件 / {{ currencySymbol(order) }}{{ displayPrice(order).toFixed(2) }}</div>
           </td>
           <td>
             <div>{{ order.store_name }}</div>
@@ -122,14 +124,47 @@ function hasAction(order: OrderItem, action: string): boolean {
   }
 }
 
+function totalQuantity(order: OrderItem): number {
+  try {
+    const products = JSON.parse(order.products_json || "[]");
+    if (products.length > 0) {
+      return products.reduce((sum: number, p: any) => sum + (p.quantity || 1), 0);
+    }
+  } catch {}
+  return order.quantity;
+}
+
+const CURRENCY_SYMBOLS: Record<string, string> = {
+  RUB: "₽",
+  USD: "$",
+  EUR: "€",
+  CNY: "¥",
+  KZT: "₸",
+  BYN: "Br",
+  UZS: "so'm",
+};
+
+function currencySymbol(order: OrderItem): string {
+  const code = (order.currency_code || "").toUpperCase();
+  return CURRENCY_SYMBOLS[code] || code + " ";
+}
+
 function displayPrice(order: OrderItem): number {
+  // customer_price is the total price from Ozon financial_data
   if (order.customer_price > 0) return order.customer_price;
+  // fallback: unit_price * quantity
   return order.unit_price * order.quantity;
 }
 
 function formatDate(d: string) {
   if (!d) return "";
   return new Date(d).toLocaleDateString("zh-CN", { month: "2-digit", day: "2-digit" });
+}
+
+function formatDateTime(d: string | null) {
+  if (!d) return "-";
+  const dt = new Date(d);
+  return dt.toLocaleDateString("zh-CN", { year: "numeric", month: "2-digit", day: "2-digit" });
 }
 
 function emitEdit(order: OrderItem) {

@@ -4,7 +4,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
-from app.api.routers import dashboard, order, store, monitor, listing, finance, task_config, precision_listing, intelligence
+from app.api.routers import dashboard, order, store, monitor, listing, finance, task_config, precision_listing, intelligence, browser_sync
 from app.core.db import engine, Base
 from app.services.scheduler_service import lifespan as scheduler_lifespan
 
@@ -63,3 +63,4 @@ app.include_router(precision_listing.router, prefix="/api/precision-listing", ta
 app.include_router(finance.router, prefix="/api/finances", tags=["finances"])
 app.include_router(task_config.router, prefix="/api/task-configs", tags=["task-configs"])
 app.include_router(intelligence.router, prefix="/api/intelligence", tags=["intelligence"])
+app.include_router(browser_sync.router, prefix="/api/browser-sync", tags=["browser-sync"])

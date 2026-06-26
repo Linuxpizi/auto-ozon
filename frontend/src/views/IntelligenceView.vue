@@ -322,12 +322,15 @@ const newSellerAction = ref({
 });
 
 const actionTypeOptions = [
-  { label: "折扣 (DISCOUNT)", value: "DISCOUNT" },
-  { label: "优惠券 (VOUCHER)", value: "VOUCHER" },
+  { label: "折扣", value: "DISCOUNT" },
+  { label: "优惠券折扣", value: "VOUCHER_DISCOUNT" },
+  { label: "满减折扣", value: "DISCOUNT_WITH_CONDITION" },
+  { label: "分期免息", value: "INSTALLMENT" },
+  { label: "多级满减", value: "MULTI_LEVEL_DISCOUNT_ON_AMOUNT" },
 ];
 const discountTypeOptions = [
-  { label: "百分比 (PERCENT)", value: "PERCENT" },
-  { label: "固定金额 (AMOUNT)", value: "AMOUNT" },
+  { label: "百分比", value: "PERCENT" },
+  { label: "固定金额", value: "CURRENCY" },
 ];
 
 // ============================================================
@@ -343,12 +346,75 @@ function formatPrice(v: any) {
   return "₽" + Number(v).toFixed(2);
 }
 
+// Ozon API enum → Chinese translations
+const STRATEGY_TYPE_MAP: Record<string, string> = {
+  COMP_PRICE: "竞品跟价",
+  MIN_EXT_PRICE: "最低价跟价",
+  MIN_PRICE: "最低价跟价",
+  TARGET_MARGIN: "目标毛利",
+  FIXED_PRICE: "固定价格",
+};
+const ACTION_TYPE_MAP: Record<string, string> = {
+  DISCOUNT: "折扣",
+  VOUCHER_DISCOUNT: "优惠券折扣",
+  DISCOUNT_WITH_CONDITION: "满减折扣",
+  INSTALLMENT: "分期免息",
+  INDIVIDUAL_DISCOUNT_BY_PRODUCTS: "卖家折扣",
+  OZON_ACCOUNT_DISCOUNT: "Ozon卡折扣",
+  MULTI_LEVEL_DISCOUNT_ON_AMOUNT: "多级满减",
+  MARKETPLACE_MULTI_LEVEL_DISCOUNT_ON_AMOUNT: "平台多级满减",
+  STOCK_DISCOUNT: "库存折扣",
+};
+const SELLER_ACTION_TYPE_MAP: Record<string, string> = {
+  DISCOUNT: "折扣",
+  VOUCHER: "优惠券",
+  DISCOUNT_WITH_CONDITION: "满减折扣",
+  INSTALLMENT: "分期免息",
+  MULTI_LEVEL_DISCOUNT_ON_AMOUNT: "多级满减",
+};
+const DISCOUNT_TYPE_MAP: Record<string, string> = {
+  PERCENT: "百分比",
+  CURRENCY: "固定金额",
+  UNSPECIFIED: "未指定",
+};
+const ACTION_STATUS_MAP: Record<string, string> = {
+  ACTIVE: "进行中",
+  ENDED: "已结束",
+  PLANNED: "待开始",
+  PAUSED: "已暂停",
+};
+const ADD_MODE_MAP: Record<string, string> = {
+  AUTO: "自动",
+  MANUAL: "手动",
+  NOT_SET: "未设置",
+};
+
+function translateActionType(val: string) {
+  return ACTION_TYPE_MAP[val] || val || "-";
+}
+function translateStrategyType(val: string) {
+  return STRATEGY_TYPE_MAP[val] || val || "-";
+}
+function translateSellerActionType(val: string) {
+  return SELLER_ACTION_TYPE_MAP[val] || val || "-";
+}
+function translateDiscountType(val: string) {
+  return DISCOUNT_TYPE_MAP[val] || val || "-";
+}
+function translateActionStatus(val: string) {
+  return ACTION_STATUS_MAP[val] || val || "-";
+}
+function translateAddMode(val: string) {
+  return ADD_MODE_MAP[val] || val || "-";
+}
+
 // ============================================================
 // Table Columns
 // ============================================================
 const strategyColumns: DataTableColumns<any> = [
   { title: "策略名称", key: "strategy_name", render: row => h("span", { style: "font-weight:500" }, row.strategy_name || row.name || "-") },
-  { title: "类型", key: "type", width: 120, render: row => h(NTag, { size: "small" }, { default: () => row.type || "COMP_PRICE" }) },
+  { title: "类型", key: "type", width: 120,
+    render: row => h(NTag, { size: "small" }, { default: () => translateStrategyType(row.type) }) },
   {
     title: "状态", key: "enabled", width: 90,
     render: row => h(NTag, { type: row.enabled ? "success" : "default", size: "small", round: true },
@@ -385,7 +451,8 @@ const strategyProductColumns: DataTableColumns<any> = [
 
 const platformColumns: DataTableColumns<any> = [
   { title: "活动名称", key: "title", render: row => h("span", { style: "font-weight:500" }, row.title) },
-  { title: "类型", key: "action_type", width: 100, render: row => h(NTag, { size: "small" }, { default: () => row.action_type || "-" }) },
+  { title: "类型", key: "action_type", width: 120,
+    render: row => h(NTag, { size: "small" }, { default: () => translateActionType(row.action_type) }) },
   {
     title: "时间", key: "date_start", width: 200,
     render: row => h("div", { style: "font-size:12px;" }, [
@@ -415,29 +482,31 @@ const platformColumns: DataTableColumns<any> = [
 const platformProductColumns: DataTableColumns<any> = [
   { type: "selection" },
   { title: "商品ID", key: "id" },
+  { title: "名称", key: "name", ellipsis: { tooltip: true } },
   { title: "原价", key: "price", render: row => formatPrice(row.price) },
   { title: "活动价", key: "action_price", render: row => formatPrice(row.action_price) },
   { title: "最高活动价", key: "max_action_price", render: row => formatPrice(row.max_action_price) },
   { title: "库存", key: "stock" },
   { title: "最低库存", key: "min_stock" },
   {
-    title: "状态", key: "add_mode",
+    title: "添加方式", key: "add_mode",
     render: row => h(NTag, {
       size: "small",
       type: row.add_mode === "AUTO" ? "success" : row.add_mode === "MANUAL" ? "warning" : "default",
-    }, { default: () => row.add_mode || "NOT_SET" }),
+    }, { default: () => translateAddMode(row.add_mode) }),
   },
 ];
 
 const sellerColumns: DataTableColumns<any> = [
   { title: "活动标题", key: "title", render: row => h("span", { style: "font-weight:500" }, row.action_parameters?.title || "-") },
-  { title: "类型", key: "type", width: 100, render: row => h(NTag, { size: "small" }, { default: () => row.action_parameters?.type || "-" }) },
+  { title: "类型", key: "type", width: 120,
+    render: row => h(NTag, { size: "small" }, { default: () => translateSellerActionType(row.action_parameters?.type) }) },
   {
     title: "状态", key: "status", width: 90,
     render: row => h(NTag, {
-      type: row.action_parameters?.status === "ACTIVE" ? "success" : "default",
+      type: row.action_parameters?.status === "ACTIVE" ? "success" : row.action_parameters?.status === "ENDED" ? "error" : row.action_parameters?.status === "PAUSED" ? "warning" : "default",
       size: "small", round: true,
-    }, { default: () => row.action_parameters?.status || "-" }),
+    }, { default: () => translateActionStatus(row.action_parameters?.status) }),
   },
   {
     title: "时间", key: "date_start", width: 200,
@@ -489,7 +558,7 @@ async function loadStrategies() {
   loading.value = true;
   try {
     const data = await apiGet("/intelligence/pricing/strategies", { store_id: selectedStoreId.value });
-    strategies.value = Array.isArray(data) ? data : data.result || [];
+    strategies.value = Array.isArray(data) ? data : data.strategies || data.result || [];
     strategyCount.value = strategies.value.filter((s: any) => s.enabled).length;
   } catch (e: any) {
     message.error("加载定价策略失败: " + e.message);
@@ -634,7 +703,7 @@ async function submitCreateStrategy() {
   submitting.value = true;
   try {
     await apiPost("/intelligence/pricing/strategies?store_id=" + selectedStoreId.value, {
-      name: newStrategy.value.name,
+      strategy_name: newStrategy.value.name,
     });
     message.success("创建成功");
     showCreateStrategy.value = false;
@@ -660,7 +729,7 @@ async function submitAddStrategyProducts() {
   try {
     await apiPost("/intelligence/pricing/products/add?store_id=" + selectedStoreId.value, {
       strategy_id: sid,
-      product_ids: ids,
+      product_id: ids,
     });
     message.success("已添加 " + ids.length + " 个商品");
     showAddStrategyProducts.value = false;

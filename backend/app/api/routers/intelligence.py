@@ -129,12 +129,25 @@ def list_pricing_competitors(
 @router.get("/pricing/products")
 def list_pricing_strategy_products(
     store_id: int = Query(...),
-    strategy_id: str = Query(...),
+    strategy_id: str = Query(""),
     db: Session = Depends(get_db),
 ) -> Any:
-    """获取策略关联商品"""
+    """获取策略关联商品. 不传 strategy_id 则返回所有策略的商品."""
     client = _get_client(store_id, db)
-    return _call(client.get_pricing_strategy_products, strategy_id)
+    if strategy_id:
+        return _call(client.get_pricing_strategy_products, strategy_id)
+    # No strategy_id: aggregate products from all strategies
+    strategies_data = _call(client.get_pricing_strategies)
+    all_products: list[dict] = []
+    for s in (strategies_data.get("strategies", []) if isinstance(strategies_data, dict) else []):
+        sid = s.get("id", "")
+        if sid:
+            products = _call(client.get_pricing_strategy_products, sid)
+            if isinstance(products, list):
+                for p in products:
+                    p["strategy_name"] = s.get("name", "")
+                all_products.extend(products)
+    return all_products
 
 
 @router.post("/pricing/products/add")

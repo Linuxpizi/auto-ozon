@@ -772,16 +772,17 @@ class OzonClient:
     # Intelligence: Pricing Strategy
     # ------------------------------------------------------------------
 
-    def get_pricing_strategies(self, page: int = 1, limit: int = 50) -> dict:
+    def get_pricing_strategies(self, page: int = 1, limit: int = 40) -> dict:
         """Get all pricing strategies.
 
         POST /v1/pricing-strategy/list
+        Ozon returns {"strategies": [...], "total": N} directly.
         """
         data = self._request(
             "POST", "/v1/pricing-strategy/list",
             json_body={"page": page, "limit": limit},
         )
-        return data.get("result", {})
+        return data
 
     def get_pricing_strategy_info(self, strategy_id: str) -> dict:
         """Get pricing strategy details including competitors.
@@ -846,27 +847,34 @@ class OzonClient:
         )
         return data
 
-    def get_pricing_competitors(self, page: int = 1, limit: int = 50) -> dict:
+    def get_pricing_competitors(self, page: int = 1, limit: int = 30) -> dict:
         """Get available competitors list.
 
         POST /v1/pricing-strategy/competitors/list
+        Ozon returns {"competitor": [...], "total": N} directly.
         """
         data = self._request(
             "POST", "/v1/pricing-strategy/competitors/list",
             json_body={"page": page, "limit": limit},
         )
-        return data.get("result", {})
+        return data
 
-    def get_pricing_strategy_products(self, strategy_id: str) -> dict:
+    def get_pricing_strategy_products(self, strategy_id: str) -> list[dict]:
         """Get products bound to a pricing strategy.
 
         POST /v1/pricing-strategy/products/list
+        Ozon returns {"product_id": [...]} directly.
         """
         data = self._request(
             "POST", "/v1/pricing-strategy/products/list",
             json_body={"strategy_id": strategy_id},
         )
-        return data.get("result", {})
+        # Ozon returns product IDs as a flat list, not product objects
+        product_ids = data.get("product_id", data.get("result", {}).get("product_id", []))
+        if isinstance(product_ids, list):
+            # Convert to list of dicts with product_id for frontend consistency
+            return [{"product_id": pid} for pid in product_ids]
+        return []
 
     def add_products_to_pricing_strategy(self, strategy_id: str, product_ids: list[str]) -> dict:
         """Bind products to a pricing strategy.
@@ -979,9 +987,13 @@ class OzonClient:
         """Get seller-created promotions.
 
         POST /v1/seller-actions/list
+        Ozon returns {"actions": [...], "total": N} directly.
         """
-        data = self._request("POST", "/v1/seller-actions/list", json_body={})
-        return data.get("result", {})
+        data = self._request(
+            "POST", "/v1/seller-actions/list",
+            json_body={"limit": 100, "offset": 0},
+        )
+        return data
 
     def create_seller_action(self, action_params: dict) -> dict:
         """Create a seller promotion.

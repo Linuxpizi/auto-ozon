@@ -124,7 +124,7 @@ declare global {
   export type { Component, Slot, Slots, ComponentPublicInstance, ComputedRef, DirectiveBinding, ExtractDefaultPropTypes, ExtractPropTypes, ExtractPublicPropTypes, InjectionKey, PropType, Ref, ShallowRef, MaybeRef, MaybeRefOrGetter, VNode, WritableComputedRef } from 'vue'
   import('vue')
   // @ts-ignore
-  export type { Platform, ScrapedProduct, ProductAttribute, StoredProduct, PluginSettings } from 'D:/job/auto-ozon/browser-extension/src/utils/types'
+  export type { Platform, ScrapedProduct, ProductAttribute, StoredProduct, PluginSettings, ListScrapingConfig, ListProductSummary } from 'D:/job/auto-ozon/browser-extension/src/utils/types'
   import('D:/job/auto-ozon/browser-extension/src/utils/types')
 }
 // for vue template auto import

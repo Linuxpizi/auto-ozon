@@ -9,6 +9,7 @@ import TaskConfigView from "../views/TaskConfigView.vue";
 import ProductManagementView from "../views/ProductManagementView.vue";
 import PrecisionListingView from "../views/PrecisionListingView.vue";
 import IntelligenceView from "../views/IntelligenceView.vue";
+import ProductSelectionView from "../views/ProductSelectionView.vue";
 
 const routes = [
   { path: "/", name: "Dashboard", component: DashboardView },
@@ -18,6 +19,7 @@ const routes = [
   { path: "/products", name: "ProductManagement", component: ProductManagementView },
   { path: "/precision-listing", name: "PrecisionListing", component: PrecisionListingView },
   { path: "/intelligence", name: "Intelligence", component: IntelligenceView },
+  { path: "/selection", name: "ProductSelection", component: ProductSelectionView },
   { path: "/task-configs", name: "TaskConfig", component: TaskConfigView },
   { path: "/:pathMatch(.*)*", name: "NotFound", component: NotFoundView },
 ];

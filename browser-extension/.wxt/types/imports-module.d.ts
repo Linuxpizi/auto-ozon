@@ -21,5 +21,5 @@ declare module '#imports' {
   export { syncProducts, fetchSyncedProducts, checkBackendHealth } from '../src/utils/api';
   export { generateShortId } from '../src/utils/crypto';
   export { getSettings, saveSettings, getProducts, addProduct, addProducts, removeProduct, clearProducts, markSynced, getUnsyncedCount } from '../src/utils/storage';
-  export { DEFAULT_SETTINGS, Platform, ScrapedProduct, ProductAttribute, StoredProduct, PluginSettings } from '../src/utils/types';
+  export { DEFAULT_SETTINGS, Platform, ScrapedProduct, ProductAttribute, StoredProduct, PluginSettings, ListScrapingConfig, ListProductSummary } from '../src/utils/types';
 }

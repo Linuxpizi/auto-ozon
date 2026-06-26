@@ -1,4 +1,4 @@
-import type { ScrapedProduct, PluginSettings } from './types'
+import type { ScrapedProduct } from './types'
 import { getSettings } from './storage'
 
 /** 获取后端 API 基础地址 */
@@ -19,14 +19,30 @@ export async function syncProducts(products: ScrapedProduct[]): Promise<{ create
   return resp.json()
 }
 
-/** 获取后端已同步的采集商品列表 */
-export async function fetchSyncedProducts(platform?: string, limit = 50) {
+/** 从后端获取采集商品列表 */
+export async function fetchBackendProducts(
+  platform?: string,
+  limit = 50,
+): Promise<{ products: ScrapedProduct[]; total: number }> {
   const baseUrl = await getBaseUrl()
   const params = new URLSearchParams({ limit: String(limit) })
   if (platform) params.set('platform', platform)
   const resp = await fetch(`${baseUrl}/api/browser-sync/products?${params}`)
   if (!resp.ok) throw new Error(`获取失败: ${resp.status}`)
-  return resp.json()
+  const products = await resp.json()
+  // 同时获取总数
+  const countResp = await fetch(`${baseUrl}/api/browser-sync/products/count${platform ? `?platform=${platform}` : ''}`)
+  const countData = countResp.ok ? await countResp.json() : { total: products.length }
+  return { products, total: countData.total }
+}
+
+/** 从后端删除采集商品 */
+export async function deleteBackendProduct(recordId: number): Promise<void> {
+  const baseUrl = await getBaseUrl()
+  const resp = await fetch(`${baseUrl}/api/browser-sync/products/${recordId}`, {
+    method: 'DELETE',
+  })
+  if (!resp.ok) throw new Error(`删除失败: ${resp.status}`)
 }
 
 /** 检测后端连接状态 */

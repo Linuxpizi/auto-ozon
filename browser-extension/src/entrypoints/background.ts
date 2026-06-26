@@ -1,41 +1,19 @@
-import type { StoredProduct, ScrapedProduct } from '@/utils/types'
-import { getSettings, getProducts, addProduct, markSynced } from '@/utils/storage'
-import { syncProducts, checkBackendHealth } from '@/utils/api'
+import type { ScrapedProduct } from '@/utils/types'
+import { getSettings } from '@/utils/storage'
+import { syncProducts, fetchBackendProducts, deleteBackendProduct, checkBackendHealth } from '@/utils/api'
 
-/** 生成唯一 ID */
-function generateId(): string {
-  return Date.now().toString(36) + Math.random().toString(36).slice(2, 8)
-}
-
-/** 更新 badge 显示未同步数量 */
+/** 更新 badge 显示后端未匹配数量 */
 async function updateBadge() {
-  const products = await getProducts()
-  const unsynced = products.filter((p) => !p.synced).length
-  const text = unsynced > 0 ? String(unsynced > 99 ? '99+' : unsynced) : ''
-  const color = unsynced > 0 ? '#ff6600' : '#9ba3b5'
-  await browser.action.setBadgeText({ text })
-  await browser.action.setBadgeBackgroundColor({ color })
-}
-
-/** 自动同步到后端 */
-async function autoSync() {
-  const products = await getProducts()
-  const unsynced = products.filter((p) => !p.synced)
-  if (unsynced.length === 0) return
-
-  const healthy = await checkBackendHealth()
-  if (!healthy) return
-
   try {
-    const syncData: ScrapedProduct[] = unsynced.map(({ id: _id, synced: _s, ...rest }) => rest)
-    const result = await syncProducts(syncData)
-    if (result.created > 0) {
-      const syncedIds = unsynced.slice(0, result.created).map((p) => p.id)
-      await markSynced(syncedIds)
-      await updateBadge()
-    }
-  } catch (e) {
-    console.error('[Auto-Ozon] 自动同步失败:', e)
+    const resp = await fetchBackendProducts(undefined, 1)
+    // badge 只在有数据时显示总数
+    const total = resp.total || 0
+    const text = total > 0 ? String(total > 99 ? '99+' : total) : ''
+    await browser.action.setBadgeText({ text })
+    await browser.action.setBadgeBackgroundColor({ color: '#ff6600' })
+  } catch {
+    // 后端不可用时清除 badge
+    await browser.action.setBadgeText({ text: '' })
   }
 }
 
@@ -47,15 +25,23 @@ export default defineBackground(() => {
 
   // 监听来自 content script 和 popup 的消息
   browser.runtime.onMessage.addListener((message, sender, sendResponse) => {
-    // Content script 上报采集数据
+    // Content script 上报采集数据 → 直接保存到后端
     if (message.action === 'productScraped') {
-      handleProductScraped(message.data, sender.tab?.id).then((result) => {
+      handleProductScraped(message.data).then((result) => {
         sendResponse(result)
       })
-      return true // 异步响应
+      return true
     }
 
-    // Popup 请求触发采集
+    // Content script 增量批量上报 → 保存到后端
+    if (message.action === 'batchSyncProducts') {
+      handleBatchSync(message.products).then((result) => {
+        sendResponse(result)
+      })
+      return true
+    }
+
+    // Popup 请求触发单个商品采集
     if (message.action === 'triggerScrape') {
       triggerScrapeInTab(message.tabId).then((result) => {
         sendResponse(result)
@@ -63,29 +49,45 @@ export default defineBackground(() => {
       return true
     }
 
-    // 获取存储的产品列表
-    if (message.action === 'getProducts') {
-      getProducts().then((products) => {
-        sendResponse({ products })
-      })
-      return true
-    }
-
-    // 删除产品
-    if (message.action === 'deleteProduct') {
-      import('@/utils/storage').then(({ removeProduct }) => {
-        removeProduct(message.id).then(() => {
-          updateBadge()
-          sendResponse({ success: true })
-        })
-      })
-      return true
-    }
-
-    // 同步到后端
-    if (message.action === 'syncToBackend') {
-      syncToBackend().then((result) => {
+    // Popup 请求触发列表页滚动采集
+    if (message.action === 'triggerListScrape') {
+      triggerListScrapeInTab(message.tabId, message.maxItems, message.scrollDelay, message.batchSize).then((result) => {
         sendResponse(result)
+      })
+      return true
+    }
+
+    // 停止采集 → 转发到 content script
+    if (message.action === 'stopScraping') {
+      stopScrapingInTab().then((result) => {
+        sendResponse(result)
+      })
+      return true
+    }
+
+    // Content script 报告列表采集进度 → 转发给 popup
+    if (message.action === 'scrapingProgress') {
+      return false // 不拦截,让 popup 的 listener 接收
+    }
+
+    // Content script 报告列表采集进度 (旧兼容)
+    if (message.action === 'listProgress') {
+      return false
+    }
+
+    // 从后端获取产品列表
+    if (message.action === 'getProducts') {
+      fetchBackendProducts(message.platform, message.limit).then((resp) => {
+        sendResponse(resp)
+      })
+      return true
+    }
+
+    // 从后端删除产品
+    if (message.action === 'deleteProduct') {
+      deleteBackendProduct(message.id).then(() => {
+        updateBadge()
+        sendResponse({ success: true })
       })
       return true
     }
@@ -96,6 +98,11 @@ export default defineBackground(() => {
         sendResponse(result)
       })
       return true
+    }
+
+    // 进度转发
+    if (message.action === 'enrichProgress') {
+      return false
     }
   })
 
@@ -123,20 +130,19 @@ export default defineBackground(() => {
   })
 })
 
-async function handleProductScraped(product: ScrapedProduct, tabId?: number) {
-  const stored: StoredProduct = {
-    ...product,
-    id: generateId(),
-    synced: false,
-  }
-
-  const added = await addProduct(stored)
-  if (added) {
+async function handleProductScraped(product: ScrapedProduct) {
+  try {
+    const healthy = await checkBackendHealth()
+    if (!healthy) {
+      return { success: false, error: '后端不可用,请检查 backend 是否运行' }
+    }
+    const result = await syncProducts([product])
     await updateBadge()
-    // 后台自动同步
-    autoSync()
+    return { success: true, created: result.created, skipped: result.skipped }
+  } catch (e) {
+    console.error('[Auto-Ozon] 直接保存到后端失败:', e)
+    return { success: false, error: String(e) }
   }
-  return { success: true, added, id: stored.id }
 }
 
 async function triggerScrapeInTab(tabId: number) {
@@ -145,31 +151,68 @@ async function triggerScrapeInTab(tabId: number) {
     const targetId = tabId || tab?.id
     if (!targetId) return { success: false, error: '无活动标签页' }
 
-    const results = await browser.tabs.sendMessage(targetId, { action: 'scrape' })
-    return results
-  } catch (e) {
-    return { success: false, error: String(e) }
-  }
-}
+    const resp = await browser.tabs.sendMessage(targetId, { action: 'scrape' })
 
-async function syncToBackend() {
-  const products = await getProducts()
-  const unsynced = products.filter((p) => !p.synced)
-  if (unsynced.length === 0) return { success: true, created: 0, skipped: 0 }
-
-  try {
-    const syncData: ScrapedProduct[] = unsynced.map(({ id: _id, synced: _s, ...rest }) => rest)
-    const result = await syncProducts(syncData)
-    if (result.created > 0) {
-      const syncedIds = unsynced.slice(0, result.created).map((p) => p.id)
-      await markSynced(syncedIds)
-      await updateBadge()
+    // ★ 关键修复:采集到数据后立即保存到后端
+    if (resp?.success && resp.data) {
+      const saved = await handleProductScraped(resp.data)
+      return { ...resp, ...saved }
     }
-    return { success: true, ...result }
+
+    return resp || { success: false, error: '采集失败' }
   } catch (e) {
     return { success: false, error: String(e) }
   }
 }
+
+async function handleBatchSync(products: ScrapedProduct[]) {
+  try {
+    const healthy = await checkBackendHealth()
+    if (!healthy) {
+      return { success: false, error: '后端不可用,请检查 backend 是否运行' }
+    }
+    const result = await syncProducts(products)
+    await updateBadge()
+    return { success: true, created: result.created, skipped: result.skipped }
+  } catch (e) {
+    console.error('[Auto-Ozon] 批量同步到后端失败:', e)
+    return { success: false, error: String(e) }
+  }
+}
+
+async function stopScrapingInTab() {
+  try {
+    const tabs = await browser.tabs.query({ active: true, currentWindow: true })
+    const tab = tabs[0]
+    if (!tab?.id) return { success: false, error: '无活动标签页' }
+    await browser.tabs.sendMessage(tab.id, { action: 'stopScraping' })
+    return { success: true }
+  } catch (e) {
+    return { success: false, error: String(e) }
+  }
+}
+
+async function triggerListScrapeInTab(tabId?: number, maxItems = 50, scrollDelay = 1500, batchSize = 10) {
+  try {
+    const [tab] = await browser.tabs.query({ active: true, currentWindow: true })
+    const targetId = tabId || tab?.id
+    if (!targetId) return { success: false, error: '无活动标签页' }
+
+    // content script 内部会增量批量上报,background 不再做最终批量保存
+    const resp = await browser.tabs.sendMessage(targetId, {
+      action: 'scrapeList',
+      maxItems,
+      scrollDelay,
+      batchSize,
+    })
+
+    return resp || { success: false, error: '采集失败' }
+  } catch (e) {
+    return { success: false, error: String(e) }
+  }
+}
+
+
 
 async function checkCurrentPage() {
   try {
@@ -182,13 +225,31 @@ async function checkCurrentPage() {
 
     if (!isOzon && !isWB) return { isSupported: false }
 
-    const isProductPage = /\/\d+\/?$/.test(url)
-    return {
-      isSupported: true,
-      platform: isOzon ? 'ozon' : 'wb',
-      isProductPage,
-      tabId: tab.id,
-      url,
+    // 先发消息让 content script 检测页面类型
+    try {
+      const pageCheck = await browser.tabs.sendMessage(tab.id!, { action: 'checkPage' })
+      return {
+        isSupported: true,
+        platform: pageCheck.platform || (isOzon ? 'ozon' : 'wb'),
+        isProductPage: pageCheck.isProductPage ?? /\/\d+\/?$/.test(url),
+        isListPage: pageCheck.isListPage ?? false,
+        pageType: pageCheck.pageType || 'unknown',
+        tabId: tab.id,
+        url,
+      }
+    } catch {
+      // content script 未加载,用 URL 猜测
+      const isProductPage = /\/\d+\/?$/.test(url)
+      const isListPage = /\/(category|brand|search|seller|collection)\//i.test(url)
+      return {
+        isSupported: true,
+        platform: isOzon ? 'ozon' : 'wb',
+        isProductPage,
+        isListPage,
+        pageType: isProductPage ? 'product' : isListPage ? 'list' : 'unknown',
+        tabId: tab.id,
+        url,
+      }
     }
   } catch {
     return { isSupported: false }

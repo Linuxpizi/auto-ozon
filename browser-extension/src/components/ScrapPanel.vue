@@ -1,36 +1,42 @@
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, computed, watch } from 'vue'
+import type { PlatformScrapingConfig, PluginSettings } from '@/utils/types'
+import { getSettings, saveSettings } from '@/utils/storage'
 
 const emit = defineEmits<{ refresh: [] }>()
 
+// --- Page info ---
 interface PageInfo {
   isSupported: boolean
   platform?: 'ozon' | 'wb'
   isProductPage?: boolean
+  isListPage?: boolean
+  pageType?: string
   tabId?: number
   url?: string
 }
 
-interface ScrapResult {
-  success: boolean
-  data?: {
-    title: string
-    price: number
-    oldPrice: number
-    rating: number
-    reviewCount: number
-    brand: string
-    images: string[]
-    sourceId: string
-  }
-  added?: boolean
-}
-
 const pageInfo = ref<PageInfo>({ isSupported: false })
-const loading = ref(false)
+
+// --- State ---
 const scraping = ref(false)
-const result = ref<ScrapResult | null>(null)
+const stopping = ref(false)
 const errorMsg = ref('')
+const settingsOpen = ref(false)
+
+// Batch progress
+const progress = ref({ scraped: 0, enriched: 0, synced: 0, total: 0, phase: '' as string })
+
+// Result
+const result = ref<{ success: boolean; created?: number; skipped?: number; count?: number; data?: any } | null>(null)
+
+// Settings
+const settings = ref<PluginSettings | null>(null)
+const platformConfig = ref<PlatformScrapingConfig | null>(null)
+
+const currentPlatform = computed(() => pageInfo.value.platform || 'ozon')
+
+const canScrape = computed(() => pageInfo.value.isProductPage || pageInfo.value.isListPage)
 
 async function checkPage() {
   try {
@@ -41,33 +47,92 @@ async function checkPage() {
   }
 }
 
+async function loadSettings() {
+  const s = await getSettings()
+  settings.value = s
+  platformConfig.value = { ...(s[currentPlatform.value] || s.ozon) }
+}
+
+watch(() => pageInfo.value.platform, () => {
+  if (pageInfo.value.platform) loadSettings()
+})
+
+async function savePlatformConfig() {
+  if (!settings.value || !platformConfig.value) return
+  settings.value[currentPlatform.value] = { ...platformConfig.value }
+  await saveSettings(settings.value)
+}
+
+// --- Scraping ---
 async function doScrape() {
   scraping.value = true
+  stopping.value = false
   errorMsg.value = ''
   result.value = null
+  progress.value = { scraped: 0, enriched: 0, synced: 0, total: 0, phase: '' }
+
   try {
-    const resp = await browser.runtime.sendMessage({
-      action: 'triggerScrape',
-      tabId: pageInfo.value.tabId,
-    })
-    if (resp?.success) {
-      result.value = resp
-      emit('refresh')
+    if (pageInfo.value.isListPage) {
+      const cfg = platformConfig.value
+      const progressListener = (msg: any) => {
+        if (msg.action === 'scrapingProgress') {
+          progress.value = msg.progress
+        }
+      }
+      browser.runtime.onMessage.addListener(progressListener)
+
+      try {
+        const resp = await browser.runtime.sendMessage({
+          action: 'triggerListScrape',
+          tabId: pageInfo.value.tabId,
+          maxItems: cfg?.maxItems || 50,
+          scrollDelay: cfg?.scrollDelay || 1500,
+          batchSize: cfg?.batchSize || 10,
+        })
+        if (resp?.success) {
+          result.value = { success: true, count: resp.count, created: resp.created, skipped: resp.skipped }
+          emit('refresh')
+        } else {
+          errorMsg.value = resp?.error || '采集失败'
+        }
+      } finally {
+        browser.runtime.onMessage.removeListener(progressListener)
+      }
     } else {
-      errorMsg.value = resp?.error || '采集失败'
+      const resp = await browser.runtime.sendMessage({
+        action: 'triggerScrape',
+        tabId: pageInfo.value.tabId,
+      })
+      if (resp?.success) {
+        result.value = resp
+        emit('refresh')
+      } else {
+        errorMsg.value = resp?.error || '采集失败'
+      }
     }
   } catch (e) {
     errorMsg.value = String(e)
   } finally {
     scraping.value = false
+    stopping.value = false
   }
 }
 
-onMounted(checkPage)
+async function doStop() {
+  stopping.value = true
+  try {
+    await browser.runtime.sendMessage({ action: 'stopScraping' })
+  } catch {}
+}
+
+onMounted(async () => {
+  await checkPage()
+  await loadSettings()
+})
 </script>
 
 <template>
-  <div class="p-4 space-y-4 animate-fade-in">
+  <div class="p-4 space-y-3 animate-fade-in">
     <!-- Unsupported page -->
     <div v-if="!pageInfo.isSupported" class="text-center py-10">
       <div class="w-16 h-16 mx-auto mb-4 rounded-2xl bg-surface-100 flex items-center justify-center">
@@ -76,13 +141,12 @@ onMounted(checkPage)
         </svg>
       </div>
       <p class="text-surface-500 text-sm font-medium">当前页面不支持采集</p>
-      <p class="text-surface-400 text-xs mt-1.5">请打开 Ozon 或 Wildberries 商品页面</p>
+      <p class="text-surface-400 text-xs mt-1.5">请打开 Ozon 商品页或分类列表页</p>
     </div>
 
-    <!-- Supported page -->
     <template v-else>
-      <!-- Page info card -->
-      <div class="card p-4">
+      <!-- Platform info card -->
+      <div class="card p-3">
         <div class="flex items-center gap-3">
           <div
             class="w-10 h-10 rounded-xl flex items-center justify-center text-white font-bold text-sm"
@@ -95,52 +159,202 @@ onMounted(checkPage)
               <span class="text-sm font-semibold text-surface-800">
                 {{ pageInfo.platform === 'ozon' ? 'Ozon' : 'Wildberries' }}
               </span>
-              <span
-                v-if="pageInfo.isProductPage"
-                class="badge-success"
-              >
-                商品页
-              </span>
-              <span v-else class="badge-warning">非商品页</span>
+              <span v-if="pageInfo.isProductPage" class="badge-success">商品页</span>
+              <span v-else-if="pageInfo.isListPage" class="badge-info">列表页</span>
+              <span v-else class="badge-warning">未知页面</span>
             </div>
-            <p class="text-xs text-surface-400 mt-0.5 truncate">
-              {{ pageInfo.url }}
-            </p>
+            <p class="text-xs text-surface-400 mt-0.5 truncate">{{ pageInfo.url }}</p>
           </div>
         </div>
       </div>
 
-      <!-- Scrape button -->
-      <button
-        @click="doScrape"
-        :disabled="!pageInfo.isProductPage || scraping"
-        class="w-full group relative overflow-hidden rounded-2xl py-3.5 font-semibold text-sm transition-all duration-300"
-        :class="[
-          pageInfo.isProductPage && !scraping
-            ? 'bg-gradient-to-r from-ozon-500 via-ozon-600 to-brand-500 text-white shadow-lg hover:shadow-xl hover:scale-[1.01] active:scale-[0.99]'
-            : 'bg-surface-100 text-surface-400 cursor-not-allowed',
-        ]"
-      >
-        <span v-if="scraping" class="flex items-center justify-center gap-2">
-          <svg class="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24">
-            <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4" />
-            <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+      <!-- Per-platform settings (collapsible, for list pages) -->
+      <div v-if="pageInfo.isListPage && platformConfig" class="card overflow-hidden">
+        <button
+          @click="settingsOpen = !settingsOpen"
+          class="w-full flex items-center justify-between px-3 py-2.5 text-xs font-medium text-surface-600 hover:bg-surface-50 transition-colors"
+        >
+          <span class="flex items-center gap-1.5">
+            <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M10.5 6h9.75M10.5 6a1.5 1.5 0 11-3 0m3 0a1.5 1.5 0 10-3 0M3.75 6H7.5m3 12h9.75m-9.75 0a1.5 1.5 0 01-3 0m3 0a1.5 1.5 0 00-3 0m-3.75 0H7.5m9-6h3.75m-3.75 0a1.5 1.5 0 01-3 0m3 0a1.5 1.5 0 00-3 0m-9.75 0h9.75" />
+            </svg>
+            采集条件设置
+          </span>
+          <svg class="w-4 h-4 transition-transform" :class="{ 'rotate-180': settingsOpen }" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M19.5 8.25l-7.5 7.5-7.5-7.5" />
           </svg>
-          采集中...
+        </button>
+        <Transition name="settings">
+          <div v-if="settingsOpen" class="px-3 pb-3 space-y-2.5 border-t border-surface-100">
+            <!-- Max items -->
+            <div class="pt-2.5">
+              <label class="text-[11px] text-surface-500 mb-1 block">最大采集数量</label>
+              <input
+                v-model.number="platformConfig.maxItems"
+                type="number" min="1" max="500"
+                class="w-full text-xs px-2.5 py-1.5 rounded-lg border border-surface-200 bg-white focus:border-ozon-400 focus:ring-1 focus:ring-ozon-200 outline-none"
+                @change="savePlatformConfig"
+              />
+            </div>
+            <!-- Batch size -->
+            <div>
+              <label class="text-[11px] text-surface-500 mb-1 block">每批上报数量</label>
+              <input
+                v-model.number="platformConfig.batchSize"
+                type="number" min="1" max="50"
+                class="w-full text-xs px-2.5 py-1.5 rounded-lg border border-surface-200 bg-white focus:border-ozon-400 focus:ring-1 focus:ring-ozon-200 outline-none"
+                @change="savePlatformConfig"
+              />
+            </div>
+            <!-- Scroll delay -->
+            <div>
+              <label class="text-[11px] text-surface-500 mb-1 block">滚动间隔 (ms)</label>
+              <input
+                v-model.number="platformConfig.scrollDelay"
+                type="number" min="500" max="5000" step="100"
+                class="w-full text-xs px-2.5 py-1.5 rounded-lg border border-surface-200 bg-white focus:border-ozon-400 focus:ring-1 focus:ring-ozon-200 outline-none"
+                @change="savePlatformConfig"
+              />
+            </div>
+            <!-- Price range -->
+            <div class="grid grid-cols-2 gap-2">
+              <div>
+                <label class="text-[11px] text-surface-500 mb-1 block">最低价格 (₽)</label>
+                <input v-model.number="platformConfig.priceMin" type="number" min="0"
+                  class="w-full text-xs px-2.5 py-1.5 rounded-lg border border-surface-200 bg-white focus:border-ozon-400 focus:ring-1 focus:ring-ozon-200 outline-none"
+                  @change="savePlatformConfig" />
+              </div>
+              <div>
+                <label class="text-[11px] text-surface-500 mb-1 block">最高价格 (₽)</label>
+                <input v-model.number="platformConfig.priceMax" type="number" min="0"
+                  class="w-full text-xs px-2.5 py-1.5 rounded-lg border border-surface-200 bg-white focus:border-ozon-400 focus:ring-1 focus:ring-ozon-200 outline-none"
+                  @change="savePlatformConfig" />
+              </div>
+            </div>
+            <!-- Rating & Reviews -->
+            <div class="grid grid-cols-2 gap-2">
+              <div>
+                <label class="text-[11px] text-surface-500 mb-1 block">最低评分</label>
+                <input v-model.number="platformConfig.minRating" type="number" min="0" max="5" step="0.1"
+                  class="w-full text-xs px-2.5 py-1.5 rounded-lg border border-surface-200 bg-white focus:border-ozon-400 focus:ring-1 focus:ring-ozon-200 outline-none"
+                  @change="savePlatformConfig" />
+              </div>
+              <div>
+                <label class="text-[11px] text-surface-500 mb-1 block">最低评价数</label>
+                <input v-model.number="platformConfig.minReviews" type="number" min="0"
+                  class="w-full text-xs px-2.5 py-1.5 rounded-lg border border-surface-200 bg-white focus:border-ozon-400 focus:ring-1 focus:ring-ozon-200 outline-none"
+                  @change="savePlatformConfig" />
+              </div>
+            </div>
+            <!-- Brand whitelist -->
+            <div>
+              <label class="text-[11px] text-surface-500 mb-1 block">品牌白名单 (逗号分隔,空=不限)</label>
+              <input
+                :value="platformConfig.brandWhitelist.join(', ')"
+                @change="platformConfig.brandWhitelist = ($event.target as HTMLInputElement).value.split(',').map(s => s.trim()).filter(Boolean); savePlatformConfig()"
+                type="text" placeholder="AI 技术提供商, Samsung"
+                class="w-full text-xs px-2.5 py-1.5 rounded-lg border border-surface-200 bg-white focus:border-ozon-400 focus:ring-1 focus:ring-ozon-200 outline-none" />
+            </div>
+            <!-- Brand blacklist -->
+            <div>
+              <label class="text-[11px] text-surface-500 mb-1 block">品牌黑名单 (逗号分隔)</label>
+              <input
+                :value="platformConfig.brandBlacklist.join(', ')"
+                @change="platformConfig.brandBlacklist = ($event.target as HTMLInputElement).value.split(',').map(s => s.trim()).filter(Boolean); savePlatformConfig()"
+                type="text" placeholder="BrandX, BrandY"
+                class="w-full text-xs px-2.5 py-1.5 rounded-lg border border-surface-200 bg-white focus:border-ozon-400 focus:ring-1 focus:ring-ozon-200 outline-none" />
+            </div>
+          </div>
+        </Transition>
+      </div>
+
+      <!-- Main action button (not scraping) -->
+      <button
+        v-if="!scraping"
+        @click="doScrape"
+        :disabled="!canScrape"
+        class="w-full group relative overflow-hidden rounded-2xl py-3.5 font-semibold text-sm transition-all duration-300"
+        :class="canScrape
+          ? 'bg-gradient-to-r from-ozon-500 via-ozon-600 to-brand-500 text-white shadow-lg hover:shadow-xl hover:scale-[1.01] active:scale-[0.99]'
+          : 'bg-surface-100 text-surface-400 cursor-not-allowed'"
+      >
+        <span v-if="pageInfo.isListPage" class="flex items-center justify-center gap-2">
+          <svg class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M3.75 12h16.5m-16.5 3.75h16.5M3.75 19.5h16.5M5.625 4.5h12.75a1.875 1.875 0 010 3.75H5.625a1.875 1.875 0 010-3.75z" />
+          </svg>
+          滚动采集全部商品
         </span>
         <span v-else class="flex items-center justify-center gap-2">
           <svg class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-            <path stroke-linecap="round" stroke-linejoin="round" d="M3.75 4.875c0-.621.504-1.125 1.125-1.125h4.5c.621 0 1.125.504 1.125 1.125v4.5c0 .621-.504 1.125-1.125 1.125h-4.5A1.125 1.125 0 013.75 9.375v-4.5zM3.75 14.625c0-.621.504-1.125 1.125-1.125h4.5c.621 0 1.125.504 1.125 1.125v4.5c0 .621-.504 1.125-1.125 1.125h-4.5a1.125 1.125 0 01-1.125-1.125v-4.5zM13.5 4.875c0-.621.504-1.125 1.125-1.125h4.5c.621 0 1.125.504 1.125 1.125v4.5c0 .621-.504 1.125-1.125 1.125h-4.5A1.125 1.125 0 0113.5 9.375v-4.5z" />
-            <path stroke-linecap="round" stroke-linejoin="round" d="M6.75 6.75h.75v.75h-.75v-.75zM6.75 16.5h.75v.75h-.75v-.75zM16.5 6.75h.75v.75h-.75v-.75zM13.5 13.5h.75v.75h-.75v-.75zM13.5 19.5h.75v.75h-.75v-.75zM19.5 13.5h.75v.75h-.75v-.75zM19.5 19.5h.75v.75h-.75v-.75zM16.5 16.5h.75v.75h-.75v-.75z" />
+            <path stroke-linecap="round" stroke-linejoin="round" d="M3.75 4.875c0-.621.504-1.125 1.125-1.125h4.5c.621 0 1.125.504 1.125 1.125v4.5c0 .621-.504 1.125-1.125 1.125h-4.5A1.125 1.125 0 013.75 9.375v-4.5z" />
+            <path stroke-linecap="round" stroke-linejoin="round" d="M6.75 6.75h.75v.75h-.75v-.75zM6.75 16.5h.75v.75h-.75v-.75zM16.5 6.75h.75v.75h-.75v-.75zM13.5 13.5h.75v.75h-.75v-.75z" />
           </svg>
-          一键采集
+          一键采集商品
         </span>
-        <!-- Shimmer effect -->
-        <div
-          v-if="pageInfo.isProductPage && !scraping"
-          class="absolute inset-0 bg-gradient-to-r from-transparent via-white/10 to-transparent -translate-x-full group-hover:translate-x-full transition-transform duration-700"
-        />
+        <div class="absolute inset-0 bg-gradient-to-r from-transparent via-white/10 to-transparent -translate-x-full group-hover:translate-x-full transition-transform duration-700" />
       </button>
+
+      <!-- Scraping in progress: Stop + Progress -->
+      <template v-if="scraping">
+        <button
+          @click="doStop"
+          :disabled="stopping"
+          class="w-full rounded-2xl py-3 font-semibold text-sm transition-all duration-300"
+          :class="stopping ? 'bg-surface-200 text-surface-400 cursor-not-allowed' : 'bg-red-500 text-white hover:bg-red-600 active:scale-[0.98]'"
+        >
+          <span class="flex items-center justify-center gap-2">
+            <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M5.25 7.5A2.25 2.25 0 017.5 5.25h9a2.25 2.25 0 012.25 2.25v9a2.25 2.25 0 01-2.25 2.25h-9a2.25 2.25 0 01-2.25-2.25v-9z" />
+            </svg>
+            {{ stopping ? '正在停止...' : '停止采集' }}
+          </span>
+        </button>
+
+        <!-- Progress card -->
+        <div class="card p-4 space-y-3">
+          <div class="flex items-center gap-2">
+            <svg class="w-4 h-4 text-ozon-500 animate-spin" fill="none" viewBox="0 0 24 24">
+              <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4" />
+              <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+            </svg>
+            <span class="text-xs font-medium text-surface-700">
+              {{ progress.phase === 'enrich' ? '正在补全商品详情...' : progress.phase === 'sync' ? '正在同步到后端...' : '正在滚动采集...' }}
+            </span>
+          </div>
+          <div class="space-y-2">
+            <div v-if="progress.total > 0">
+              <div class="flex justify-between text-[11px] text-surface-500 mb-0.5">
+                <span>采集卡片</span>
+                <span>{{ progress.scraped }} / {{ progress.total }}</span>
+              </div>
+              <div class="h-1.5 bg-surface-100 rounded-full overflow-hidden">
+                <div class="h-full bg-ozon-500 rounded-full transition-all duration-300"
+                  :style="{ width: `${Math.min(100, (progress.scraped / progress.total) * 100)}%` }" />
+              </div>
+            </div>
+            <div v-if="progress.enriched > 0 || progress.phase === 'enrich'">
+              <div class="flex justify-between text-[11px] text-surface-500 mb-0.5">
+                <span>补全详情</span>
+                <span>{{ progress.enriched }} / {{ progress.total }}</span>
+              </div>
+              <div class="h-1.5 bg-surface-100 rounded-full overflow-hidden">
+                <div class="h-full bg-blue-500 rounded-full transition-all duration-300"
+                  :style="{ width: `${Math.min(100, progress.total > 0 ? (progress.enriched / progress.total) * 100 : 0)}%` }" />
+              </div>
+            </div>
+            <div v-if="progress.synced > 0 || progress.phase === 'sync'">
+              <div class="flex justify-between text-[11px] text-surface-500 mb-0.5">
+                <span>已同步后端</span>
+                <span>{{ progress.synced }} / {{ progress.total }}</span>
+              </div>
+              <div class="h-1.5 bg-surface-100 rounded-full overflow-hidden">
+                <div class="h-full bg-emerald-500 rounded-full transition-all duration-300"
+                  :style="{ width: `${Math.min(100, progress.total > 0 ? (progress.synced / progress.total) * 100 : 0)}%` }" />
+              </div>
+            </div>
+          </div>
+        </div>
+      </template>
 
       <!-- Error -->
       <div v-if="errorMsg" class="card p-3 bg-red-50 border-red-100 animate-slide-up">
@@ -152,7 +366,22 @@ onMounted(checkPage)
         </div>
       </div>
 
-      <!-- Success result -->
+      <!-- List result -->
+      <div v-if="result?.success && result.count" class="card p-3 animate-slide-up">
+        <div class="flex items-center gap-2 mb-1">
+          <div class="w-5 h-5 rounded-full bg-emerald-100 flex items-center justify-center">
+            <svg class="w-3 h-3 text-emerald-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="3">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M4.5 12.75l6 6 9-13.5" />
+            </svg>
+          </div>
+          <span class="text-xs font-semibold text-emerald-600">采集完成: {{ result.count }} 个商品</span>
+        </div>
+        <p class="text-xs text-surface-400">
+          已保存 {{ result.created }} 条, 去重跳过 {{ result.skipped }} 条
+        </p>
+      </div>
+
+      <!-- Single product result -->
       <div v-if="result?.success && result.data" class="card overflow-hidden animate-slide-up">
         <div class="p-4">
           <div class="flex items-center gap-2 mb-3">
@@ -161,49 +390,20 @@ onMounted(checkPage)
                 <path stroke-linecap="round" stroke-linejoin="round" d="M4.5 12.75l6 6 9-13.5" />
               </svg>
             </div>
-            <span class="text-xs font-semibold text-emerald-600">
-              {{ result.added ? '采集成功' : '已存在（去重）' }}
-            </span>
+            <span class="text-xs font-semibold text-emerald-600">采集成功</span>
           </div>
-
           <div class="flex gap-3">
-            <!-- Thumbnail -->
             <div v-if="result.data.images?.length" class="w-16 h-16 rounded-xl overflow-hidden bg-surface-100 flex-shrink-0">
-              <img
-                :src="result.data.images[0]"
-                class="w-full h-full object-cover"
-                alt=""
-                @error="($event.target as HTMLImageElement).style.display='none'"
-              />
+              <img :src="result.data.images[0]" class="w-full h-full object-cover" alt="" />
             </div>
             <div class="flex-1 min-w-0">
-              <p class="text-sm font-medium text-surface-800 line-clamp-2 leading-snug">
-                {{ result.data.title }}
-              </p>
+              <p class="text-sm font-medium text-surface-800 line-clamp-2 leading-snug">{{ result.data.title }}</p>
               <div class="flex items-center gap-2 mt-1.5">
                 <span class="text-brand-600 font-bold text-sm">
                   {{ result.data.price ? `₽${result.data.price.toLocaleString()}` : '—' }}
                 </span>
-                <span
-                  v-if="result.data.oldPrice && result.data.oldPrice > result.data.price"
-                  class="text-surface-400 text-xs line-through"
-                >
-                  ₽{{ result.data.oldPrice.toLocaleString() }}
-                </span>
-              </div>
-              <div class="flex items-center gap-2 mt-1">
-                <span v-if="result.data.rating" class="text-xs text-amber-500 flex items-center gap-0.5">
-                  <svg class="w-3 h-3" fill="currentColor" viewBox="0 0 20 20">
-                    <path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.07 3.292a1 1 0 00.95.69h3.462c.969 0 1.371 1.24.588 1.81l-2.8 2.034a1 1 0 00-.364 1.118l1.07 3.292c.3.921-.755 1.688-1.54 1.118l-2.8-2.034a1 1 0 00-1.175 0l-2.8 2.034c-.784.57-1.838-.197-1.539-1.118l1.07-3.292a1 1 0 00-.364-1.118L2.98 8.72c-.783-.57-.38-1.81.588-1.81h3.461a1 1 0 00.951-.69l1.07-3.292z" />
-                  </svg>
-                  {{ result.data.rating }}
-                </span>
-                <span v-if="result.data.reviewCount" class="text-xs text-surface-400">
-                  {{ result.data.reviewCount }} 条评价
-                </span>
-                <span v-if="result.data.brand" class="text-xs text-surface-400">
-                  {{ result.data.brand }}
-                </span>
+                <span v-if="result.data.oldPrice && result.data.oldPrice > result.data.price"
+                  class="text-surface-400 text-xs line-through">₽{{ result.data.oldPrice.toLocaleString() }}</span>
               </div>
             </div>
           </div>
@@ -212,3 +412,21 @@ onMounted(checkPage)
     </template>
   </div>
 </template>
+
+<style scoped>
+.settings-enter-active,
+.settings-leave-active {
+  transition: all 0.2s ease;
+  overflow: hidden;
+}
+.settings-enter-from,
+.settings-leave-to {
+  opacity: 0;
+  max-height: 0;
+}
+.settings-enter-to,
+.settings-leave-from {
+  opacity: 1;
+  max-height: 600px;
+}
+</style>

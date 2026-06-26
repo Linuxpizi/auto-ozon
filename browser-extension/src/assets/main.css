@@ -92,6 +92,10 @@
     @apply badge bg-emerald-50 text-emerald-600;
   }
 
+  .badge-info {
+    @apply badge bg-blue-50 text-blue-600;
+  }
+
   .badge-warning {
     @apply badge bg-amber-50 text-amber-600;
   }

@@ -1,12 +1,16 @@
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue'
-import type { StoredProduct } from '@/utils/types'
+import type { ScrapedProduct } from '@/utils/types'
 
 const emit = defineEmits<{ refresh: [] }>()
 
-const products = ref<StoredProduct[]>([])
+interface BackendProduct extends ScrapedProduct {
+  id: number
+  created_at?: string
+}
+
+const products = ref<BackendProduct[]>([])
 const loading = ref(false)
-const syncing = ref(false)
 const searchQuery = ref('')
 const filterPlatform = ref<'all' | 'ozon' | 'wb'>('all')
 
@@ -27,12 +31,11 @@ const filteredProducts = computed(() => {
   return list
 })
 
-const unsyncedCount = computed(() => products.value.filter((p) => !p.synced).length)
-
 async function loadProducts() {
   loading.value = true
   try {
-    const resp = await browser.runtime.sendMessage({ action: 'getProducts' })
+    const platform = filterPlatform.value === 'all' ? undefined : filterPlatform.value
+    const resp = await browser.runtime.sendMessage({ action: 'getProducts', platform, limit: 200 })
     products.value = resp?.products || []
   } catch {
     products.value = []
@@ -41,21 +44,15 @@ async function loadProducts() {
   }
 }
 
-async function deleteProduct(id: string) {
+async function deleteProduct(id: number) {
   await browser.runtime.sendMessage({ action: 'deleteProduct', id })
   products.value = products.value.filter((p) => p.id !== id)
   emit('refresh')
 }
 
-async function syncAll() {
-  syncing.value = true
-  try {
-    await browser.runtime.sendMessage({ action: 'syncToBackend' })
-    await loadProducts()
-    emit('refresh')
-  } finally {
-    syncing.value = false
-  }
+async function refreshList() {
+  await loadProducts()
+  emit('refresh')
 }
 
 onMounted(loadProducts)
@@ -78,7 +75,7 @@ onMounted(loadProducts)
         />
       </div>
 
-      <!-- Platform filter & sync button -->
+      <!-- Platform filter & refresh button -->
       <div class="flex items-center gap-2">
         <div class="flex bg-surface-50 rounded-lg p-0.5 flex-1">
           <button
@@ -92,18 +89,13 @@ onMounted(loadProducts)
           </button>
         </div>
         <button
-          @click="syncAll"
-          :disabled="syncing || unsyncedCount === 0"
+          @click="refreshList"
           class="btn-primary py-2 px-3 text-xs whitespace-nowrap"
         >
-          <svg v-if="syncing" class="w-3.5 h-3.5 animate-spin" fill="none" viewBox="0 0 24 24">
-            <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4" />
-            <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+          <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0l3.181 3.183a8.25 8.25 0 0013.803-3.7M4.031 9.865a8.25 8.25 0 0113.803-3.7l3.181 3.182" />
           </svg>
-          <svg v-else class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-            <path stroke-linecap="round" stroke-linejoin="round" d="M7.5 21L3 16.5m0 0L7.5 12M3 16.5h13.5m0-13.5L21 7.5m0 0L16.5 12M21 7.5H7.5" />
-          </svg>
-          同步 ({{ unsyncedCount }})
+          刷新
         </button>
       </div>
     </div>
@@ -164,12 +156,6 @@ onMounted(loadProducts)
                 </span>
                 <span class="text-brand-600 text-xs font-bold">
                   {{ product.price ? `₽${product.price.toLocaleString()}` : '—' }}
-                </span>
-                <span
-                  v-if="product.synced"
-                  class="badge-success text-[10px] py-0"
-                >
-                  已同步
                 </span>
               </div>
             </div>

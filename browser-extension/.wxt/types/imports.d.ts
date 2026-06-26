@@ -6,11 +6,8 @@ declare global {
   const EffectScope: typeof import('vue').EffectScope
   const InvalidMatchPattern: typeof import('wxt/utils/match-patterns').InvalidMatchPattern
   const MatchPattern: typeof import('wxt/utils/match-patterns').MatchPattern
-  const addProduct: typeof import('D:/job/auto-ozon/browser-extension/src/utils/storage').addProduct
-  const addProducts: typeof import('D:/job/auto-ozon/browser-extension/src/utils/storage').addProducts
   const browser: typeof import('wxt/browser').browser
   const checkBackendHealth: typeof import('D:/job/auto-ozon/browser-extension/src/utils/api').checkBackendHealth
-  const clearProducts: typeof import('D:/job/auto-ozon/browser-extension/src/utils/storage').clearProducts
   const computed: typeof import('vue').computed
   const createApp: typeof import('vue').createApp
   const createIframeUi: typeof import('wxt/utils/content-script-ui/iframe').createIframeUi
@@ -24,17 +21,16 @@ declare global {
   const defineContentScript: typeof import('wxt/utils/define-content-script').defineContentScript
   const defineUnlistedScript: typeof import('wxt/utils/define-unlisted-script').defineUnlistedScript
   const defineWxtPlugin: typeof import('wxt/utils/define-wxt-plugin').defineWxtPlugin
+  const deleteBackendProduct: typeof import('D:/job/auto-ozon/browser-extension/src/utils/api').deleteBackendProduct
   const effectScope: typeof import('vue').effectScope
   const fakeBrowser: typeof import('wxt/testing').fakeBrowser
-  const fetchSyncedProducts: typeof import('D:/job/auto-ozon/browser-extension/src/utils/api').fetchSyncedProducts
+  const fetchBackendProducts: typeof import('D:/job/auto-ozon/browser-extension/src/utils/api').fetchBackendProducts
   const generateShortId: typeof import('D:/job/auto-ozon/browser-extension/src/utils/crypto').generateShortId
   const getAppConfig: typeof import('wxt/utils/app-config').getAppConfig
   const getCurrentInstance: typeof import('vue').getCurrentInstance
   const getCurrentScope: typeof import('vue').getCurrentScope
   const getCurrentWatcher: typeof import('vue').getCurrentWatcher
-  const getProducts: typeof import('D:/job/auto-ozon/browser-extension/src/utils/storage').getProducts
   const getSettings: typeof import('D:/job/auto-ozon/browser-extension/src/utils/storage').getSettings
-  const getUnsyncedCount: typeof import('D:/job/auto-ozon/browser-extension/src/utils/storage').getUnsyncedCount
   const h: typeof import('vue').h
   const inject: typeof import('vue').inject
   const injectScript: typeof import('wxt/utils/inject-script').injectScript
@@ -44,7 +40,6 @@ declare global {
   const isRef: typeof import('vue').isRef
   const isShallow: typeof import('vue').isShallow
   const markRaw: typeof import('vue').markRaw
-  const markSynced: typeof import('D:/job/auto-ozon/browser-extension/src/utils/storage').markSynced
   const nextTick: typeof import('vue').nextTick
   const onActivated: typeof import('vue').onActivated
   const onBeforeMount: typeof import('vue').onBeforeMount
@@ -64,7 +59,6 @@ declare global {
   const reactive: typeof import('vue').reactive
   const readonly: typeof import('vue').readonly
   const ref: typeof import('vue').ref
-  const removeProduct: typeof import('D:/job/auto-ozon/browser-extension/src/utils/storage').removeProduct
   const resolveComponent: typeof import('vue').resolveComponent
   const saveSettings: typeof import('D:/job/auto-ozon/browser-extension/src/utils/storage').saveSettings
   const shallowReactive: typeof import('vue').shallowReactive
@@ -124,7 +118,7 @@ declare global {
   export type { Component, Slot, Slots, ComponentPublicInstance, ComputedRef, DirectiveBinding, ExtractDefaultPropTypes, ExtractPropTypes, ExtractPublicPropTypes, InjectionKey, PropType, Ref, ShallowRef, MaybeRef, MaybeRefOrGetter, VNode, WritableComputedRef } from 'vue'
   import('vue')
   // @ts-ignore
-  export type { Platform, ScrapedProduct, ProductAttribute, StoredProduct, PluginSettings, ListScrapingConfig, ListProductSummary } from 'D:/job/auto-ozon/browser-extension/src/utils/types'
+  export type { Platform, ScrapedProduct, ProductAttribute, PlatformScrapingConfig, PluginSettings, ListProductSummary } from 'D:/job/auto-ozon/browser-extension/src/utils/types'
   import('D:/job/auto-ozon/browser-extension/src/utils/types')
 }
 // for vue template auto import
@@ -136,11 +130,8 @@ declare module 'vue' {
     readonly EffectScope: UnwrapRef<typeof import('vue')['EffectScope']>
     readonly InvalidMatchPattern: UnwrapRef<typeof import('wxt/utils/match-patterns')['InvalidMatchPattern']>
     readonly MatchPattern: UnwrapRef<typeof import('wxt/utils/match-patterns')['MatchPattern']>
-    readonly addProduct: UnwrapRef<typeof import('D:/job/auto-ozon/browser-extension/src/utils/storage')['addProduct']>
-    readonly addProducts: UnwrapRef<typeof import('D:/job/auto-ozon/browser-extension/src/utils/storage')['addProducts']>
     readonly browser: UnwrapRef<typeof import('wxt/browser')['browser']>
     readonly checkBackendHealth: UnwrapRef<typeof import('D:/job/auto-ozon/browser-extension/src/utils/api')['checkBackendHealth']>
-    readonly clearProducts: UnwrapRef<typeof import('D:/job/auto-ozon/browser-extension/src/utils/storage')['clearProducts']>
     readonly computed: UnwrapRef<typeof import('vue')['computed']>
     readonly createApp: UnwrapRef<typeof import('vue')['createApp']>
     readonly createIframeUi: UnwrapRef<typeof import('wxt/utils/content-script-ui/iframe')['createIframeUi']>
@@ -154,17 +145,16 @@ declare module 'vue' {
     readonly defineContentScript: UnwrapRef<typeof import('wxt/utils/define-content-script')['defineContentScript']>
     readonly defineUnlistedScript: UnwrapRef<typeof import('wxt/utils/define-unlisted-script')['defineUnlistedScript']>
     readonly defineWxtPlugin: UnwrapRef<typeof import('wxt/utils/define-wxt-plugin')['defineWxtPlugin']>
+    readonly deleteBackendProduct: UnwrapRef<typeof import('D:/job/auto-ozon/browser-extension/src/utils/api')['deleteBackendProduct']>
     readonly effectScope: UnwrapRef<typeof import('vue')['effectScope']>
     readonly fakeBrowser: UnwrapRef<typeof import('wxt/testing')['fakeBrowser']>
-    readonly fetchSyncedProducts: UnwrapRef<typeof import('D:/job/auto-ozon/browser-extension/src/utils/api')['fetchSyncedProducts']>
+    readonly fetchBackendProducts: UnwrapRef<typeof import('D:/job/auto-ozon/browser-extension/src/utils/api')['fetchBackendProducts']>
     readonly generateShortId: UnwrapRef<typeof import('D:/job/auto-ozon/browser-extension/src/utils/crypto')['generateShortId']>
     readonly getAppConfig: UnwrapRef<typeof import('wxt/utils/app-config')['getAppConfig']>
     readonly getCurrentInstance: UnwrapRef<typeof import('vue')['getCurrentInstance']>
     readonly getCurrentScope: UnwrapRef<typeof import('vue')['getCurrentScope']>
     readonly getCurrentWatcher: UnwrapRef<typeof import('vue')['getCurrentWatcher']>
-    readonly getProducts: UnwrapRef<typeof import('D:/job/auto-ozon/browser-extension/src/utils/storage')['getProducts']>
     readonly getSettings: UnwrapRef<typeof import('D:/job/auto-ozon/browser-extension/src/utils/storage')['getSettings']>
-    readonly getUnsyncedCount: UnwrapRef<typeof import('D:/job/auto-ozon/browser-extension/src/utils/storage')['getUnsyncedCount']>
     readonly h: UnwrapRef<typeof import('vue')['h']>
     readonly inject: UnwrapRef<typeof import('vue')['inject']>
     readonly injectScript: UnwrapRef<typeof import('wxt/utils/inject-script')['injectScript']>
@@ -174,7 +164,6 @@ declare module 'vue' {
     readonly isRef: UnwrapRef<typeof import('vue')['isRef']>
     readonly isShallow: UnwrapRef<typeof import('vue')['isShallow']>
     readonly markRaw: UnwrapRef<typeof import('vue')['markRaw']>
-    readonly markSynced: UnwrapRef<typeof import('D:/job/auto-ozon/browser-extension/src/utils/storage')['markSynced']>
     readonly nextTick: UnwrapRef<typeof import('vue')['nextTick']>
     readonly onActivated: UnwrapRef<typeof import('vue')['onActivated']>
     readonly onBeforeMount: UnwrapRef<typeof import('vue')['onBeforeMount']>
@@ -194,7 +183,6 @@ declare module 'vue' {
     readonly reactive: UnwrapRef<typeof import('vue')['reactive']>
     readonly readonly: UnwrapRef<typeof import('vue')['readonly']>
     readonly ref: UnwrapRef<typeof import('vue')['ref']>
-    readonly removeProduct: UnwrapRef<typeof import('D:/job/auto-ozon/browser-extension/src/utils/storage')['removeProduct']>
     readonly resolveComponent: UnwrapRef<typeof import('vue')['resolveComponent']>
     readonly saveSettings: UnwrapRef<typeof import('D:/job/auto-ozon/browser-extension/src/utils/storage')['saveSettings']>
     readonly shallowReactive: UnwrapRef<typeof import('vue')['shallowReactive']>

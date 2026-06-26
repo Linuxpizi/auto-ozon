@@ -1,6 +1,11 @@
 from typing import Optional, List, Any
-from datetime import datetime
-from pydantic import BaseModel
+from datetime import datetime, timezone
+import re
+from pydantic import BaseModel, model_validator
+
+
+def _camel_to_snake(name: str) -> str:
+    return re.sub(r'(?<=[a-z0-9])([A-Z])', r'_\1', name).lower()
 
 
 class ScrapedProductBase(BaseModel):
@@ -19,7 +24,23 @@ class ScrapedProductBase(BaseModel):
     attributes: List[dict] = []
     description: str = ""
     source_url: str = ""
-    scraped_at: Optional[str] = None
+    scraped_at: Optional[datetime] = None
+
+    @model_validator(mode='before')
+    @classmethod
+    def convert_input(cls, data):
+        """浏览器插件发送 camelCase + scraped_at 字符串,统一转换"""
+        if not isinstance(data, dict):
+            return data
+        result = {_camel_to_snake(k): v for k, v in data.items()}
+        # scraped_at 字符串 → datetime
+        sa = result.get('scraped_at')
+        if isinstance(sa, str):
+            try:
+                result['scraped_at'] = datetime.fromisoformat(sa.replace('Z', '+00:00'))
+            except (ValueError, TypeError):
+                result['scraped_at'] = datetime.now(timezone.utc)
+        return result
 
 
 class ScrapedProductCreate(ScrapedProductBase):

@@ -18,8 +18,8 @@ declare module '#imports' {
   export { InvalidMatchPattern, MatchPattern } from 'wxt/utils/match-patterns';
   export { onActivated, onBeforeMount, onBeforeUnmount, onBeforeUpdate, onErrorCaptured, onDeactivated, onMounted, onServerPrefetch, onUnmounted, onUpdated, useAttrs, useSlots, computed, customRef, isReadonly, isRef, isShallow, isProxy, isReactive, markRaw, reactive, readonly, ref, shallowReactive, shallowReadonly, shallowRef, triggerRef, toRaw, toRef, toRefs, toValue, unref, watch, watchEffect, watchPostEffect, watchSyncEffect, defineComponent, defineAsyncComponent, getCurrentInstance, h, inject, nextTick, provide, useCssModule, createApp, effectScope, EffectScope, getCurrentScope, onScopeDispose, Component, Slot, Slots, ComponentPublicInstance, ComputedRef, DirectiveBinding, ExtractDefaultPropTypes, ExtractPropTypes, ExtractPublicPropTypes, InjectionKey, PropType, Ref, ShallowRef, MaybeRef, MaybeRefOrGetter, VNode, WritableComputedRef, onRenderTracked, onRenderTriggered, resolveComponent, useCssVars, useModel, getCurrentWatcher, onWatcherCleanup, useId, useTemplateRef } from 'vue';
   export { fakeBrowser } from 'wxt/testing';
-  export { syncProducts, fetchSyncedProducts, checkBackendHealth } from '../src/utils/api';
+  export { syncProducts, fetchBackendProducts, deleteBackendProduct, checkBackendHealth } from '../src/utils/api';
   export { generateShortId } from '../src/utils/crypto';
-  export { getSettings, saveSettings, getProducts, addProduct, addProducts, removeProduct, clearProducts, markSynced, getUnsyncedCount } from '../src/utils/storage';
-  export { DEFAULT_SETTINGS, Platform, ScrapedProduct, ProductAttribute, StoredProduct, PluginSettings, ListScrapingConfig, ListProductSummary } from '../src/utils/types';
+  export { getSettings, saveSettings } from '../src/utils/storage';
+  export { DEFAULT_SETTINGS, Platform, ScrapedProduct, ProductAttribute, PlatformScrapingConfig, PluginSettings, ListProductSummary } from '../src/utils/types';
 }

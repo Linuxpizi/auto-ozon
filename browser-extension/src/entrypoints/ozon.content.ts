@@ -525,7 +525,7 @@ async function findAndClickNextPage(): Promise<boolean> {
 }
 
 /** 等待页面内容更新(检测商品卡片变化) */
-function waitForPageUpdate(oldFirstId: string, timeout = 8000): Promise<boolean> {
+function waitForPageUpdate(oldFirstId: string, timeout = 9000): Promise<boolean> {
   return new Promise((resolve) => {
     const start = Date.now()
     const check = () => {
@@ -662,7 +662,7 @@ const OZON_INTERNAL_API = 'https://www.ozon.ru/api/entrypoint-api.bx/page/json/v
  */
 async function fetchProductDetailFromHtml(sourceId: string, sourceUrl?: string): Promise<Partial<ScrapedProduct> | null> {
   // 使用真实的产品页面 URL,构造错误的 URL (如 /product/-12345/) 会 404
-  const productUrl = sourceUrl || `https://www.ozon.ru/product/-${sourceId}/`
+  const productUrl = sourceUrl || `https://www.ozon.ru/product/${sourceId}/`
   try {
     await randomDelay(300, 800)
     console.log(`[Auto-Ozon] HTML 降级: fetching ${productUrl}`)
@@ -791,10 +791,10 @@ async function fetchProductDetailFromHtml(sourceId: string, sourceUrl?: string):
  * 返回的 JSON 结构中有 "widgetStates" 包含所有 widget 数据
  */
 async function fetchProductDetailFromApi(sourceId: string, sourceUrl?: string): Promise<Partial<ScrapedProduct> | null> {
-  // 策略 1: 尝试内部 JSON API (可能被 403)
+  // 内容脚本直接 fetch（同源请求，携带 cookie）
   try {
     await randomDelay(200, 600)
-    const apiUrl = `${OZON_INTERNAL_API}?url=/product/-${sourceId}/`
+    const apiUrl = `${OZON_INTERNAL_API}?url=/product/${sourceId}/`
     const resp = await fetch(apiUrl, {
       headers: {
         'accept': 'application/json',
@@ -802,17 +802,19 @@ async function fetchProductDetailFromApi(sourceId: string, sourceUrl?: string): 
       },
       credentials: 'include',
     })
+    console.log(`[Auto-Ozon] fetchProductDetailFromApi ${sourceId}: status=${resp.status}`)
     if (resp.ok) {
       const data = await resp.json()
       const result = parseInternalApiResponse(data, sourceId)
       if (result) return result
+    } else {
+      console.warn(`[Auto-Ozon] API ${sourceId} returned ${resp.status}`)
     }
-    // API 失败或解析无结果,降级到 HTML 采集
   } catch (e) {
-    console.warn(`[Auto-Ozon] JSON API ${sourceId} 失败:`, e)
+    console.warn(`[Auto-Ozon] JSON API ${sourceId} 请求失败:`, e)
   }
 
-  // 策略 2: HTML 页面降级 (用真实 URL)
+  // HTML 页面降级 (用真实 URL)
   return await fetchProductDetailFromHtml(sourceId, sourceUrl)
 }
 
@@ -827,83 +829,159 @@ function parseInternalApiResponse(data: any, sourceId: string): Partial<ScrapedP
     images: [],
   }
 
-  // 内部 API 返回的 widgetStates 是一个对象,key 是 widget ID
   const states = data?.widgetStates || data || {}
+  const allKeys = Object.keys(states)
+  console.log(`[Auto-Ozon] parseInternalApiResponse ${sourceId}: ${allKeys.length} widget keys`)
 
+  // ── Step 1: 按 widget key 精确匹配提取 ──
   for (const [key, val] of Object.entries(states)) {
     if (typeof val !== 'string') continue
-    try {
-      const widget = JSON.parse(val as string)
+    let widget: any
+    try { widget = JSON.parse(val as string) } catch { continue }
 
-      // 提取商品标题
-      if (key.includes('webProductHeading') || key.includes('pdptitle')) {
-        result.title = widget.title || widget.text || result.title
+    // --- 标题: webProductHeading / pdptitle ---
+    if (!result.title && (key.includes('webProductHeading') || key.includes('pdptitle'))) {
+      // Ozon heading widget 可能嵌套在 widgetState.options 或直接是顶层
+      const t = widget.options?.title || widget.title || widget.text || widget.heading || ''
+      if (typeof t === 'string' && t.length > 3) {
+        result.title = t
+        console.log(`[Auto-Ozon] ${sourceId} heading key=${key} → title="${t.substring(0, 60)}"`)
       }
+    }
 
-      // 提取图片
-      if (key.includes('webGallery') || key.includes('gallery')) {
-        const images = widget.images || widget.items || []
-        result.images = images.map((img: any) => {
-          const url = img.big || img.medium || img.small || img.url || ''
-          return url.startsWith('//') ? 'https:' + url : url
-        }).filter(Boolean)
+    // --- 价格: webPrice ---
+    if (!result.price && key.includes('webPrice') && !key.includes('Decreased')) {
+      // Dump first price widget structure for debugging
+      console.log(`[Auto-Ozon] ${sourceId} price widget key=${key} keys=`, Object.keys(widget))
+      // Try common Ozon price structures
+      const priceRaw =
+        widget.options?.price || widget.options?.actionPrice ||
+        widget.price || widget.actionPrice ||
+        widget.computedPrice || widget.items?.[0]?.price ||
+        ''
+      const oldPriceRaw =
+        widget.options?.oldPrice || widget.options?.basePrice ||
+        widget.oldPrice || widget.basePrice ||
+        widget.computedOldPrice || widget.items?.[0]?.oldPrice ||
+        ''
+      const p = parsePrice(String(priceRaw))
+      const op = parsePrice(String(oldPriceRaw))
+      if (p > 0) { result.price = p; console.log(`[Auto-Ozon] ${sourceId} price=${p}`) }
+      if (op > 0) { result.oldPrice = op; console.log(`[Auto-Ozon] ${sourceId} oldPrice=${op}`) }
+    }
+
+    // --- 评分: webReviewProductScore ---
+    if (!result.rating && key.includes('webReviewProductScore')) {
+      // Dump raw widget JSON to see actual Ozon structure
+      console.log(`[Auto-Ozon] ${sourceId} review RAW widget:`, JSON.stringify(widget).substring(0, 500))
+      // Try common Ozon review structures
+      const ratingRaw =
+        widget.options?.rating || widget.options?.score ||
+        widget.rating || widget.score || widget.reviewScore ||
+        widget.items?.[0]?.rating || ''
+      const countRaw =
+        widget.options?.reviewCount || widget.options?.count || widget.options?.reviewsCount ||
+        widget.reviewCount || widget.count || widget.reviewsCount ||
+        widget.items?.[0]?.count || widget.items?.[0]?.reviewCount || ''
+      const r = parseFloat(String(ratingRaw).replace(',', '.'))
+      const c = parseInt(String(countRaw).replace(/\D/g, ''))
+      if (r > 0) { result.rating = r; console.log(`[Auto-Ozon] ${sourceId} rating=${r}`) }
+      if (c > 0) { result.reviewCount = c; console.log(`[Auto-Ozon] ${sourceId} reviewCount=${c}`) }
+    }
+
+    // --- 品牌: webBrandName / 从 breadcrumb 取最后一级之前的 ---
+    if (!result.brand && key.includes('webBrandName')) {
+      const b = widget.options?.text || widget.options?.name || widget.brand?.name || widget.text || widget.name || ''
+      if (typeof b === 'string' && b.length > 1) {
+        result.brand = b
+        console.log(`[Auto-Ozon] ${sourceId} brand key=${key} → "${b}"`)
       }
+    }
 
-      // 提取价格
-      if (key.includes('webPrice') || key.includes('price')) {
-        const priceStr = widget.price || widget.actionPrice || ''
-        const oldPriceStr = widget.oldPrice || widget.basePrice || ''
-        result.price = parseFloat(String(priceStr).replace(/\s/g, '').replace(',', '.')) || result.price
-        result.oldPrice = parseFloat(String(oldPriceStr).replace(/\s/g, '').replace(',', '.')) || result.oldPrice
+    // --- 分类面包屑: webBreadcrumb ---
+    if (!result.category && key.includes('webBreadcrumb')) {
+      console.log(`[Auto-Ozon] ${sourceId} breadcrumb key=${key} keys=`, Object.keys(widget))
+      const crumbs = widget.options?.items || widget.items || widget.links || []
+      if (Array.isArray(crumbs) && crumbs.length > 1) {
+        const cats = crumbs.map((c: any) => c.title || c.text || c.label || c.name || '').filter(Boolean)
+        if (cats.length > 1) result.category = cats.slice(1).join(' > ')
       }
+    }
 
-      // 提取评分和评论数
-      if (key.includes('webReviewProductScore') || key.includes('review')) {
-        const ratingStr = widget.rating || widget.score || ''
-        result.rating = parseFloat(String(ratingStr)) || result.rating
-        const countStr = widget.reviewCount || widget.count || ''
-        result.reviewCount = parseInt(String(countStr).replace(/\s/g, '')) || result.reviewCount
-      }
+    // --- 描述: webDescription ---
+    if (!result.description && key.includes('webDescription')) {
+      const d = widget.options?.text || widget.options?.content || widget.text || widget.content || widget.description || ''
+      if (typeof d === 'string' && d.length > 10) result.description = d.slice(0, 2000)
+    }
 
-      // 提取品牌
-      if (key.includes('webBrandName') || key.includes('brand')) {
-        result.brand = widget.brand?.name || widget.text || widget.name || result.brand
-      }
-
-      // 提取属性/特征
-      if (key.includes('webCharacteristics') || key.includes('characteristic')) {
-        const chars = widget.options || widget.characteristics || widget.items || []
+    // --- 属性/特征: webCharacteristics ---
+    if (!result.attributes!.length && (key.includes('webCharacteristics') || key.includes('characteristic'))) {
+      console.log(`[Auto-Ozon] ${sourceId} characteristics key=${key} keys=`, Object.keys(widget))
+      const chars = widget.options?.rows || widget.options?.items || widget.options?.characteristics ||
+                    widget.rows || widget.items || widget.characteristics || []
+      if (Array.isArray(chars)) {
         for (const c of chars) {
-          const name = c.title || c.name || c.label || ''
-          const value = c.value || c.text || ''
-          if (name && value) {
-            result.attributes!.push({ name, value })
+          if (!c) continue
+          const name = c.title || c.name || c.label || c.property || ''
+          const value = c.value || c.text || c.val || ''
+          if (name && value && String(name).length > 1) {
+            result.attributes!.push({ name: String(name), value: String(value) })
           }
         }
       }
+    }
 
-      // 提取描述
-      if (key.includes('webDescription') || key.includes('description')) {
-        result.description = widget.text || widget.content || widget.description || result.description
-      }
+    // --- 卖家: webMerchantInfo / webBestSeller ---
+    if (!result.sellerName && (key.includes('webMerchantInfo') || key.includes('webBestSeller'))) {
+      const s = widget.options?.merchantName || widget.merchantName || widget.text || widget.name || ''
+      if (typeof s === 'string' && s.length > 1) result.sellerName = s
+    }
 
-      // 提取卖家信息
-      if (key.includes('webMerchantInfo') || key.includes('webBestSeller') || key.includes('merchant')) {
-        result.sellerName = widget.merchantName || widget.text || widget.name || result.sellerName
+    // --- 图片: webGallery ---
+    if (!result.images!.length && (key.includes('webGallery') || key.includes('gallery'))) {
+      const raw = widget.options?.images || widget.images || widget.items || []
+      if (Array.isArray(raw) && raw.length > 0) {
+        result.images = raw.map((img: any) => {
+          if (typeof img === 'string') return img.startsWith('//') ? 'https:' + img : img
+          const url = img.big || img.medium || img.small || img.url || img.src || ''
+          return url.startsWith('//') ? 'https:' + url : url
+        }).filter(Boolean)
       }
-
-      // 提取分类面包屑
-      if (key.includes('webBreadcrumb') || key.includes('breadcrumb')) {
-        const crumbs = widget.items || widget.links || []
-        const cats = crumbs.map((c: any) => c.title || c.text || c.label || '').filter(Boolean)
-        if (cats.length > 1) {
-          result.category = cats.slice(1).join(' > ')
-        }
-      }
-    } catch {
-      // 不是 JSON 字符串,跳过
     }
   }
+
+  // ── Step 2: 如果精确匹配没拿到品牌,尝试从 breadcrumbs 中提取 ──
+  if (!result.brand) {
+    // Ozon 面包屑最后一个通常是品牌页或商品页,倒数第二个经常是品牌
+    for (const [key, val] of Object.entries(states)) {
+      if (typeof val !== 'string' || !key.includes('Breadcrumb')) continue
+      try {
+        const w = JSON.parse(val as string)
+        const crumbs = w.options?.items || w.items || w.links || []
+        if (Array.isArray(crumbs) && crumbs.length >= 2) {
+          // 取面包屑中最后一个非商品项作为品牌
+          for (let i = crumbs.length - 2; i >= 0; i--) {
+            const name = crumbs[i].title || crumbs[i].text || ''
+            if (name && name.length > 1 && name.length < 60 && !name.includes('ozon.ru')) {
+              result.brand = name
+              break
+            }
+          }
+        }
+      } catch {}
+    }
+  }
+
+  console.log(`[Auto-Ozon] parseResult ${sourceId}:`, {
+    title: result.title?.substring(0, 50),
+    brand: result.brand,
+    rating: result.rating,
+    reviewCount: result.reviewCount,
+    price: result.price,
+    images: result.images!.length,
+    attrs: result.attributes!.length,
+    desc: result.description ? result.description.substring(0, 50) : '',
+  })
 
   return result.images!.length > 0 || result.title || result.attributes!.length > 0 ? result : null
 }

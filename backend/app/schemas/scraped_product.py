@@ -26,6 +26,23 @@ class ScrapedProductBase(BaseModel):
     source_url: str = ""
     scraped_at: Optional[datetime] = None
 
+    # ── 新增:物理规格 ──
+    weight_g: int = 0
+    depth_mm: int = 0
+    height_mm: int = 0
+    width_mm: int = 0
+
+    # ── 新增:标识符 ──
+    supplier_sku: str = ""
+    barcode: str = ""
+
+    # ── 新增:媒体 ──
+    video_url: str = ""
+
+    # ── 新增:Ozon 内部分类 ──
+    ozon_category_id: int = 0
+    ozon_type_id: int = 0
+
     @model_validator(mode='before')
     @classmethod
     def convert_input(cls, data):

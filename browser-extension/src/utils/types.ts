@@ -19,6 +19,32 @@ export interface ScrapedProduct {
   description: string
   sourceUrl: string
   scrapedAt: string
+
+  // ── 新增:物理规格 ──
+  /** 包装重量(克) */
+  weightG: number
+  /** 包装长度(mm) */
+  depthMm: number
+  /** 包装高度(mm) */
+  heightMm: number
+  /** 包装宽度(mm) */
+  widthMm: number
+
+  // ── 新增:标识符 ──
+  /** 供应商 SKU / 供应商货号 */
+  supplierSku: string
+  /** EAN/GTIN 条形码 */
+  barcode: string
+
+  // ── 新增:媒体 ──
+  /** 商品视频 URL */
+  videoUrl: string
+
+  // ── 新增:Ozon 内部分类(从内部 API 获取) ──
+  /** Ozon description_category_id */
+  ozonCategoryId: number
+  /** Ozon type_id */
+  ozonTypeId: number
 }
 
 export interface ProductAttribute {
@@ -86,7 +112,7 @@ const defaultPlatformConfig: PlatformScrapingConfig = {
 }
 
 export const DEFAULT_SETTINGS: PluginSettings = {
-  apiBaseUrl: 'http://localhost:8000',
+  apiBaseUrl: 'http://localhost:9000',
   autoScrape: true,
   ozon: { ...defaultPlatformConfig },
   wb: { ...defaultPlatformConfig },

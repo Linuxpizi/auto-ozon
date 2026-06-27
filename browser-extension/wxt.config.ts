@@ -12,7 +12,7 @@ export default defineConfig({
       'https://ozon.ru/*',
       'https://www.wildberries.ru/*',
       'https://wildberries.ru/*',
-      'http://localhost:8000/*',
+      'http://localhost:9000/*',
     ],
     action: {
       default_popup: 'popup.html',

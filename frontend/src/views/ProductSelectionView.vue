@@ -4,9 +4,6 @@
       <div class="page-header">
         <n-h2 class="page-title" style="margin: 0">选品中心</n-h2>
         <n-space>
-          <n-button type="primary" size="small" @click="importJson" :loading="importing">
-            导入 Ozon 数据
-          </n-button>
           <n-button size="small" @click="loadProducts" :loading="loading">刷新</n-button>
         </n-space>
       </div>
@@ -108,7 +105,6 @@ import { apiGet, apiPost, apiPut, apiDelete } from "../api";
 
 // ── state ─────────────────────────────────────────────────────────
 const loading = ref(false);
-const importing = ref(false);
 const products = ref<any[]>([]);
 const totalCount = ref(0);
 const currentPage = ref(1);
@@ -421,19 +417,6 @@ async function loadBrands() {
   } catch { /* ignore */ }
 }
 
-async function importJson() {
-  importing.value = true;
-  try {
-    const res = await apiPost("/selection/import-json");
-    message.success(`导入完成: 新增 ${res.created} 条, 跳过 ${res.skipped} 条`);
-    await loadProducts();
-    await loadBrands();
-  } catch (e: any) {
-    message.error("导入失败: " + e.message);
-  } finally {
-    importing.value = false;
-  }
-}
 
 async function deleteProduct(id: number) {
   try {

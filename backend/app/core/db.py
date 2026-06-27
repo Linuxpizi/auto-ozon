@@ -72,6 +72,21 @@ def _migrate_columns(engine):
         ("orders", "in_process_at", "ALTER TABLE orders ADD COLUMN in_process_at DATETIME"),
         ("orders", "available_actions", "ALTER TABLE orders ADD COLUMN available_actions TEXT DEFAULT '[]'"),
         ("orders", "currency_code", "ALTER TABLE orders ADD COLUMN currency_code VARCHAR(16) DEFAULT ''"),
+        # scraped_product_records: 新增列
+        ("scraped_product_records", "weight_g", "ALTER TABLE scraped_product_records ADD COLUMN weight_g INTEGER DEFAULT 0"),
+        ("scraped_product_records", "depth_mm", "ALTER TABLE scraped_product_records ADD COLUMN depth_mm INTEGER DEFAULT 0"),
+        ("scraped_product_records", "height_mm", "ALTER TABLE scraped_product_records ADD COLUMN height_mm INTEGER DEFAULT 0"),
+        ("scraped_product_records", "width_mm", "ALTER TABLE scraped_product_records ADD COLUMN width_mm INTEGER DEFAULT 0"),
+        ("scraped_product_records", "supplier_sku", "ALTER TABLE scraped_product_records ADD COLUMN supplier_sku VARCHAR(128) DEFAULT ''"),
+        ("scraped_product_records", "barcode", "ALTER TABLE scraped_product_records ADD COLUMN barcode VARCHAR(64) DEFAULT ''"),
+        ("scraped_product_records", "video_url", "ALTER TABLE scraped_product_records ADD COLUMN video_url VARCHAR(1024) DEFAULT ''"),
+        ("scraped_product_records", "ozon_category_id", "ALTER TABLE scraped_product_records ADD COLUMN ozon_category_id INTEGER DEFAULT 0"),
+        ("scraped_product_records", "ozon_type_id", "ALTER TABLE scraped_product_records ADD COLUMN ozon_type_id INTEGER DEFAULT 0"),
+        ("scraped_product_records", "synced", "ALTER TABLE scraped_product_records ADD COLUMN synced BOOLEAN DEFAULT 1"),
+        ("scraped_product_records", "matched", "ALTER TABLE scraped_product_records ADD COLUMN matched BOOLEAN DEFAULT 0"),
+        ("scraped_product_records", "matched_suppliers", "ALTER TABLE scraped_product_records ADD COLUMN matched_suppliers TEXT DEFAULT '[]'"),
+        ("scraped_product_records", "created_at", "ALTER TABLE scraped_product_records ADD COLUMN created_at DATETIME DEFAULT CURRENT_TIMESTAMP"),
+        ("scraped_product_records", "updated_at", "ALTER TABLE scraped_product_records ADD COLUMN updated_at DATETIME"),
     ]
     for table, column, sql in simple_migrations:
         columns = {c["name"] for c in inspector.get_columns(table)}

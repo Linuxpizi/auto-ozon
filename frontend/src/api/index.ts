@@ -1,4 +1,4 @@
-export const API_BASE = "http://127.0.0.1:8000/api";
+export const API_BASE = "http://127.0.0.1:9000/api";
 
 async function request<T = any>(path: string, options?: RequestInit): Promise<T> {
   const res = await fetch(`${API_BASE}${path}`, options);

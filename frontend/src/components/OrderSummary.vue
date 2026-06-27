@@ -1,9 +1,10 @@
 <template>
   <div>
-    <!-- 图片放大浮层 -->
+    <!-- 图片悬浮放大浮层 -->
     <teleport to="body">
-      <div v-if="zoomImage" style="position: fixed; inset: 0; z-index: 9999; background: rgba(0,0,0,0.7); display: flex; align-items: center; justify-content: center; cursor: zoom-out;" @click="zoomImage = ''">
-        <img :src="zoomImage" style="max-width: 90vw; max-height: 90vh; border-radius: 8px; box-shadow: 0 4px 24px rgba(0,0,0,0.5);" />
+      <div v-if="hoverImage" style="position: fixed; z-index: 9999; pointer-events: none; padding: 8px; background: #fff; border-radius: 8px; box-shadow: 0 4px 24px rgba(0,0,0,0.25);"
+        :style="{ left: hoverPos.x + 'px', top: hoverPos.y + 'px' }">
+        <img :src="hoverImage" style="width: 420px; height: 420px; object-fit: contain; border-radius: 6px;" />
       </div>
     </teleport>
     <table class="table" style="font-size: 13px;">
@@ -24,8 +25,20 @@
           <td>
             <div style="display: flex; align-items: center; gap: 6px;">
               <img v-if="order.image_url" :src="order.image_url"
-                style="width: 36px; height: 36px; object-fit: cover; border-radius: 4px; flex-shrink: 0; cursor: zoom-in;" alt="" @click.stop="zoomImage = order.image_url" />
-              <div style="min-width: 0;">
+                style="width: 64px; height: 64px; object-fit: cover; border-radius: 6px; flex-shrink: 0; cursor: pointer;" alt=""
+                @mouseenter="showHoverImage($event, order.image_url)"
+                @mouseleave="hideHoverImage" />
+              <a v-if="getProductUrl(order)"
+                :href="getProductUrl(order)!"
+                target="_blank" rel="noopener noreferrer"
+                style="min-width: 0; color: var(--accent, #1677ff); text-decoration: none; display: block;"
+                @mouseenter="$event.currentTarget.style.textDecoration='underline'"
+                @mouseleave="$event.currentTarget.style.textDecoration='none'">
+                <div style="font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: underline; text-underline-offset: 2px;">{{
+                  order.shipment_number }}</div>
+                <div style="font-size: 12px; color: var(--accent, #1677ff); text-decoration: inherit;">{{ order.offer_id || order.sku }}</div>
+              </a>
+              <div v-else style="min-width: 0;">
                 <div style="font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">{{
                   order.shipment_number }}</div>
                 <div style="font-size: 12px; color: var(--text-secondary);">{{ order.offer_id || order.sku }}</div>
@@ -75,7 +88,52 @@ import type { PropType } from "vue";
 import { NTag, NButton, NSpace } from "naive-ui";
 import type { OrderItem } from "../store";
 
-const zoomImage = ref("");
+const hoverImage = ref("");
+const hoverPos = ref({ x: 0, y: 0 });
+
+function showHoverImage(e: MouseEvent, url: string) {
+  const rect = (e.target as HTMLElement).getBoundingClientRect();
+  // Position to the right of the image, or to the left if not enough space
+  let x = rect.right + 12;
+  if (x + 440 > window.innerWidth) {
+    x = rect.left - 444;
+  }
+  let y = rect.top - 80;
+  if (y < 8) y = 8;
+  hoverPos.value = { x, y };
+  hoverImage.value = url;
+}
+
+function hideHoverImage() {
+  hoverImage.value = "";
+}
+
+function getProductUrl(order: OrderItem): string | null {
+  // Ozon consumer-facing product page
+  // https://www.ozon.ru/product/{product_id}/
+  const OZON_PRODUCT_BASE = "https://www.ozon.ru/product";
+
+  // Try order.product_id first
+  if (order.product_id) {
+    return `${OZON_PRODUCT_BASE}/${order.product_id}/`;
+  }
+  // Fallback: order.sku IS the Ozon product_id
+  if (order.sku && /^\d+$/.test(order.sku)) {
+    return `${OZON_PRODUCT_BASE}/${order.sku}/`;
+  }
+  // Fallback: extract from products_json
+  try {
+    const products = JSON.parse(order.products_json || "[]");
+    if (products.length > 0) {
+      const pid = products[0].product_id || products[0].sku;
+      if (pid && /^\d+$/.test(String(pid))) {
+        return `${OZON_PRODUCT_BASE}/${pid}/`;
+      }
+    }
+  } catch {}
+  return null;
+}
+
 
 defineProps({
   orders: {

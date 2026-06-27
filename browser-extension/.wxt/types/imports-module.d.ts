@@ -20,6 +20,7 @@ declare module '#imports' {
   export { fakeBrowser } from 'wxt/testing';
   export { syncProducts, fetchBackendProducts, deleteBackendProduct, checkBackendHealth } from '../src/utils/api';
   export { generateShortId } from '../src/utils/crypto';
+  export { randomDelay, normalDelay, microPause, readingPause, occasionalLongPause, humanScroll, humanScrollTo, humanScrollToTop, humanScrollToBottom, simulateHover, simulateMouseLeave, humanClick, humanLinkClick, humanFetch, transitionPause, batchTransitionPause, enrichDelay, scrollPause } from '../src/utils/humanize';
   export { getSettings, saveSettings } from '../src/utils/storage';
   export { DEFAULT_SETTINGS, Platform, ScrapedProduct, ProductAttribute, PlatformScrapingConfig, PluginSettings, ListProductSummary } from '../src/utils/types';
 }

@@ -1,4 +1,10 @@
 import type { ProductAttribute, ScrapedProduct } from '@/utils/types'
+import {
+  randomDelay, normalDelay, microPause, readingPause, occasionalLongPause,
+  humanScroll, humanScrollTo, humanScrollToTop, humanScrollToBottom,
+  simulateHover, simulateMouseLeave, humanClick, humanLinkClick,
+  humanFetch, transitionPause, batchTransitionPause, enrichDelay, scrollPause,
+} from '@/utils/humanize'
 
 // ─── 通用工具 ───────────────────────────────────────────────
 
@@ -110,19 +116,21 @@ function extractDetailSellerName(): string {
   return ''
 }
 
-function extractDetailAttributes(): ProductAttribute[] {
+async function extractDetailAttributes(): Promise<ProductAttribute[]> {
   const attrs: ProductAttribute[] = []
 
-  // 策略 1: 先尝试点击「展开全部」按钮,让折叠的属性显示出来
+  // 策略 1: 先尝试逐个点击「展开全部」按钮,让折叠的属性显示出来
+  // ★ 拟人化:逐个点击而非批量点击,每次点击后等待 DOM 更新
   const expandBtns = document.querySelectorAll(
     'button[class*="show-more"], button[class*="expand"], [data-widget="webCharacteristics"] button, [class*="characteristic"] button'
   )
-  expandBtns.forEach((btn) => {
+  for (const btn of Array.from(expandBtns)) {
     const text = btn.textContent?.trim() || ''
     if (/показать все|展开|show more|все характеристики/i.test(text)) {
-      try { (btn as HTMLElement).click() } catch { /* ignore */ }
+      await humanClick(btn as HTMLElement)
+      await normalDelay(300, 800)
     }
-  })
+  }
 
   // 策略 2: 多种选择器尝试匹配属性区域
   const selectors = [
@@ -205,19 +213,30 @@ function extractDetailDescription(): string {
   return el?.textContent?.trim()?.slice(0, 2000) || ''
 }
 
-function scrapeOzonProduct(): ScrapedProduct | null {
+async function scrapeOzonProduct(): Promise<ScrapedProduct | null> {
   const sourceId = extractDetailSourceId()
   if (!sourceId) return null
 
-  // 先展开全部属性,等待 500ms 让 DOM 更新
+  // ★ 拟人化:先模拟浏览页面顶部内容,等待页面完全加载
+  await readingPause()
+
+  // 模拟用户慢慢向下滚动查看商品信息
+  const scrollTargets = [300, 600, 400]
+  for (const dist of scrollTargets) {
+    await humanScroll(dist)
+    await normalDelay(400, 1000)
+  }
+
+  // 展开全部属性
   const expandAllBtns = document.querySelectorAll(
     'button[class*="show-more"], button[class*="expand"]'
   )
-  expandAllBtns.forEach((btn) => {
-    try { (btn as HTMLElement).click() } catch { /* ignore */ }
-  })
+  for (const btn of Array.from(expandAllBtns)) {
+    await humanClick(btn as HTMLElement)
+  }
 
-  const attributes = extractDetailAttributes()
+  await microPause()
+  const attributes = await extractDetailAttributes()
 
   // 把 SKU 和变体信息也追加到 attributes 中
   const sku = extractDetailSku()
@@ -272,6 +291,8 @@ interface ListCard {
   imageUrl: string
   rating: number
   reviewCount: number
+  brand: string
+  sellerName: string
   sourceUrl: string
 }
 
@@ -343,9 +364,26 @@ function parseCard(el: HTMLElement): ListCard | null {
     if (m) reviewCount = parseInt(m[1])
   }
 
+  // ★ 品牌 — Ozon 卡片上通常有品牌标签
+  let brand = ''
+  const brandLink = el.querySelector('a[href*="/brand/"]')
+  if (brandLink) {
+    brand = brandLink.textContent?.trim() || ''
+  }
+  if (!brand) {
+    // 品牌有时是 tsBody300Medium 样式的 span
+    const brandSpan = el.querySelector('[class*="brand"], [class*="Brand"]')
+    if (brandSpan) brand = brandSpan.textContent?.trim() || ''
+  }
+
+  // ★ 卖家
+  let sellerName = ''
+  const sellerEl = el.querySelector('[class*="seller"], [class*="Seller"], [class*="merchant"]')
+  if (sellerEl) sellerName = sellerEl.textContent?.trim() || ''
+
   const fullUrl = new URL(href, location.origin).href
 
-  return { sourceId, title, price, oldPrice, imageUrl, rating, reviewCount, sourceUrl: fullUrl }
+  return { sourceId, title, price, oldPrice, imageUrl, rating, reviewCount, brand, sellerName, sourceUrl: fullUrl }
 }
 
 /** 扫描页面上所有可见的商品卡片 */
@@ -415,8 +453,10 @@ function scanListCards(): ListCard[] {
  *   2. 带有 rel="next" 的链接
  *   3. 文本为 "Далее" 或 ">" 的按钮
  *   4. URL 含 page=N 的链接中当前页+1 的那个
+ *
+ * ★ 拟人化:使用 humanLinkClick 替代原生 .click()
  */
-function findAndClickNextPage(): boolean {
+async function findAndClickNextPage(): Promise<boolean> {
   // 策略 1: data-widget="paginator" 内的下一页链接
   const paginator = document.querySelector('[data-widget="paginator"]')
   if (paginator) {
@@ -429,7 +469,8 @@ function findAndClickNextPage(): boolean {
       }) as HTMLElement
     if (nextBtn) {
       console.log('[Auto-Ozon] Found next page button via paginator:', nextBtn.textContent?.trim())
-      nextBtn.click()
+      // ★ 拟人化:先 hover,再延时点击
+      await humanLinkClick(nextBtn)
       return true
     }
   }
@@ -438,7 +479,7 @@ function findAndClickNextPage(): boolean {
   const relNext = document.querySelector('a[rel="next"]') as HTMLElement | null
   if (relNext) {
     console.log('[Auto-Ozon] Found next page via rel="next"')
-    relNext.click()
+    await humanLinkClick(relNext)
     return true
   }
 
@@ -454,7 +495,7 @@ function findAndClickNextPage(): boolean {
     const href = link.getAttribute('href') || ''
     if (new RegExp(`[?&]page=${nextPage}(?:&|$)`).test(href)) {
       console.log(`[Auto-Ozon] Found next page link: page=${nextPage}`)
-      link.click()
+      await humanLinkClick(link)
       return true
     }
   }
@@ -473,7 +514,7 @@ function findAndClickNextPage(): boolean {
       const parent = btn.closest('[class*="paginator"], [class*="pagination"], nav')
       if (parent) {
         console.log(`[Auto-Ozon] Found next page button: "${text || ariaLabel}"`)
-        btn.click()
+        await humanLinkClick(btn as HTMLElement)
         return true
       }
     }
@@ -515,12 +556,18 @@ async function scrollAndCollect(
   const allCards = new Map<string, ListCard>()
   let maxPages = 10 // 安全上限,防止无限翻页
 
+  // ★ 拟人化:开始采集前等待一小会儿,模拟用户打开页面后浏览
+  await readingPause()
+
   while (allCards.size < maxItems && maxPages > 0) {
     // 检查停止信号
     if (shouldStop && shouldStop()) {
       console.log('[Auto-Ozon] scrollAndCollect: stopped by user')
       break
     }
+
+    // ★ 拟人化:偶尔暂停更久
+    await occasionalLongPause()
 
     // ── 当前页:滚动并采集 ──
     let stableRounds = 0
@@ -555,8 +602,12 @@ async function scrollAndCollect(
           stableRounds = 0
         }
 
-        window.scrollBy(0, window.innerHeight)
-        setTimeout(() => tick().then(resolveTick), scrollDelay)
+        // ★ 拟人化:用 humanScroll 替代固定距离滚动,滚动距离也有波动
+        const scrollAmount = window.innerHeight * (0.85 + Math.random() * 0.3)
+        humanScroll(scrollAmount).then(() => {
+          // ★ 拟人化:滚动后用可变延时替代固定延时
+          scrollPause(scrollDelay).then(() => tick().then(resolveTick))
+        })
       })
     }
 
@@ -565,9 +616,9 @@ async function scrollAndCollect(
     if (allCards.size >= maxItems) break
 
     // ── 当前页已滚动完毕,尝试翻到下一页 ──
-    // 先滚动到页面底部,确保分页按钮可见
-    window.scrollTo(0, document.documentElement.scrollHeight)
-    await new Promise((r) => setTimeout(r, 800))
+    // ★ 拟人化:模拟用户浏览完当前页后慢慢滚到底部
+    await humanScrollToBottom()
+    await normalDelay(500, 1200)
 
     // 记录当前第一个卡片的 ID,用于判断页面是否已更新
     const currentCards = scanListCards()
@@ -589,9 +640,10 @@ async function scrollAndCollect(
       break
     }
 
-    // 新页面加载后先滚回顶部,让虚拟滚动渲染新卡片
-    window.scrollTo(0, 0)
-    await new Promise((r) => setTimeout(r, 1000))
+    // ★ 拟人化:新页面加载后,先停顿再模拟用户回到顶部
+    await readingPause()
+    await humanScrollToTop()
+    await normalDelay(800, 2000)
   }
 
   return Array.from(allCards.values()).slice(0, maxItems)
@@ -605,27 +657,163 @@ async function scrollAndCollect(
 const OZON_INTERNAL_API = 'https://www.ozon.ru/api/entrypoint-api.bx/page/json/v2'
 
 /**
+ * HTML 降级采集:通过 fetch 商品页面 HTML,解析 DOM 提取数据
+ * 当内部 JSON API 返回 403 时使用
+ */
+async function fetchProductDetailFromHtml(sourceId: string, sourceUrl?: string): Promise<Partial<ScrapedProduct> | null> {
+  // 使用真实的产品页面 URL,构造错误的 URL (如 /product/-12345/) 会 404
+  const productUrl = sourceUrl || `https://www.ozon.ru/product/-${sourceId}/`
+  try {
+    await randomDelay(300, 800)
+    console.log(`[Auto-Ozon] HTML 降级: fetching ${productUrl}`)
+    const resp = await fetch(productUrl, {
+      credentials: 'include',
+      headers: {
+        'accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+        'accept-language': 'ru-RU,ru;q=0.9,en-US;q=0.8,en;q=0.7',
+      },
+    })
+    if (!resp.ok) {
+      console.warn(`[Auto-Ozon] HTML 降级 ${sourceId} 返回 ${resp.status}`)
+      return null
+    }
+    const html = await resp.text()
+
+    const result: Partial<ScrapedProduct> = {
+      platform: 'ozon',
+      sourceId,
+      attributes: [],
+      images: [],
+    }
+
+    // ── 策略 A: 解析 <script type="application/ld+json"> (SEO 结构化数据) ──
+    const ldJsonMatch = html.match(/<script[^>]*type="application\/ld\+json"[^>]*>([\s\S]*?)<\/script>/gi)
+    if (ldJsonMatch) {
+      for (const block of ldJsonMatch) {
+        const jsonStr = block.replace(/<script[^>]*>/i, '').replace(/<\/script>/i, '')
+        try {
+          const ld = JSON.parse(jsonStr)
+          if (ld['@type'] === 'Product' || ld.name) {
+            result.title = result.title || ld.name || ''
+            result.description = result.description || ld.description || ''
+            if (ld.brand?.name) result.brand = ld.brand.name
+            else if (typeof ld.brand === 'string') result.brand = ld.brand
+            if (ld.image) {
+              const imgs = Array.isArray(ld.image) ? ld.image : [ld.image]
+              result.images = imgs.filter((u: string) => u && u.startsWith('http'))
+            }
+            if (ld.sku) result.sourceId = String(ld.sku)
+            if (ld.category) result.category = ld.category
+            // 价格
+            const offers = ld.offers || ld.Offers
+            if (offers) {
+              const o = Array.isArray(offers) ? offers[0] : offers
+              if (o.price) result.price = parseFloat(o.price) || result.price
+              if (o.priceCurrency) result.price = result.price // already in roubles on Ozon
+            }
+            // 评分
+            if (ld.aggregateRating) {
+              result.rating = parseFloat(ld.aggregateRating.ratingValue) || result.rating
+              result.reviewCount = parseInt(ld.aggregateRating.reviewCount) || result.reviewCount
+            }
+          }
+        } catch { /* not valid JSON, skip */ }
+      }
+    }
+
+    // ── 策略 B: 解析 HTML DOM (DOMParser) ──
+    const parser = new DOMParser()
+    const doc = parser.parseFromString(html, 'text/html')
+
+    // brand
+    if (!result.brand) {
+      const brandEl = doc.querySelector('[data-widget="webBrandName"] a, [data-widget="webBrandName"] span, a[href*="/brand/"]')
+      result.brand = brandEl?.textContent?.trim() || ''
+    }
+    // title
+    if (!result.title) {
+      const titleEl = doc.querySelector('h1, [data-widget="webProductHeading"] span')
+      result.title = titleEl?.textContent?.trim() || ''
+    }
+    // 分类面包屑
+    if (!result.category) {
+      const crumbs = doc.querySelectorAll('[data-widget="webBreadcrumb"] a')
+      if (crumbs.length > 0) {
+        result.category = Array.from(crumbs).map(a => a.textContent?.trim()).filter(Boolean).join(' > ')
+      }
+    }
+    // 描述
+    if (!result.description) {
+      const descEl = doc.querySelector('[data-widget="webDescription"]')
+      result.description = descEl?.textContent?.trim() || ''
+    }
+    // 属性
+    if (!result.attributes!.length) {
+      const attrsContainer = doc.querySelector('[data-widget="webCharacteristics"]')
+      if (attrsContainer) {
+        const rows = attrsContainer.querySelectorAll('tr, [class*="row"], dl > div')
+        for (const row of Array.from(rows)) {
+          const cells = row.querySelectorAll('td, span, dt, dd')
+          if (cells.length >= 2) {
+            const name = cells[0]?.textContent?.trim()
+            const value = cells[1]?.textContent?.trim()
+            if (name && value && name !== value) result.attributes!.push({ name, value })
+          }
+        }
+      }
+    }
+    // 卖家
+    if (!result.sellerName) {
+      const sellerEl = doc.querySelector('[data-widget="webMerchantInfo"] a, [data-widget="webBestSeller"] button span')
+      result.sellerName = sellerEl?.textContent?.trim() || ''
+    }
+    // 图片 (从 meta og:image)
+    if (!result.images!.length) {
+      const ogImg = doc.querySelector('meta[property="og:image"]')
+      if (ogImg) {
+        const src = ogImg.getAttribute('content') || ''
+        if (src) result.images = [src]
+      }
+    }
+
+    console.log(`[Auto-Ozon] HTML 降级 ${sourceId}: brand=${result.brand}, title=${result.title?.substring(0, 50)}, attrs=${result.attributes!.length}`)
+    // 至少有标题或品牌才算成功
+    return (result.title || result.brand) ? result : null
+  } catch (e) {
+    console.warn(`[Auto-Ozon] HTML 降级 ${sourceId} 失败:`, e)
+    return null
+  }
+}
+
+/**
  * 通过 Ozon 内部 JSON API 获取单个商品的完整详情
  * sourceId 如 "1425179442"
  * 返回的 JSON 结构中有 "widgetStates" 包含所有 widget 数据
  */
-async function fetchProductDetailFromApi(sourceId: string): Promise<Partial<ScrapedProduct> | null> {
+async function fetchProductDetailFromApi(sourceId: string, sourceUrl?: string): Promise<Partial<ScrapedProduct> | null> {
+  // 策略 1: 尝试内部 JSON API (可能被 403)
   try {
-    const url = `${OZON_INTERNAL_API}?url=/product/-${sourceId}/`
-    const resp = await fetch(url, {
+    await randomDelay(200, 600)
+    const apiUrl = `${OZON_INTERNAL_API}?url=/product/-${sourceId}/`
+    const resp = await fetch(apiUrl, {
       headers: {
         'accept': 'application/json',
         'x-requested-with': 'XMLHttpRequest',
       },
-      credentials: 'include', // 携带用户 cookies
+      credentials: 'include',
     })
-    if (!resp.ok) return null
-    const data = await resp.json()
-    return parseInternalApiResponse(data, sourceId)
+    if (resp.ok) {
+      const data = await resp.json()
+      const result = parseInternalApiResponse(data, sourceId)
+      if (result) return result
+    }
+    // API 失败或解析无结果,降级到 HTML 采集
   } catch (e) {
-    console.warn(`[Auto-Ozon] 补全 ${sourceId} 失败:`, e)
-    return null
+    console.warn(`[Auto-Ozon] JSON API ${sourceId} 失败:`, e)
   }
+
+  // 策略 2: HTML 页面降级 (用真实 URL)
+  return await fetchProductDetailFromHtml(sourceId, sourceUrl)
 }
 
 /**
@@ -737,15 +925,14 @@ async function enrichProductsFromApi(
     const p = products[i]
     onProgress(i + 1, products.length, p.sourceId)
 
-    const detail = await fetchProductDetailFromApi(p.sourceId)
+    const detail = await fetchProductDetailFromApi(p.sourceId, p.sourceUrl)
     if (detail) {
       results.push({ id: p.id, data: detail })
     }
 
-    // 随机延时 2~5 秒
+    // ★ 拟人化:使用渐进加速延时 + 偶尔长停顿
     if (i < products.length - 1) {
-      const delay = DELAY_MIN + Math.random() * (DELAY_MAX - DELAY_MIN)
-      await new Promise(r => setTimeout(r, delay))
+      await enrichDelay(i, products.length, DELAY_MIN, DELAY_MAX)
     }
   }
   return results
@@ -806,9 +993,10 @@ export default defineContentScript({
 
       // 采集单个商品详情
       if (message.action === 'scrape') {
-        const product = scrapeOzonProduct()
-        sendResponse({ success: !!product, data: product })
-        return true
+        scrapeOzonProduct().then((product) => {
+          sendResponse({ success: !!product, data: product })
+        })
+        return true // 异步响应
       }
 
       // 列表页滚动采集
@@ -843,15 +1031,18 @@ export default defineContentScript({
             images: c.imageUrl ? [c.imageUrl] : [],
             rating: c.rating,
             reviewCount: c.reviewCount,
-            brand: '',
+            brand: c.brand || '',
             category: '',
-            sellerName: '',
+            sellerName: c.sellerName || '',
             sellerUrl: '',
             attributes: [],
             description: '',
             sourceUrl: c.sourceUrl,
             scrapedAt: new Date().toISOString(),
           }))
+
+          // ★ 拟人化:滚动采集结束后,模拟用户停顿再开始逐个查看详情
+          await transitionPause()
 
           const total = products.length
           let enriched = 0
@@ -864,6 +1055,11 @@ export default defineContentScript({
               break
             }
 
+            // ★ 拟人化:批次之间加入自然停顿
+            if (batchStart > 0) {
+              await batchTransitionPause()
+            }
+
             const batchEnd = Math.min(batchStart + batchSize, total)
             const batch = products.slice(batchStart, batchEnd)
 
@@ -873,7 +1069,7 @@ export default defineContentScript({
             for (let i = 0; i < batch.length; i++) {
               if (scrapeStopFlag) break
               const p = batch[i]
-              const detail = await fetchProductDetailFromApi(p.sourceId)
+              const detail = await fetchProductDetailFromApi(p.sourceId, p.sourceUrl)
               if (detail) {
                 batch[i] = {
                   ...p,
@@ -892,10 +1088,9 @@ export default defineContentScript({
                 enriched++
                 console.log(`[Auto-Ozon] scrapeList: enriched ${p.sourceId} — brand=${batch[i].brand}`)
               }
-              // 随机延时避免风控
+              // ★ 拟人化:使用渐进加速延时 + 偶尔长停顿
               if (i < batch.length - 1) {
-                const delay = 1500 + Math.random() * 1500
-                await new Promise(r => setTimeout(r, delay))
+                await enrichDelay(i, batch.length)
               }
             }
 

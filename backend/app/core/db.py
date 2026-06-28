@@ -87,6 +87,10 @@ def _migrate_columns(engine):
         ("scraped_product_records", "matched_suppliers", "ALTER TABLE scraped_product_records ADD COLUMN matched_suppliers TEXT DEFAULT '[]'"),
         ("scraped_product_records", "created_at", "ALTER TABLE scraped_product_records ADD COLUMN created_at DATETIME DEFAULT CURRENT_TIMESTAMP"),
         ("scraped_product_records", "updated_at", "ALTER TABLE scraped_product_records ADD COLUMN updated_at DATETIME"),
+        # scraped_product_records: v2 多值字段 (JSON arrays)
+        ("scraped_product_records", "video_urls", "ALTER TABLE scraped_product_records ADD COLUMN video_urls TEXT DEFAULT '[]'"),
+        ("scraped_product_records", "sku_list", "ALTER TABLE scraped_product_records ADD COLUMN sku_list TEXT DEFAULT '[]'"),
+        ("scraped_product_records", "spec_list", "ALTER TABLE scraped_product_records ADD COLUMN spec_list TEXT DEFAULT '[]'"),
     ]
     for table, column, sql in simple_migrations:
         columns = {c["name"] for c in inspector.get_columns(table)}
@@ -114,6 +118,9 @@ def _migrate_columns(engine):
     _fix_column_type(engine, "listings", "sku", "VARCHAR(128)", "''")
     _fix_column_type(engine, "listings", "name", "VARCHAR(512)", "''")
     _fix_column_type(engine, "listings", "price", "VARCHAR(32)", "''")
+
+    # ── scraped_product_records: migrate old single-value → new JSON arrays ──
+    _migrate_scraped_product_v2(engine)
 
     # Drop obsolete columns that no longer exist in the model
     # but still exist in SQLite with NOT NULL constraints, causing insert failures.
@@ -158,6 +165,63 @@ def _drop_column_if_exists(engine, table: str, column: str):
         if row:
             conn.execute(text(f"ALTER TABLE {table} DROP COLUMN {column}"))
             conn.commit()
+
+
+def _migrate_scraped_product_v2(engine):
+    """Convert old single-value columns to new JSON array columns.
+
+    Old columns (kept for backward compat, but data migrated to new format):
+      video_url (str) → video_urls (JSON list)
+      supplier_sku (str) + barcode (str) → sku_list (JSON list of {sku, barcode})
+      weight_g (int) + depth_mm + height_mm + width_mm → spec_list (JSON list of {weight_g, depth_mm, height_mm, width_mm})
+    """
+    import json as _json
+    inspector = inspect(engine)
+    tables = set(inspector.get_table_names())
+    if "scraped_product_records" not in tables:
+        return
+    cols = {c["name"] for c in inspector.get_columns("scraped_product_records")}
+    # Only migrate if new columns are empty (first run after upgrade)
+    need_migrate = False
+    for new_col in ("video_urls", "sku_list", "spec_list"):
+        if new_col in cols:
+            with engine.connect() as conn:
+                row = conn.execute(text(
+                    f"SELECT COUNT(*) FROM scraped_product_records WHERE {new_col} = '[]' OR {new_col} IS NULL"
+                )).fetchone()
+                if row and row[0] > 0:
+                    need_migrate = True
+                    break
+    if not need_migrate:
+        return
+    with engine.connect() as conn:
+        rows = conn.execute(text("SELECT id, video_url, supplier_sku, barcode, weight_g, depth_mm, height_mm, width_mm FROM scraped_product_records")).fetchall()
+        for r in rows:
+            rid = r[0]
+            updates, params = [], []
+            # video_url → video_urls
+            vu = r[1] or ""
+            if vu and cols.get("video_urls") is not None:  # always true after ADD COLUMN
+                updates.append("video_urls = ?")
+                params.append(_json.dumps([vu], ensure_ascii=False))
+            # supplier_sku + barcode → sku_list
+            sku = r[2] or ""
+            bc = r[3] or ""
+            if (sku or bc):
+                updates.append("sku_list = ?")
+                params.append(_json.dumps([{"sku": sku, "barcode": bc}], ensure_ascii=False))
+            # weight + dims → spec_list
+            wg = r[4] or 0
+            dp = r[5] or 0
+            ht = r[6] or 0
+            wd = r[7] or 0
+            if wg or dp or ht or wd:
+                updates.append("spec_list = ?")
+                params.append(_json.dumps([{"weight_g": wg, "depth_mm": dp, "height_mm": ht, "width_mm": wd}], ensure_ascii=False))
+            if updates:
+                params.append(rid)
+                conn.execute(text(f"UPDATE scraped_product_records SET {', '.join(updates)} WHERE id = ?"), params)
+        conn.commit()
 
 
 _migrate_columns(engine)

@@ -827,80 +827,73 @@ function parseInternalApiResponse(data: any, sourceId: string): Partial<ScrapedP
     sourceId,
     attributes: [],
     images: [],
+    videoUrls: [],
+    skuList: [],
+    specList: [],
   }
 
   const states = data?.widgetStates || data || {}
   const allKeys = Object.keys(states)
-  console.log(`[Auto-Ozon] parseInternalApiResponse ${sourceId}: ${allKeys.length} widget keys`)
 
-  // ── Step 1: 按 widget key 精确匹配提取 ──
+  // ── Step 1: 按 widget key 匹配提取 ──
+  // 数据结构参考: 后端 ozon_product_scraper.py 中的解析逻辑
   for (const [key, val] of Object.entries(states)) {
     if (typeof val !== 'string') continue
     let widget: any
     try { widget = JSON.parse(val as string) } catch { continue }
 
-    // --- 标题: webProductHeading / pdptitle ---
-    if (!result.title && (key.includes('webProductHeading') || key.includes('pdptitle'))) {
-      // Ozon heading widget 可能嵌套在 widgetState.options 或直接是顶层
-      const t = widget.options?.title || widget.title || widget.text || widget.heading || ''
+    // --- 标题: webProductHeading ---
+    if (!result.title && key.includes('webProductHeading')) {
+      const t = widget.title || widget.options?.title || widget.text || ''
       if (typeof t === 'string' && t.length > 3) {
         result.title = t
-        console.log(`[Auto-Ozon] ${sourceId} heading key=${key} → title="${t.substring(0, 60)}"`)
       }
     }
 
-    // --- 价格: webPrice ---
+    // --- 价格: webPrice (排除 Decreased) ---
     if (!result.price && key.includes('webPrice') && !key.includes('Decreased')) {
-      // Dump first price widget structure for debugging
-      console.log(`[Auto-Ozon] ${sourceId} price widget key=${key} keys=`, Object.keys(widget))
-      // Try common Ozon price structures
-      const priceRaw =
-        widget.options?.price || widget.options?.actionPrice ||
-        widget.price || widget.actionPrice ||
-        widget.computedPrice || widget.items?.[0]?.price ||
-        ''
-      const oldPriceRaw =
-        widget.options?.oldPrice || widget.options?.basePrice ||
-        widget.oldPrice || widget.basePrice ||
-        widget.computedOldPrice || widget.items?.[0]?.oldPrice ||
-        ''
+      // Ozon webPrice widget: 可能有嵌套结构
+      const priceRaw = widget.price || widget.options?.price || widget.actionPrice || widget.options?.actionPrice || ''
+      const oldPriceRaw = widget.oldPrice || widget.options?.oldPrice || widget.basePrice || widget.options?.basePrice || ''
       const p = parsePrice(String(priceRaw))
       const op = parsePrice(String(oldPriceRaw))
-      if (p > 0) { result.price = p; console.log(`[Auto-Ozon] ${sourceId} price=${p}`) }
-      if (op > 0) { result.oldPrice = op; console.log(`[Auto-Ozon] ${sourceId} oldPrice=${op}`) }
+      if (p > 0) result.price = p
+      if (op > 0) result.oldPrice = op
     }
 
-    // --- 评分: webReviewProductScore ---
+    // --- 评分和评论数: webReviewProductScore ---
+    // Ozon 实际结构: { "totalScore": 4.9, "reviewsCount": 61800, "score": null }
     if (!result.rating && key.includes('webReviewProductScore')) {
-      // Dump raw widget JSON to see actual Ozon structure
-      console.log(`[Auto-Ozon] ${sourceId} review RAW widget:`, JSON.stringify(widget).substring(0, 500))
-      // Try common Ozon review structures
-      const ratingRaw =
-        widget.options?.rating || widget.options?.score ||
-        widget.rating || widget.score || widget.reviewScore ||
-        widget.items?.[0]?.rating || ''
-      const countRaw =
-        widget.options?.reviewCount || widget.options?.count || widget.options?.reviewsCount ||
-        widget.reviewCount || widget.count || widget.reviewsCount ||
-        widget.items?.[0]?.count || widget.items?.[0]?.reviewCount || ''
-      const r = parseFloat(String(ratingRaw).replace(',', '.'))
-      const c = parseInt(String(countRaw).replace(/\D/g, ''))
-      if (r > 0) { result.rating = r; console.log(`[Auto-Ozon] ${sourceId} rating=${r}`) }
-      if (c > 0) { result.reviewCount = c; console.log(`[Auto-Ozon] ${sourceId} reviewCount=${c}`) }
+      const totalScore = widget.totalScore ?? widget.options?.totalScore ?? widget.score ?? null
+      const reviewsCount = widget.reviewsCount ?? widget.options?.reviewsCount ?? widget.reviewCount ?? null
+      const r = parseFloat(String(totalScore).replace(',', '.'))
+      if (r > 0 && r <= 5) result.rating = r  // Ozon rating 1-5
+      const c = parseInt(String(reviewsCount).replace(/\D/g, ''))
+      if (c > 0) result.reviewCount = c
     }
 
-    // --- 品牌: webBrandName / 从 breadcrumb 取最后一级之前的 ---
-    if (!result.brand && key.includes('webBrandName')) {
-      const b = widget.options?.text || widget.options?.name || widget.brand?.name || widget.text || widget.name || ''
-      if (typeof b === 'string' && b.length > 1) {
-        result.brand = b
-        console.log(`[Auto-Ozon] ${sourceId} brand key=${key} → "${b}"`)
+    // --- 品牌: webBrand (不是 webBrandName!) ---
+    // Ozon 实际 key 是 "webBrand-xxx", 结构: { content: { title: { text: [{ type: "link", content: "BrandName" }] } } }
+    if (!result.brand && key.includes('webBrand') && !key.includes('webBrandGrid')) {
+      // 路径 1: content.title.text[].content
+      const textArr = widget.content?.title?.text || widget.options?.content?.title?.text || []
+      if (Array.isArray(textArr)) {
+        for (const t of textArr) {
+          if (t?.type === 'link' && t?.content && typeof t.content === 'string' && t.content.length > 1) {
+            result.brand = t.content.trim()
+            break
+          }
+        }
+      }
+      // 路径 2: 简单字段
+      if (!result.brand) {
+        const b = widget.text || widget.options?.text || widget.name || widget.options?.name || ''
+        if (typeof b === 'string' && b.length > 1) result.brand = b.trim()
       }
     }
 
     // --- 分类面包屑: webBreadcrumb ---
     if (!result.category && key.includes('webBreadcrumb')) {
-      console.log(`[Auto-Ozon] ${sourceId} breadcrumb key=${key} keys=`, Object.keys(widget))
       const crumbs = widget.options?.items || widget.items || widget.links || []
       if (Array.isArray(crumbs) && crumbs.length > 1) {
         const cats = crumbs.map((c: any) => c.title || c.text || c.label || c.name || '').filter(Boolean)
@@ -910,22 +903,147 @@ function parseInternalApiResponse(data: any, sourceId: string): Partial<ScrapedP
 
     // --- 描述: webDescription ---
     if (!result.description && key.includes('webDescription')) {
-      const d = widget.options?.text || widget.options?.content || widget.text || widget.content || widget.description || ''
+      const d = widget.text || widget.options?.text || widget.content || widget.options?.content || widget.description || ''
       if (typeof d === 'string' && d.length > 10) result.description = d.slice(0, 2000)
     }
 
-    // --- 属性/特征: webCharacteristics ---
-    if (!result.attributes!.length && (key.includes('webCharacteristics') || key.includes('characteristic'))) {
-      console.log(`[Auto-Ozon] ${sourceId} characteristics key=${key} keys=`, Object.keys(widget))
-      const chars = widget.options?.rows || widget.options?.items || widget.options?.characteristics ||
-                    widget.rows || widget.items || widget.characteristics || []
+    // --- 属性/特征: webShortCharacteristics / webCharacteristics / webFullCharacteristics ---
+    // Ozon has multiple characteristics widgets with DIFFERENT data structures:
+    //   webShortCharacteristics — 3-5 "highlight" attrs at top of page
+    //     Structure A: { characteristics: [{ title: { textRs: [...] }, values: [{ text: "..." }] }] }
+    //   webCharacteristics — FULL product specs (20-30+ attrs)
+    //     Structure B: { sections: [{ title: "...", properties: [{ name, value, propertyName, propertyValues }] }] }
+    //     Structure C: { characteristics: [{ groupName, properties: [{ propertyName, propertyValues }] }] }
+    //     Structure D: { groups: [{ title, properties: [{ title, value }] }] }
+    //   webFullCharacteristics — sometimes used for detailed specs
+    //   webProductProperties / webSpecifications — alternative widget names
+    if (key.includes('haract') || key.includes('roper') || key.includes('pecif') || key.includes('webFull')) {
+      // ── Extract from Structure A: characteristics[].title.textRs + values[].text ──
+      const chars = widget.characteristics || widget.options?.characteristics || []
       if (Array.isArray(chars)) {
-        for (const c of chars) {
-          if (!c) continue
-          const name = c.title || c.name || c.label || c.property || ''
-          const value = c.value || c.text || c.val || ''
-          if (name && value && String(name).length > 1) {
+        for (const ch of chars) {
+          if (!ch) continue
+
+          // ── Path 1: title.textRs[].content → values[].text (webShortCharacteristics format) ──
+          let name = ''
+          const textRs = ch.title?.textRs || ch.title?.text || []
+          if (Array.isArray(textRs)) {
+            for (const tr of textRs) {
+              if (tr?.type === 'text' && tr?.content) { name = tr.content; break }
+              if (tr?.type === 'link' && tr?.content) { name = tr.content; break }
+            }
+          }
+          // Path 2: title is a string directly
+          if (!name && typeof ch.title === 'string') name = ch.title
+          // Path 3: name/label/propertyName fields
+          if (!name) name = ch.name || ch.label || ch.property || ch.propertyName || ''
+
+          // ── Extract value ──
+          let value = ''
+          // values[].text (webShortCharacteristics format)
+          const values = ch.values || []
+          if (Array.isArray(values)) {
+            for (const v of values) {
+              if (v?.text) { value = v.text; break }
+              if (v?.content) { value = v.content; break }
+            }
+          }
+          // propertyValues[].value (webCharacteristics format)
+          if (!value && Array.isArray(ch.propertyValues)) {
+            for (const pv of ch.propertyValues) {
+              if (pv?.value) { value = pv.value; break }
+            }
+          }
+          // Direct value/text fields
+          if (!value) value = ch.value || ch.text || ''
+
+          if (name && String(name).length > 1) {
             result.attributes!.push({ name: String(name), value: String(value) })
+            if (!result.brand && /^бренд$/i.test(String(name).trim())) {
+              result.brand = String(value).trim()
+            }
+          }
+
+          // ── Nested properties inside a characteristic group ──
+          if (ch.properties && Array.isArray(ch.properties)) {
+            for (const prop of ch.properties) {
+              if (!prop) continue
+              let pName = prop.name || prop.propertyName || prop.title || ''
+              if (!pName && typeof prop.title === 'string') pName = prop.title
+              // Try textRs for name
+              if (!pName && Array.isArray(prop.title?.textRs)) {
+                for (const tr of prop.title.textRs) {
+                  if (tr?.type === 'text' && tr?.content) { pName = tr.content; break }
+                }
+              }
+              let pValue = prop.value || prop.text || ''
+              if (!pValue && Array.isArray(prop.propertyValues)) {
+                for (const pv of prop.propertyValues) { if (pv?.value) { pValue = pv.value; break } }
+              }
+              if (!pValue && Array.isArray(prop.values)) {
+                for (const v of prop.values) { if (v?.text) { pValue = v.text; break } }
+              }
+              if (pName && String(pName).length > 1) {
+                result.attributes!.push({ name: String(pName), value: String(pValue) })
+                if (!result.brand && /^бренд$/i.test(String(pName).trim())) {
+                  result.brand = String(pValue).trim()
+                }
+              }
+            }
+          }
+        }
+      }
+
+      // ── Extract from Structure B: sections[].properties[] ──
+      const sections = widget.sections || widget.options?.sections || []
+      if (Array.isArray(sections)) {
+        for (const sec of sections) {
+          if (!sec) continue
+          const props = sec.properties || sec.items || sec.rows || []
+          if (!Array.isArray(props)) continue
+          for (const prop of props) {
+            if (!prop) continue
+            let pName = prop.name || prop.propertyName || prop.label || prop.title || ''
+            if (!pName && Array.isArray(prop.title?.textRs)) {
+              for (const tr of prop.title.textRs) { if (tr?.content) { pName = tr.content; break } }
+            }
+            let pValue = prop.value || prop.text || ''
+            if (!pValue && Array.isArray(prop.propertyValues)) {
+              for (const pv of prop.propertyValues) { if (pv?.value) { pValue = pv.value; break } }
+            }
+            if (!pValue && Array.isArray(prop.values)) {
+              for (const v of prop.values) { if (v?.text) { pValue = v.text; break } }
+            }
+            if (pName && String(pName).length > 1) {
+              result.attributes!.push({ name: String(pName), value: String(pValue) })
+              if (!result.brand && /^бренд$/i.test(String(pName).trim())) {
+                result.brand = String(pValue).trim()
+              }
+            }
+          }
+        }
+      }
+
+      // ── Extract from Structure D: groups[].properties[] ──
+      const groups = widget.groups || widget.options?.groups || []
+      if (Array.isArray(groups)) {
+        for (const grp of groups) {
+          if (!grp) continue
+          const props = grp.properties || grp.items || []
+          if (!Array.isArray(props)) continue
+          for (const prop of props) {
+            if (!prop) continue
+            let pName = prop.name || prop.title || prop.label || ''
+            if (!pName && Array.isArray(prop.title?.textRs)) {
+              for (const tr of prop.title.textRs) { if (tr?.content) { pName = tr.content; break } }
+            }
+            let pValue = prop.value || prop.text || ''
+            if (!pValue && Array.isArray(prop.values)) {
+              for (const v of prop.values) { if (v?.text) { pValue = v.text; break } }
+            }
+            if (pName && String(pName).length > 1) {
+              result.attributes!.push({ name: String(pName), value: String(pValue) })
+            }
           }
         }
       }
@@ -933,12 +1051,12 @@ function parseInternalApiResponse(data: any, sourceId: string): Partial<ScrapedP
 
     // --- 卖家: webMerchantInfo / webBestSeller ---
     if (!result.sellerName && (key.includes('webMerchantInfo') || key.includes('webBestSeller'))) {
-      const s = widget.options?.merchantName || widget.merchantName || widget.text || widget.name || ''
+      const s = widget.merchantName || widget.options?.merchantName || widget.text || widget.name || ''
       if (typeof s === 'string' && s.length > 1) result.sellerName = s
     }
 
     // --- 图片: webGallery ---
-    if (!result.images!.length && (key.includes('webGallery') || key.includes('gallery'))) {
+    if (!result.images!.length && key.includes('webGallery')) {
       const raw = widget.options?.images || widget.images || widget.items || []
       if (Array.isArray(raw) && raw.length > 0) {
         result.images = raw.map((img: any) => {
@@ -950,16 +1068,22 @@ function parseInternalApiResponse(data: any, sourceId: string): Partial<ScrapedP
     }
   }
 
-  // ── Step 2: 如果精确匹配没拿到品牌,尝试从 breadcrumbs 中提取 ──
+  // ── Step 2: 品牌 fallback — 从标题中提取 ──
+  if (!result.brand && result.title) {
+    const firstWord = result.title.split(/[\s,]/)[0]
+    if (firstWord && firstWord.length > 1 && firstWord.length < 40 && /^[A-Za-zА-Яа-я]/.test(firstWord)) {
+      result.brand = firstWord
+    }
+  }
+
+  // ── Step 3: 品牌 fallback — 从 breadcrumbs 中提取 ──
   if (!result.brand) {
-    // Ozon 面包屑最后一个通常是品牌页或商品页,倒数第二个经常是品牌
     for (const [key, val] of Object.entries(states)) {
       if (typeof val !== 'string' || !key.includes('Breadcrumb')) continue
       try {
         const w = JSON.parse(val as string)
         const crumbs = w.options?.items || w.items || w.links || []
         if (Array.isArray(crumbs) && crumbs.length >= 2) {
-          // 取面包屑中最后一个非商品项作为品牌
           for (let i = crumbs.length - 2; i >= 0; i--) {
             const name = crumbs[i].title || crumbs[i].text || ''
             if (name && name.length > 1 && name.length < 60 && !name.includes('ozon.ru')) {
@@ -972,15 +1096,139 @@ function parseInternalApiResponse(data: any, sourceId: string): Partial<ScrapedP
     }
   }
 
+  // ── Step 4: 从属性中提取物理规格、标识符、折扣、库存 → JSON arrays ──
+  const specAccum: { weight_g: number; depth_mm: number; height_mm: number; width_mm: number } = { weight_g: 0, depth_mm: 0, height_mm: 0, width_mm: 0 }
+  if (result.attributes && result.attributes.length > 0) {
+    for (const attr of result.attributes) {
+      const name = (attr.name || '').toLowerCase().trim()
+      const val = attr.value || ''
+
+      // 折扣
+      if (!result.discount && (name === 'скидка' || name.includes('discount'))) {
+        result.discount = val
+      }
+
+      // 库存
+      if (!result.stock && (name.includes('остал') || name.includes('stock') || name === 'наличие')) {
+        result.stock = val
+      }
+
+      // 重量
+      if (!specAccum.weight_g && (name.includes('вес') || name === 'масса' || name === 'weight')) {
+        const m = val.match(/([\d.,]+)\s*(г|грамм|kg|кг)/i)
+        if (m) {
+          let num = parseFloat(m[1].replace(',', '.'))
+          if (/kg|кг/i.test(m[2])) num *= 1000
+          if (num > 0) specAccum.weight_g = Math.round(num)
+        }
+      }
+
+      // Combined dimensions: "200 x 150 x 50 мм"
+      if (name.includes('размер') || name.includes('габарит')) {
+        const m = val.match(/(\d[\d.,]*)\s*[x×\*]\s*(\d[\d.,]*)\s*[x×\*]\s*(\d[\d.,]*)\s*мм/i)
+        if (m && !specAccum.depth_mm) {
+          specAccum.depth_mm = Math.round(parseFloat(m[1].replace(',', '.')))
+          specAccum.width_mm = Math.round(parseFloat(m[2].replace(',', '.')))
+          specAccum.height_mm = Math.round(parseFloat(m[3].replace(',', '.')))
+        }
+      }
+
+      // Individual dimensions
+      if (!specAccum.depth_mm && (name.includes('глубин') || name.includes('длин') || name === 'depth')) {
+        const m = val.match(/([\d.,]+)\s*мм/i)
+        if (m) specAccum.depth_mm = Math.round(parseFloat(m[1].replace(',', '.')))
+      }
+      if (!specAccum.height_mm && (name.includes('высот') || name === 'height')) {
+        const m = val.match(/([\d.,]+)\s*мм/i)
+        if (m) specAccum.height_mm = Math.round(parseFloat(m[1].replace(',', '.')))
+      }
+      if (!specAccum.width_mm && (name.includes('ширин') || name === 'width')) {
+        const m = val.match(/([\d.,]+)\s*мм/i)
+        if (m) specAccum.width_mm = Math.round(parseFloat(m[1].replace(',', '.')))
+      }
+
+      // 条形码
+      if (name.includes('штрихкод') || name.includes('barcode') || name === 'ean' || name === 'gtin') {
+        const code = val.replace(/\D/g, '')
+        if (code.length >= 8) {
+          const exists = result.skuList!.some(s => s.barcode === code)
+          if (!exists) result.skuList!.push({ sku: '', barcode: code })
+        }
+      }
+
+      // 供应商 SKU
+      if (name.includes('артикул продавца') || name.includes('артикул') || name.includes('supplier sku')) {
+        if (val.length > 1 && val.length < 64) {
+          const exists = result.skuList!.some(s => s.sku === val.trim())
+          if (!exists) result.skuList!.push({ sku: val.trim(), barcode: '' })
+        }
+      }
+    }
+  }
+  // Flush spec accumulator → specList
+  if (specAccum.weight_g || specAccum.depth_mm || specAccum.height_mm || specAccum.width_mm) {
+    result.specList!.push(specAccum)
+  }
+
+  // ── Step 5: 从 widget 中直接提取折扣 ──
+  if (!result.discount) {
+    for (const [key, val] of Object.entries(states)) {
+      if (typeof val !== 'string' || !key.includes('webPrice')) continue
+      try {
+        const w = JSON.parse(val as string)
+        const disc = w.discount || w.options?.discount || w.badge || ''
+        if (disc && typeof disc === 'string') {
+          result.discount = disc
+          break
+        }
+      } catch {}
+    }
+  }
+
+  // ── Step 6: 从 widget 中提取库存 ──
+  if (!result.stock) {
+    for (const [key, val] of Object.entries(states)) {
+      if (typeof val !== 'string' || !key.includes('webStock')) continue
+      try {
+        const w = JSON.parse(val as string)
+        const stockText = w.text || w.options?.text || w.value || w.stockText || ''
+        if (stockText && typeof stockText === 'string') {
+          result.stock = stockText
+          break
+        }
+      } catch {}
+    }
+  }
+
+  // ── Step 7: 从 widget 中提取视频 → videoUrls[] ──
+  if (!result.videoUrls!.length) {
+    for (const [key, val] of Object.entries(states)) {
+      if (typeof val !== 'string') continue
+      if (key.includes('webVideo') || key.includes('video')) {
+        try {
+          const w = JSON.parse(val as string)
+          const url = w.url || w.videoUrl || w.options?.url || w.options?.videoUrl || ''
+          if (url && typeof url === 'string' && url.startsWith('http')) {
+            if (!result.videoUrls!.includes(url)) result.videoUrls!.push(url)
+          }
+        } catch {}
+      }
+    }
+  }
+
   console.log(`[Auto-Ozon] parseResult ${sourceId}:`, {
     title: result.title?.substring(0, 50),
     brand: result.brand,
     rating: result.rating,
     reviewCount: result.reviewCount,
     price: result.price,
+    discount: result.discount,
+    stock: result.stock,
     images: result.images!.length,
     attrs: result.attributes!.length,
-    desc: result.description ? result.description.substring(0, 50) : '',
+    videoUrls: result.videoUrls!.length,
+    skuList: result.skuList!.length,
+    specList: result.specList!.length,
   })
 
   return result.images!.length > 0 || result.title || result.attributes!.length > 0 ? result : null

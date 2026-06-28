@@ -21,9 +21,23 @@ class ProductUpdate(BaseModel):
     category: Optional[str] = None
     price: Optional[float] = None
     old_price: Optional[float] = None
+    discount: Optional[str] = None
+    stock: Optional[str] = None
     description: Optional[str] = None
     source_url: Optional[str] = None
     images: Optional[List[str]] = None
+    attributes: Optional[List[dict]] = None
+    rating: Optional[float] = None
+    review_count: Optional[int] = None
+    seller_name: Optional[str] = None
+    seller_url: Optional[str] = None
+    weight_g: Optional[int] = None
+    depth_mm: Optional[int] = None
+    height_mm: Optional[int] = None
+    width_mm: Optional[int] = None
+    supplier_sku: Optional[str] = None
+    barcode: Optional[str] = None
+    video_url: Optional[str] = None
 
 
 class UploadRequest(BaseModel):

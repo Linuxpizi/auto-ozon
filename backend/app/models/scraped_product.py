@@ -17,6 +17,8 @@ class ScrapedProductRecord(Base):
     review_count = Column(Integer, default=0)
     brand = Column(String(128), default="")
     category = Column(String(512), default="")
+    discount = Column(String(32), default="", comment="折扣文本 如 -52%")
+    stock = Column(String(128), default="", comment="库存文本 如 Осталось 5 штук")
     seller_name = Column(String(256), default="")
     seller_url = Column(String(512), default="")
     attributes = Column(JSON, default=list, comment="属性列表")
@@ -25,19 +27,12 @@ class ScrapedProductRecord(Base):
     scraped_at = Column(DateTime, nullable=True, comment="插件采集时间")
 
     # ── 新增:物理规格 ──
-    weight_g = Column(Integer, default=0, comment="包装重量(克)")
-    depth_mm = Column(Integer, default=0, comment="包装长度(mm)")
-    height_mm = Column(Integer, default=0, comment="包装高度(mm)")
-    width_mm = Column(Integer, default=0, comment="包装宽度(mm)")
+    # ── 多值字段 (JSON arrays) ──
+    video_urls = Column(JSON, default=list, comment="视频 URL 列表")
+    sku_list = Column(JSON, default=list, comment="SKU+条形码列表 [{sku, barcode}]")
+    spec_list = Column(JSON, default=list, comment="规格列表 [{weight_g, depth_mm, height_mm, width_mm, color, size, ...}]")
 
-    # ── 新增:标识符 ──
-    supplier_sku = Column(String(128), default="", comment="供应商 SKU / 货号")
-    barcode = Column(String(64), default="", comment="EAN/GTIN 条形码")
-
-    # ── 新增:媒体 ──
-    video_url = Column(String(1024), default="", comment="商品视频 URL")
-
-    # ── 新增:Ozon 内部分类(从公开参考数据 API 获取) ──
+    # ── Ozon 内部分类 ──
     ozon_category_id = Column(Integer, default=0, comment="Ozon description_category_id")
     ozon_type_id = Column(Integer, default=0, comment="Ozon type_id")
 

@@ -12,7 +12,7 @@
       <n-space style="margin-bottom: 12px" align="center" wrap>
         <n-input v-model:value="keyword" placeholder="搜索名称 / SKU / 品类" clearable style="width: 220px" size="small" @keyup.enter="loadProducts" />
         <n-select v-model:value="filterBrand" :options="brandOptions" placeholder="品牌" clearable filterable style="width: 160px" size="small" @update:value="loadProducts" />
-        <n-select v-model:value="filterPlatform" :options="[{ label: '全部平台', value: '' }, { label: 'Ozon', value: 'ozon' }, { label: 'Wildberries', value: 'wb' }]" placeholder="平台" clearable style="width: 130px" size="small" @update:value="loadProducts" />
+        <n-select v-model:value="filterPlatform" :options="platformOptions" placeholder="平台" clearable style="width: 130px" size="small" @update:value="loadProducts" />
         <n-input-number v-model:value="minPrice" placeholder="最低价" :min="0" style="width: 110px" size="small" @update:value="loadProducts" />
         <n-input-number v-model:value="maxPrice" placeholder="最高价" :min="0" style="width: 110px" size="small" @update:value="loadProducts" />
         <n-input-number v-model:value="minRating" placeholder="最低评分" :min="0" :max="5" :step="0.1" style="width: 110px" size="small" @update:value="loadProducts" />
@@ -37,7 +37,7 @@
         :row-key="(row: any) => row.id"
         size="small"
         striped
-        :scroll-x="1800"
+        :scroll-x="1600"
         :max-height="600"
         :pagination="pagination"
         remote
@@ -47,34 +47,219 @@
     </div>
   </div>
 
-  <!-- 编辑弹窗 -->
-  <n-modal v-model:show="editVisible" preset="card" title="编辑商品" style="width: 640px" :bordered="false">
-    <n-form label-placement="left" label-width="80" :model="editForm">
-      <n-form-item label="商品名称"><n-input v-model:value="editForm.title" type="textarea" :rows="2" placeholder="商品名称" /></n-form-item>
-      <n-grid :cols="2" :x-gap="12">
-        <n-gi><n-form-item label="品牌"><n-input v-model:value="editForm.brand" placeholder="品牌" /></n-form-item></n-gi>
-        <n-gi><n-form-item label="品类"><n-input v-model:value="editForm.category" placeholder="品类" /></n-form-item></n-gi>
-      </n-grid>
-      <n-grid :cols="2" :x-gap="12">
-        <n-gi><n-form-item label="现价"><n-input-number v-model:value="editForm.price" :min="0" style="width: 100%" placeholder="价格" /></n-form-item></n-gi>
-        <n-gi><n-form-item label="原价"><n-input-number v-model:value="editForm.old_price" :min="0" style="width: 100%" placeholder="原价" /></n-form-item></n-gi>
-      </n-grid>
-      <n-form-item label="商品链接"><n-input v-model:value="editForm.source_url" placeholder="来源 URL" /></n-form-item>
-      <n-form-item label="描述"><n-input v-model:value="editForm.description" type="textarea" :rows="3" placeholder="商品描述" /></n-form-item>
-    </n-form>
-    <template #footer>
-      <n-space justify="end">
-        <n-button @click="editVisible = false">取消</n-button>
-        <n-button type="primary" :loading="editSaving" @click="saveEdit">保存</n-button>
-      </n-space>
-    </template>
-  </n-modal>
+  <!-- ========== 详情抽屉 ========== -->
+  <n-drawer v-model:show="drawerVisible" :width="720" placement="right" :closable="true">
+    <n-drawer-content :title="null" :native-scrollbar="false" body-content-style="padding: 20px 24px 16px">
+      <!-- 标题栏：平台标签 + 来源ID -->
+      <template v-if="detailProduct">
+        <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 16px">
+          <n-tag :type="detailProduct.platform === 'ozon' ? 'info' : 'success'" size="small" round>
+            {{ detailProduct.platform?.toUpperCase() }}
+          </n-tag>
+          <n-text depth="3" style="font-size: 12px">ID: {{ detailProduct.source_id }}</n-text>
+        </div>
 
-  <!-- 上传弹窗 -->
+        <!-- 数据指标行：评分 / 评论数 / 折扣 / 库存 (只读展示) -->
+        <div class="metrics-bar">
+          <div class="metric-item">
+            <span class="metric-value" style="color: #f5a623">★ {{ detailProduct.rating || '—' }}</span>
+            <span class="metric-label">{{ detailProduct.review_count?.toLocaleString() || 0 }} 评论</span>
+          </div>
+          <div v-if="detailProduct.discount" class="metric-item">
+            <n-tag type="error" size="small" round>{{ detailProduct.discount }}</n-tag>
+          </div>
+          <div v-if="detailProduct.old_price && detailProduct.old_price > (detailProduct.price || 0)" class="metric-item">
+            <span class="metric-label" style="text-decoration: line-through">{{ detailProduct.old_price?.toLocaleString() }} ₽</span>
+            <span class="metric-value">{{ detailProduct.price?.toLocaleString() }} ₽</span>
+          </div>
+          <div v-else class="metric-item">
+            <span class="metric-value">{{ detailProduct.price?.toLocaleString() || '—' }} ₽</span>
+          </div>
+          <div v-if="detailProduct.stock" class="metric-item">
+            <n-tag size="small" round :bordered="false">{{ detailProduct.stock }}</n-tag>
+          </div>
+        </div>
+
+        <n-divider style="margin: 12px 0" />
+
+        <!-- 图片区：主图 + 附图 -->
+        <div style="margin-bottom: 12px">
+          <div class="section-label">图片</div>
+          <div v-if="detailProduct.images?.length" class="gallery-row">
+            <div v-for="(img, idx) in detailProduct.images" :key="idx" class="gallery-item" :class="{ 'is-main': idx === 0 }">
+              <n-image
+                :src="img"
+                :width="idx === 0 ? 110 : 72"
+                :height="idx === 0 ? 110 : 72"
+                object-fit="cover"
+                class="gallery-img"
+              />
+              <span v-if="idx === 0" class="main-badge">主图</span>
+              <span v-else class="img-index">{{ idx + 1 }}</span>
+            </div>
+          </div>
+          <div v-else style="padding: 10px 0; color: #999; font-size: 13px">暂无图片</div>
+        </div>
+
+        <n-divider style="margin: 12px 0" />
+
+        <!-- 可折叠区 -->
+        <n-collapse default-expanded-names="basic" accordion>
+          <!-- ━━ 基本信息 ━━ -->
+          <n-collapse-item name="basic" title="📋 基本信息">
+            <div class="section-body">
+              <div class="field-group">
+                <label class="field-label">标题 <n-button size="tiny" quaternary type="primary" @click="handleAiOptimize('title')"><template #icon><span>✨</span></template>AI 优化</n-button></label>
+                <n-input v-model:value="detailProduct.title" type="textarea" :rows="2" placeholder="商品标题" />
+                <div v-if="isModified('title')" class="original-hint">
+                  <n-text depth="3" tag="span" style="font-size: 11px">原始：</n-text>
+                  <n-text depth="3" tag="span" style="font-size: 11px; text-decoration: line-through">{{ originalProduct?.title || '无' }}</n-text>
+                </div>
+              </div>
+              <div class="field-row-3">
+                <div class="field-group">
+                  <label class="field-label">品牌</label>
+                  <n-input v-model:value="detailProduct.brand" size="small" placeholder="品牌" />
+                  <div v-if="isModified('brand')" class="original-hint">
+                    <n-text depth="3" tag="span" style="font-size: 11px">原始：{{ originalProduct?.brand || '无' }}</n-text>
+                  </div>
+                </div>
+                <div class="field-group">
+                  <label class="field-label">分类</label>
+                  <n-input v-model:value="detailProduct.category" size="small" placeholder="分类" />
+                  <div v-if="isModified('category')" class="original-hint">
+                    <n-text depth="3" tag="span" style="font-size: 11px">原始：{{ originalProduct?.category || '无' }}</n-text>
+                  </div>
+                </div>
+                <div class="field-group">
+                  <label class="field-label">卖家</label>
+                  <n-input v-model:value="detailProduct.seller_name" size="small" placeholder="卖家" />
+                </div>
+              </div>
+              <div class="field-row-2">
+                <div class="field-group">
+                  <label class="field-label">现价 (₽)</label>
+                  <n-input-number v-model:value="detailProduct.price" :min="0" size="small" style="width: 100%" />
+                  <div v-if="isModified('price')" class="original-hint">
+                    <n-text depth="3" tag="span" style="font-size: 11px">原始：{{ originalProduct?.price?.toLocaleString() || '无' }} ₽</n-text>
+                  </div>
+                </div>
+                <div class="field-group">
+                  <label class="field-label">原价 (₽)</label>
+                  <n-input-number v-model:value="detailProduct.old_price" :min="0" size="small" style="width: 100%" />
+                  <div v-if="isModified('old_price')" class="original-hint">
+                    <n-text depth="3" tag="span" style="font-size: 11px">原始：{{ originalProduct?.old_price?.toLocaleString() || '无' }} ₽</n-text>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </n-collapse-item>
+
+          <!-- ━━ 规格与标识 ━━ -->
+          <n-collapse-item name="specs" title="📐 规格与标识">
+            <div class="section-body">
+              <div class="field-row-3">
+                <div class="field-group">
+                  <label class="field-label">供应商 SKU</label>
+                  <n-input v-model:value="detailProduct.supplier_sku" size="small" placeholder="供应商 SKU" />
+                </div>
+                <div class="field-group">
+                  <label class="field-label">条形码</label>
+                  <n-input v-model:value="detailProduct.barcode" size="small" placeholder="EAN / GTIN" />
+                </div>
+                <div class="field-group">
+                  <label class="field-label">视频 URL</label>
+                  <n-input v-model:value="detailProduct.video_url" size="small" placeholder="https://..." />
+                </div>
+              </div>
+              <div class="field-row-4">
+                <div class="field-group">
+                  <label class="field-label">重量 (g)</label>
+                  <n-input-number v-model:value="detailProduct.weight_g" :min="0" size="small" style="width: 100%" />
+                </div>
+                <div class="field-group">
+                  <label class="field-label">长 (mm)</label>
+                  <n-input-number v-model:value="detailProduct.depth_mm" :min="0" size="small" style="width: 100%" />
+                </div>
+                <div class="field-group">
+                  <label class="field-label">高 (mm)</label>
+                  <n-input-number v-model:value="detailProduct.height_mm" :min="0" size="small" style="width: 100%" />
+                </div>
+                <div class="field-group">
+                  <label class="field-label">宽 (mm)</label>
+                  <n-input-number v-model:value="detailProduct.width_mm" :min="0" size="small" style="width: 100%" />
+                </div>
+              </div>
+            </div>
+          </n-collapse-item>
+
+          <!-- ━━ 商品属性 ━━ -->
+          <n-collapse-item name="attrs" title="🏷️ 商品属性">
+            <div class="section-body">
+              <div v-if="detailProduct.attributes?.length">
+                <div v-for="(attr, idx) in detailProduct.attributes" :key="idx" class="attr-row">
+                  <n-input v-model:value="attr.name" size="small" placeholder="属性名" style="flex: 0 0 110px" />
+                  <n-input v-model:value="attr.value" size="small" placeholder="属性值" style="flex: 1" />
+                  <n-button size="tiny" quaternary type="error" circle @click="removeAttribute(idx)">✕</n-button>
+                </div>
+              </div>
+              <n-empty v-else description="暂无属性" size="small" />
+              <n-space style="margin-top: 10px">
+                <n-button size="small" dashed @click="addAttribute">+ 添加属性</n-button>
+                <n-button size="small" type="primary" @click="handleAiOptimize('attrs')">
+                  ✨ AI 优化全部属性
+                </n-button>
+              </n-space>
+            </div>
+          </n-collapse-item>
+
+          <!-- ━━ 商品描述 ━━ -->
+          <n-collapse-item name="desc" title="📝 商品描述">
+            <div class="section-body">
+              <n-input v-model:value="detailProduct.description" type="textarea" :rows="4" placeholder="商品描述内容" />
+              <div v-if="isModified('description')" class="original-hint" style="margin-top: 4px">
+                <n-text depth="3" tag="span" style="font-size: 11px">原始描述已修改</n-text>
+              </div>
+              <div style="margin-top: 8px">
+                <n-button size="small" type="primary" @click="handleAiOptimize('description')">
+                  ✨ AI 优化描述
+                </n-button>
+              </div>
+            </div>
+          </n-collapse-item>
+
+          <!-- ━━ 来源 ━━ -->
+          <n-collapse-item name="source" title="🔗 来源链接">
+            <div style="padding: 4px 0; font-size: 13px; word-break: break-all">
+              <a v-if="detailProduct.source_url" :href="detailProduct.source_url" target="_blank" rel="noopener" style="color: #2080f0; text-decoration: none">
+                {{ detailProduct.source_url }}
+              </a>
+              <n-text v-else depth="3">无链接</n-text>
+            </div>
+          </n-collapse-item>
+        </n-collapse>
+      </template>
+
+      <template #footer>
+        <n-space justify="end">
+          <n-popconfirm @positive-click="handleDelete">
+            <template #trigger>
+              <n-button type="error" size="small">删除</n-button>
+            </template>
+            确定删除此商品？
+          </n-popconfirm>
+          <n-button size="small" @click="openUpload">上传到店铺</n-button>
+          <n-button type="primary" size="small" :loading="drawerSaving" @click="saveDetail">保存修改</n-button>
+        </n-space>
+      </template>
+    </n-drawer-content>
+  </n-drawer>
+
+  <!-- ========== 上传弹窗 ========== -->
   <n-modal v-model:show="uploadVisible" preset="card" title="上传到店铺" style="width: 480px" :bordered="false">
     <n-alert v-if="uploadProduct" type="info" style="margin-bottom: 12px">
-      <strong>{{ truncate(uploadProduct.title, 50) }}</strong>
-      <span style="margin-left: 8px; color: var(--text-secondary)">ID: {{ uploadProduct.source_id }}</span>
+      <strong>{{ truncateText(uploadProduct.title, 50) }}</strong>
+      <span style="margin-left: 8px; color: #999">ID: {{ uploadProduct.source_id }}</span>
     </n-alert>
     <n-form label-placement="left" label-width="80" :model="uploadForm">
       <n-form-item label="选择店铺">
@@ -96,9 +281,10 @@
 <script setup lang="ts">
 import { h, ref, onMounted, reactive } from "vue";
 import {
-  NH2, NSpace, NButton, NInput, NSelect, NInputNumber,
-  NDataTable, NTag, NTooltip, NImage, NPopconfirm, NModal,
-  NForm, NFormItem, NGrid, NGi, NAlert,
+  NH2, NH4, NSpace, NButton, NInput, NSelect, NInputNumber,
+  NDataTable, NTag, NTooltip, NImage, NPopconfirm, NModal, NDrawer, NDrawerContent,
+  NCard, NForm, NFormItem, NGrid, NGi, NAlert, NEmpty, NText, NDivider,
+  NCollapse, NCollapseItem,
   useMessage, type DataTableColumns, type SelectOption,
 } from "naive-ui";
 import { apiGet, apiPost, apiPut, apiDelete } from "../api";
@@ -119,6 +305,12 @@ const minRating = ref<number | null>(null);
 const minReviews = ref<number | null>(null);
 const brandOptions = ref<SelectOption[]>([]);
 
+const platformOptions = [
+  { label: "全部平台", value: "" },
+  { label: "Ozon", value: "ozon" },
+  { label: "Wildberries", value: "wb" },
+];
+
 const message = useMessage();
 
 const pagination = reactive({
@@ -130,19 +322,11 @@ const pagination = reactive({
   prefix: ({ itemCount }: { itemCount: number }) => `共 ${itemCount} 条`,
 });
 
-// ── edit modal state ──────────────────────────────────────────────
-const editVisible = ref(false);
-const editSaving = ref(false);
-const editProductId = ref(0);
-const editForm = reactive({
-  title: "",
-  brand: "",
-  category: "",
-  price: 0,
-  old_price: 0,
-  description: "",
-  source_url: "",
-});
+// ── drawer state ──────────────────────────────────────────────────
+const drawerVisible = ref(false);
+const drawerSaving = ref(false);
+const detailProduct = ref<any>(null);
+const originalProduct = ref<any>(null);  // 快照：用于区分原始值 vs 已修改值
 
 // ── upload modal state ────────────────────────────────────────────
 const uploadVisible = ref(false);
@@ -164,182 +348,194 @@ function calcDiscount(price: number, oldPrice: number): string {
   return pct > 0 ? `-${pct}%` : "";
 }
 
-function truncate(text: string, maxLen: number): string {
+function truncateText(text: string, maxLen: number): string {
   if (!text) return "";
   return text.length > maxLen ? text.slice(0, maxLen) + "..." : text;
 }
 
+function truncateUrl(url: string): string {
+  if (!url) return "";
+  return url.length > 60 ? url.slice(0, 60) + "..." : url;
+}
+
 function brandTagType(brand: string): "" | "info" | "success" | "warning" | "error" {
-  const map: Record<string, "" | "info" | "success" | "warning" | "error"> = {
-    Samsung: "info", iQOO: "success", Tecno: "warning", OPPO: "success", Hotwav: "error",
-  };
-  return map[brand] || "";
+  const b = (brand || "").toLowerCase();
+  if (b.includes("samsung") || b.includes("apple")) return "success";
+  if (b.includes("xiaomi") || b.includes("huawei")) return "info";
+  if (b.includes("weiss") || b.includes("indesit")) return "warning";
+  return "";
+}
+
+function imageSlot(row: any) {
+  const imgs = row.images || [];
+  if (!imgs.length) {
+    return h("span", { style: "color: #999; font-size: 12px" }, "无图");
+  }
+  return h(NImage, {
+    src: imgs[0],
+    width: 48,
+    height: 48,
+    objectFit: "cover",
+    style: "border-radius: 4px; border: 1px solid #e0e0e6; cursor: pointer",
+    fallbackSrc: "data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 width=%2248%22 height=%2248%22><rect fill=%22%23f0f0f0%22 width=%2248%22 height=%2248%22/><text x=%2224%22 y=%2228%22 text-anchor=%22middle%22 fill=%22%23999%22 font-size=%228%22>/img</text></svg>",
+  });
+}
+
+function nameSlot(row: any) {
+  return h("div", { style: "max-width: 280px" }, [
+    h("div", {
+      style: "font-size: 13px; font-weight: 500; cursor: pointer; color: var(--n-text-color)",
+      onClick: () => openDrawer(row),
+    }, truncateText(row.title || "", 55)),
+    row.discount
+      ? h(NTag, { type: "error", size: "tiny", style: "margin-top: 2px" }, () => row.discount)
+      : null,
+  ]);
+}
+
+function priceSlot(row: any) {
+  const discount = calcDiscount(row.price, row.old_price);
+  return h("div", { style: "white-space: nowrap" }, [
+    h("div", { style: "font-weight: 600; font-size: 13px" }, formatPrice(row.price)),
+    row.old_price && row.old_price > row.price
+      ? h("div", { style: "font-size: 11px; color: #999; text-decoration: line-through" }, formatPrice(row.old_price))
+      : null,
+    discount
+      ? h(NTag, { type: "error", size: "tiny", style: "margin-top: 2px" }, () => discount)
+      : null,
+  ]);
+}
+
+function ratingSlot(row: any) {
+  const r = row.rating || 0;
+  const c = row.review_count || 0;
+  if (!r) return h("span", { style: "color: #999" }, "—");
+  return h("div", [
+    h("span", { style: "color: #f5a623; font-weight: 600" }, "\u2605 " + r.toFixed(1)),
+    h("span", { style: "color: #999; font-size: 11px; margin-left: 4px" }, `(${c.toLocaleString()})`),
+  ]);
+}
+
+function attrsSlot(row: any) {
+  const attrs = row.attributes || [];
+  if (!attrs.length) return h("span", { style: "color: #999; font-size: 12px" }, "—");
+  const display = attrs.slice(0, 3);
+  const items = display.map((a: any) =>
+    h(NTooltip, { trigger: "hover" }, {
+      trigger: () => h(NTag, { size: "tiny", bordered: false, style: "margin: 1px 2px" },
+        () => `${a.name}: ${truncateText(a.value || "", 20)}`),
+      default: () => `${a.name}: ${a.value || ""}`,
+    })
+  );
+  if (attrs.length > 3) {
+    items.push(h(NTag, { size: "tiny", bordered: false, type: "info" }, () => `+${attrs.length - 3}`));
+  }
+  return h("div", { style: "max-width: 260px" }, items);
+}
+
+function actionsSlot(row: any) {
+  return h(NSpace, { size: 4 }, () => [
+    h(NButton, { size: "tiny", quaternary: true, onClick: () => openDrawer(row) }, () => "详情"),
+    h(NButton, { size: "tiny", quaternary: true, type: "info", onClick: () => openUpload(row) }, () => "上传"),
+  ]);
 }
 
 // ── columns ───────────────────────────────────────────────────────
 const columns: DataTableColumns<any> = [
-  {
-    title: "图片", key: "images", width: 64, fixed: "left",
-    render(row) {
-      const img = row.images?.length > 0 ? row.images[0] : "";
-      if (!img) return h("span", { style: { color: "#ccc" } }, "—");
-      return h(NImage, { src: img, width: 48, height: 48, objectFit: "cover", style: "border-radius: 4px;", lazy: true });
-    },
-  },
-  {
-    title: "ID", key: "source_id", width: 120, sorter: "default",
-    render(row) {
-      const url = row.source_url || "";
-      if (url) return h("a", { href: url, target: "_blank", style: "color: #1890ff; font-size: 12px;" }, row.source_id);
-      return h("span", { style: "font-size: 12px;" }, row.source_id);
-    },
-  },
-  {
-    title: "商品名称", key: "title", minWidth: 280, ellipsis: { tooltip: true }, sorter: "default",
-    render(row) {
-      const title = row.title || "";
-      const url = row.source_url || "";
-      const children = [h("span", { style: "font-size: 13px; font-weight: 500; line-height: 1.5;" }, truncate(title, 80))];
-      if (row.brand) children.unshift(h(NTag, { size: "small", round: true, type: brandTagType(row.brand), style: "margin-right: 6px;" }, { default: () => row.brand }));
-      if (url) return h("a", { href: url, target: "_blank", style: "text-decoration: none; color: inherit;" }, children);
-      return h("div", children);
-    },
-  },
-  {
-    title: "平台", key: "platform", width: 70,
-    render(row) {
-      return h(NTag, { size: "small", type: row.platform === "ozon" ? "warning" : "info", round: true }, { default: () => row.platform === "ozon" ? "Ozon" : "WB" });
-    },
-  },
-  {
-    title: "品类", key: "category", width: 150, ellipsis: { tooltip: true }, sorter: "default",
-    render(row) { return h("span", { style: "font-size: 12px; color: var(--text-secondary);" }, truncate(row.category, 40) || "—"); },
-  },
-  {
-    title: "现价", key: "price", width: 110, sorter: (a: any, b: any) => (a.price || 0) - (b.price || 0),
-    render(row) { return h("span", { style: "font-weight: 700; color: #e53e3e; font-size: 13px;" }, formatPrice(row.price)); },
-  },
-  {
-    title: "原价", key: "old_price", width: 100, sorter: (a: any, b: any) => (a.old_price || 0) - (b.old_price || 0),
-    render(row) {
-      if (!row.old_price) return h("span", { style: { color: "#ccc" } }, "—");
-      return h("span", { style: "text-decoration: line-through; color: #999; font-size: 12px;" }, formatPrice(row.old_price));
-    },
-  },
-  {
-    title: "折扣", key: "discount", width: 70,
-    render(row) {
-      const d = calcDiscount(row.price, row.old_price);
-      if (!d) return h("span", { style: { color: "#ccc" } }, "—");
-      return h(NTag, { size: "small", type: "error", round: true }, { default: () => d });
-    },
-  },
-  {
-    title: "评分", key: "rating", width: 80, sorter: (a: any, b: any) => (a.rating || 0) - (b.rating || 0),
-    render(row) {
-      const r = row.rating || 0;
-      if (!r) return h("span", { style: { color: "#ccc" } }, "—");
-      return h("span", { style: `color: ${r >= 4 ? "#52c41a" : r >= 3 ? "#faad14" : "#ff4d4f"}; font-weight: 600;` }, `⭐ ${r.toFixed(1)}`);
-    },
-  },
-  {
-    title: "评论数", key: "review_count", width: 80, sorter: (a: any, b: any) => (a.review_count || 0) - (b.review_count || 0),
-    render(row) {
-      const c = row.review_count || 0;
-      if (!c) return h("span", { style: { color: "#ccc" } }, "—");
-      return h("span", { style: "font-size: 12px;" }, c.toLocaleString());
-    },
-  },
-  {
-    title: "卖家", key: "seller_name", width: 120, ellipsis: { tooltip: true },
-    render(row) {
-      if (!row.seller_name) return h("span", { style: { color: "#ccc" } }, "—");
-      if (row.seller_url) return h("a", { href: row.seller_url, target: "_blank", style: "color: #1890ff; font-size: 12px;" }, truncate(row.seller_name, 20));
-      return h("span", { style: "font-size: 12px;" }, truncate(row.seller_name, 20));
-    },
-  },
-  {
-    title: "属性", key: "attributes", width: 260,
-    render(row) {
-      const attrs = row.attributes || [];
-      if (attrs.length === 0) return h("span", { style: "color: #ccc; font-size: 12px;" }, "—");
-      const shown = attrs.slice(0, 3);
-      const rest = attrs.slice(3);
-      const items = shown.map((a: any) => h("span", {
-        style: "display: inline-block; font-size: 11px; margin: 1px 3px 1px 0; padding: 1px 5px; background: #f5f5f5; border-radius: 3px; white-space: nowrap;",
-      }, `${a.name}: ${a.value}`));
-      if (rest.length > 0) {
-        items.push(h(NTooltip, {}, {
-          trigger: () => h("span", { style: "display: inline-block; font-size: 11px; padding: 1px 5px; background: #e6f7ff; border-radius: 3px; cursor: pointer;" }, `+${rest.length}`),
-          default: () => h("pre", { style: "margin: 0; white-space: pre-wrap; font-size: 12px;" }, rest.map((a: any) => `${a.name}: ${a.value}`).join("\n")),
-        }));
-      }
-      return h("div", { style: "line-height: 1.6;" }, items);
-    },
-  },
-  {
-    title: "描述", key: "description", width: 200, ellipsis: { tooltip: true },
-    render(row) {
-      if (!row.description) return h("span", { style: "color: #ccc; font-size: 12px;" }, "—");
-      return h(NTooltip, {}, {
-        trigger: () => h("span", { style: "font-size: 12px; color: var(--text-secondary);" }, truncate(row.description, 40)),
-        default: () => h("div", { style: "max-width: 400px; max-height: 300px; overflow-y: auto; white-space: pre-wrap; font-size: 13px; line-height: 1.6;" }, row.description),
-      });
-    },
-  },
-  {
-    title: "采集时间", key: "scraped_at", width: 140, sorter: "default",
-    render(row) {
-      if (!row.scraped_at) return h("span", { style: { color: "#ccc" } }, "—");
-      const d = new Date(row.scraped_at);
-      return h("span", { style: "font-size: 12px; color: var(--text-secondary);" },
-        d.toLocaleString("zh-CN", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" }));
-    },
-  },
-  {
-    title: "操作", key: "actions", width: 140, fixed: "right",
-    render(row) {
-      return h(NSpace, { size: 2, wrap: false }, {
-        default: () => [
-          h(NButton, { size: "tiny", type: "primary", text: true, onClick: () => openEdit(row) }, { default: () => "编辑" }),
-          h(NButton, { size: "tiny", type: "info", text: true, onClick: () => openUpload(row) }, { default: () => "上传" }),
-          h(NPopconfirm, { onPositiveClick: () => deleteProduct(row.id) }, {
-            trigger: () => h(NButton, { size: "tiny", type: "error", text: true }, { default: () => "删除" }),
-            default: () => "确认删除此商品?",
-          }),
-        ],
-      });
-    },
-  },
+  { title: "图片", key: "images", width: 64, render: imageSlot, fixed: "left" as const },
+  { title: "商品名称", key: "title", minWidth: 260, render: nameSlot, ellipsis: { tooltip: true } },
+  { title: "品牌", key: "brand", width: 110, render: (row) => h(NTag, { type: brandTagType(row.brand), size: "small", bordered: false }, () => row.brand || "\u2014") },
+  { title: "价格", key: "price", width: 140, render: priceSlot },
+  { title: "评分", key: "rating", width: 110, render: ratingSlot },
+  { title: "属性", key: "attributes", minWidth: 260, render: attrsSlot },
+  { title: "分类", key: "category", width: 140, render: (row) => h("span", { style: "font-size: 12px; color: #999" }, truncateText(row.category || "", 30)) },
+  { title: "操作", key: "actions", width: 100, render: actionsSlot, fixed: "right" as const },
 ];
 
-// ── edit / upload ─────────────────────────────────────────────────
-function openEdit(row: any) {
-  editProductId.value = row.id;
-  editForm.title = row.title || "";
-  editForm.brand = row.brand || "";
-  editForm.category = row.category || "";
-  editForm.price = row.price || 0;
-  editForm.old_price = row.old_price || 0;
-  editForm.description = row.description || "";
-  editForm.source_url = row.source_url || "";
-  editVisible.value = true;
+// ── drawer ────────────────────────────────────────────────────────
+function openDrawer(row: any) {
+  detailProduct.value = JSON.parse(JSON.stringify(row));
+  originalProduct.value = JSON.parse(JSON.stringify(row)); // 快照
+  drawerVisible.value = true;
 }
 
-async function saveEdit() {
-  editSaving.value = true;
+/** 判断某字段是否被修改过（与原始值不同） */
+function isModified(field: string): boolean {
+  if (!originalProduct.value || !detailProduct.value) return false;
+  const orig = originalProduct.value[field];
+  const curr = detailProduct.value[field];
+  if (typeof orig === "number" && typeof curr === "number") return orig !== curr;
+  return String(orig ?? "") !== String(curr ?? "");
+}
+
+/** AI 优化（预留入口，后续接入 AI API） */
+function handleAiOptimize(target: "title" | "attrs" | "description") {
+  if (target === "title") {
+    message.info("AI 优化标题功能即将上线，敬请期待 ✨");
+  } else if (target === "attrs") {
+    message.info("AI 优化属性功能即将上线，敬请期待 ✨");
+  } else {
+    message.info("AI 优化描述功能即将上线，敬请期待 ✨");
+  }
+}
+
+function addAttribute() {
+  if (!detailProduct.value) return;
+  if (!detailProduct.value.attributes) detailProduct.value.attributes = [];
+  detailProduct.value.attributes.push({ name: "", value: "" });
+}
+
+function removeAttribute(idx: number) {
+  if (!detailProduct.value?.attributes) return;
+  detailProduct.value.attributes.splice(idx, 1);
+}
+
+async function saveDetail() {
+  if (!detailProduct.value) return;
+  drawerSaving.value = true;
   try {
-    await apiPut(`/selection/products/${editProductId.value}`, { ...editForm });
+    const d = detailProduct.value;
+    // 只提交可编辑字段，评分/评论数/折扣/库存为只读不提交
+    await apiPut(`/selection/products/${d.id}`, {
+      title: d.title,
+      brand: d.brand,
+      category: d.category,
+      price: d.price,
+      old_price: d.old_price,
+      description: d.description,
+      source_url: d.source_url,
+      images: d.images,
+      attributes: d.attributes,
+      seller_name: d.seller_name,
+      seller_url: d.seller_url,
+      video_urls: d.video_urls || [],
+      sku_list: d.sku_list || [],
+      spec_list: d.spec_list || [],
+    });
     message.success("保存成功");
-    editVisible.value = false;
+    drawerVisible.value = false;
     await loadProducts();
   } catch (e: any) {
     message.error("保存失败: " + e.message);
   } finally {
-    editSaving.value = false;
+    drawerSaving.value = false;
   }
 }
 
+async function handleDelete() {
+  if (!detailProduct.value) return;
+  try {
+    await apiDelete(`/selection/products/${detailProduct.value.id}`);
+    message.success("已删除");
+    drawerVisible.value = false;
+    await loadProducts();
+    await loadBrands();
+  } catch (e: any) {
+    message.error("删除失败: " + e.message);
+  }
+}
+
+// ── upload ────────────────────────────────────────────────────────
 function openUpload(row: any) {
   uploadProduct.value = row;
   uploadForm.store_id = null;
@@ -359,7 +555,7 @@ async function doUpload() {
   if (!uploadForm.store_id) { message.warning("请选择店铺"); return; }
   uploading.value = true;
   try {
-    const res = await apiPost(`/selection/products/${uploadProduct.value.id}/upload`, {
+    await apiPost(`/selection/products/${uploadProduct.value.id}/upload`, {
       store_id: uploadForm.store_id,
       offer_id: uploadForm.offer_id,
     });
@@ -377,25 +573,20 @@ async function loadProducts() {
   loading.value = true;
   try {
     const skip = (currentPage.value - 1) * pageSize.value;
-    const params: Record<string, string | number | undefined> = { skip, limit: pageSize.value };
+    const params: Record<string, any> = { skip, limit: pageSize.value };
     if (filterBrand.value) params.brand = filterBrand.value;
     if (filterPlatform.value) params.platform = filterPlatform.value;
     if (keyword.value) params.keyword = keyword.value;
-    if (minPrice.value !== null) params.min_price = minPrice.value;
-    if (maxPrice.value !== null) params.max_price = maxPrice.value;
-    if (minRating.value !== null) params.min_rating = minRating.value;
-    if (minReviews.value !== null) params.min_reviews = minReviews.value;
-    products.value = await apiGet("/selection/products", params);
+    if (minPrice.value != null) params.min_price = minPrice.value;
+    if (maxPrice.value != null) params.max_price = maxPrice.value;
+    if (minRating.value != null) params.min_rating = minRating.value;
+    if (minReviews.value != null) params.min_reviews = minReviews.value;
 
-    const countParams: Record<string, string | number | undefined> = {};
-    if (filterBrand.value) countParams.brand = filterBrand.value;
-    if (filterPlatform.value) countParams.platform = filterPlatform.value;
-    if (keyword.value) countParams.keyword = keyword.value;
-    if (minPrice.value !== null) countParams.min_price = minPrice.value;
-    if (maxPrice.value !== null) countParams.max_price = maxPrice.value;
-    if (minRating.value !== null) countParams.min_rating = minRating.value;
-    if (minReviews.value !== null) countParams.min_reviews = minReviews.value;
-    const countRes = await apiGet("/selection/products/count", countParams);
+    const [data, countRes] = await Promise.all([
+      apiGet("/selection/products", params),
+      apiGet("/selection/products/count", params),
+    ]);
+    products.value = data;
     totalCount.value = countRes.total;
     pagination.itemCount = countRes.total;
     pagination.page = currentPage.value;
@@ -417,18 +608,6 @@ async function loadBrands() {
   } catch { /* ignore */ }
 }
 
-
-async function deleteProduct(id: number) {
-  try {
-    await apiDelete(`/selection/products/${id}`);
-    message.success("已删除");
-    await loadProducts();
-    await loadBrands();
-  } catch (e: any) {
-    message.error("删除失败: " + e.message);
-  }
-}
-
 function resetFilters() {
   filterBrand.value = null;
   filterPlatform.value = null;
@@ -446,3 +625,132 @@ function onPageSizeChange(size: number) { pageSize.value = size; currentPage.val
 
 onMounted(() => { loadProducts(); loadBrands(); });
 </script>
+
+<style scoped>
+/* ── 指标行 ── */
+.metrics-bar {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+.metric-item {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.metric-value {
+  font-size: 14px;
+  font-weight: 600;
+}
+.metric-label {
+  font-size: 12px;
+  color: #999;
+}
+
+/* ── 图片区 ── */
+.gallery-row {
+  display: flex;
+  gap: 10px;
+  overflow-x: auto;
+  padding: 6px 0;
+}
+.gallery-item {
+  position: relative;
+  flex-shrink: 0;
+  border-radius: 8px;
+  overflow: hidden;
+  border: 2px solid var(--n-border-color, #e0e0e6);
+}
+.gallery-item.is-main {
+  border-color: #2080f0;
+  box-shadow: 0 0 0 1px #2080f033;
+}
+.gallery-img {
+  display: block;
+}
+.main-badge {
+  position: absolute;
+  bottom: 2px;
+  left: 2px;
+  background: #2080f0;
+  color: #fff;
+  font-size: 10px;
+  padding: 1px 6px;
+  border-radius: 4px;
+  font-weight: 600;
+}
+.img-index {
+  position: absolute;
+  bottom: 2px;
+  left: 2px;
+  background: rgba(0, 0, 0, 0.45);
+  color: #fff;
+  font-size: 10px;
+  padding: 1px 5px;
+  border-radius: 4px;
+}
+
+/* ── 折叠面板内容 ── */
+.section-body {
+  padding: 6px 0;
+}
+.section-label {
+  font-size: 12px;
+  color: #999;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  margin-bottom: 6px;
+}
+
+/* ── 表单字段组 ── */
+.field-group {
+  margin-bottom: 12px;
+}
+.field-label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  font-weight: 500;
+  color: #666;
+  margin-bottom: 4px;
+}
+.field-row-2 {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+.field-row-3 {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  gap: 12px;
+}
+.field-row-4 {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr 1fr;
+  gap: 12px;
+}
+
+/* ── 原始值提示 ── */
+.original-hint {
+  margin-top: 3px;
+  padding: 3px 8px;
+  background: #fafafa;
+  border-radius: 4px;
+  border-left: 2px solid #e0e0e6;
+}
+
+/* ── 属性行 ── */
+.attr-row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  margin-bottom: 8px;
+}
+
+/* ── 响应式 ── */
+@media (max-width: 700px) {
+  .field-row-3, .field-row-4 { grid-template-columns: 1fr 1fr; }
+}
+</style>

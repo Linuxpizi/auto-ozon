@@ -19,6 +19,8 @@ class ScrapedProductBase(BaseModel):
     review_count: int = 0
     brand: str = ""
     category: str = ""
+    discount: str = ""
+    stock: str = ""
     seller_name: str = ""
     seller_url: str = ""
     attributes: List[dict] = []
@@ -26,20 +28,12 @@ class ScrapedProductBase(BaseModel):
     source_url: str = ""
     scraped_at: Optional[datetime] = None
 
-    # ── 新增:物理规格 ──
-    weight_g: int = 0
-    depth_mm: int = 0
-    height_mm: int = 0
-    width_mm: int = 0
+    # ── 多值字段 (JSON arrays) ──
+    video_urls: List[str] = []
+    sku_list: List[dict] = []          # [{"sku": "...", "barcode": "..."}]
+    spec_list: List[dict] = []         # [{"weight_g": 0, "depth_mm": 0, "height_mm": 0, "width_mm": 0, "color": "...", "size": "..."}]
 
-    # ── 新增:标识符 ──
-    supplier_sku: str = ""
-    barcode: str = ""
-
-    # ── 新增:媒体 ──
-    video_url: str = ""
-
-    # ── 新增:Ozon 内部分类 ──
+    # ── Ozon 内部分类 ──
     ozon_category_id: int = 0
     ozon_type_id: int = 0
 
@@ -50,6 +44,36 @@ class ScrapedProductBase(BaseModel):
         if not isinstance(data, dict):
             return data
         result = {_camel_to_snake(k): v for k, v in data.items()}
+
+        # ── Backward compat: convert old single-value fields → new JSON arrays ──
+        # video_url → video_urls
+        if "video_url" in result and "video_urls" not in result:
+            vu = result.pop("video_url", "")
+            result["video_urls"] = [vu] if vu else []
+        # supplier_sku + barcode → sku_list
+        if ("supplier_sku" in result or "barcode" in result) and "sku_list" not in result:
+            sku = result.pop("supplier_sku", "")
+            bc = result.pop("barcode", "")
+            if sku or bc:
+                result["sku_list"] = [{"sku": sku or "", "barcode": bc or ""}]
+            else:
+                result.pop("supplier_sku", None)
+                result.pop("barcode", None)
+                result.setdefault("sku_list", [])
+        # weight_g + dims → spec_list
+        has_dims = any(result.pop(f, 0) for f in ("weight_g", "depth_mm", "height_mm", "width_mm"))
+        if has_dims and "spec_list" not in result:
+            result["spec_list"] = [{
+                "weight_g": result.pop("weight_g", 0),
+                "depth_mm": result.pop("depth_mm", 0),
+                "height_mm": result.pop("height_mm", 0),
+                "width_mm": result.pop("width_mm", 0),
+            }]
+        else:
+            for f in ("weight_g", "depth_mm", "height_mm", "width_mm"):
+                result.pop(f, None)
+            result.setdefault("spec_list", [])
+
         # scraped_at 字符串 → datetime
         sa = result.get('scraped_at')
         if isinstance(sa, str):

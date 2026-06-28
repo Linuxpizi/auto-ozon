@@ -20,25 +20,13 @@ export interface ScrapedProduct {
   sourceUrl: string
   scrapedAt: string
 
-  // ── 新增:物理规格 ──
-  /** 包装重量(克) */
-  weightG: number
-  /** 包装长度(mm) */
-  depthMm: number
-  /** 包装高度(mm) */
-  heightMm: number
-  /** 包装宽度(mm) */
-  widthMm: number
-
-  // ── 新增:标识符 ──
-  /** 供应商 SKU / 供应商货号 */
-  supplierSku: string
-  /** EAN/GTIN 条形码 */
-  barcode: string
-
-  // ── 新增:媒体 ──
-  /** 商品视频 URL */
-  videoUrl: string
+  // ── 多值字段 (JSON arrays) ──
+  /** 商品视频 URL 列表 */
+  videoUrls: string[]
+  /** SKU + 条形码列表 [{sku, barcode}] */
+  skuList: Array<{ sku: string; barcode: string }>
+  /** 规格列表 [{weight_g, depth_mm, height_mm, width_mm, color, size, ...}] */
+  specList: Array<{ weight_g: number; depth_mm: number; height_mm: number; width_mm: number; [key: string]: any }>
 
   // ── 新增:Ozon 内部分类(从内部 API 获取) ──
   /** Ozon description_category_id */

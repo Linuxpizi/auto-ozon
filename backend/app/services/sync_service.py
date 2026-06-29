@@ -128,8 +128,13 @@ def sync_orders_for_store(
             except (ValueError, TypeError):
                 pass
 
-        # p.price is already the total order value (sum of unit_price × qty for all products)
+        # gmv = total order value (unit_price × qty for all products)
+        # p.price is already the total order value from Ozon API
         gmv = p.customer_price if p.customer_price > 0 else p.price
+        # unit_price = per-unit price (fixed at source in ozon_client.py)
+        # customer_price = total customer price from Ozon financial data
+        unit_price = p.unit_price
+        customer_price = p.customer_price
         image_url = image_map.get(p.offer_id, "") or image_map.get(p.sku, "")
         if not image_url:
             logger.error(
@@ -153,8 +158,8 @@ def sync_orders_for_store(
             image_url=image_url,
             tracking_number=p.tracking_number,
             quantity=p.quantity,
-            unit_price=p.price,
-            customer_price=p.customer_price,
+            unit_price=unit_price,
+            customer_price=customer_price,
             payout=p.payout,
             commission=p.commission_amount,
             discount=p.discount_value,
@@ -177,8 +182,8 @@ def sync_orders_for_store(
                 shipment_number=p.posting_number,
                 tracking_number=p.tracking_number,
                 quantity=p.quantity,
-                unit_price=p.price,
-                customer_price=p.customer_price,
+                unit_price=unit_price,
+                customer_price=customer_price,
                 payout=p.payout,
                 commission=p.commission_amount,
                 discount=p.discount_value,

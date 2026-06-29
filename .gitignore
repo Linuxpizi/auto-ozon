@@ -32,3 +32,5 @@ backend/ozon.db
 # 测试文件
 backend/tests/mail.py
 backend/tests/test_ozon_api.py
+
+.copilot-hub

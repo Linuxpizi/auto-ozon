@@ -115,6 +115,7 @@ class OzonPostingFBS:
     sku: str
     product_name: str
     price: float
+    unit_price: float
     quantity: int
     in_process_at: Optional[str]
     shipment_date: Optional[str]
@@ -335,6 +336,8 @@ class OzonClient:
                 fin_by_pid[int(fp.get("product_id", 0))] = fp
 
             _products_json_items: list[dict] = []
+            first_unit_price = 0.0
+            first_customer_price = 0.0
             for p in products:
                 # Per-unit price from the products[].price.amount field
                 p_price_obj = p.get("price", {})
@@ -354,9 +357,14 @@ class OzonClient:
                 total_payout += float(fin.get("payout", 0))
                 cp_obj = fin.get("customer_price", {})
                 if isinstance(cp_obj, dict):
-                    total_customer_price += float(cp_obj.get("amount", 0))
+                    cp_val = float(cp_obj.get("amount", 0))
                 else:
-                    total_customer_price += float(cp_obj or 0)
+                    cp_val = float(cp_obj or 0)
+                total_customer_price += cp_val
+                if not first_unit_price and unit_price > 0:
+                    first_unit_price = unit_price
+                if not first_customer_price and cp_val > 0:
+                    first_customer_price = cp_val
                 co_obj = fin.get("commission", {})
                 if isinstance(co_obj, dict):
                     total_commission += float(co_obj.get("amount", 0))
@@ -390,6 +398,7 @@ class OzonClient:
                     sku=str(first_product.get("sku", "")),
                     product_name=first_product.get("name", ""),
                     price=total_price,
+                    unit_price=first_unit_price,
                     quantity=total_quantity,
                     in_process_at=item.get("in_process_at"),
                     shipment_date=item.get("shipment_date"),

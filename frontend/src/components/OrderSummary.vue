@@ -208,9 +208,9 @@ function currencySymbol(order: OrderItem): string {
 }
 
 function displayPrice(order: OrderItem): number {
-  // customer_price is the total price from Ozon financial_data
+  // customer_price = total from Ozon financial_data (already includes qty)
   if (order.customer_price > 0) return order.customer_price;
-  // fallback: unit_price * quantity
+  // unit_price = per-unit, multiply by quantity for total
   return order.unit_price * order.quantity;
 }
 

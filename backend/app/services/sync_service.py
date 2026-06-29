@@ -128,6 +128,13 @@ def sync_orders_for_store(
             except (ValueError, TypeError):
                 pass
 
+        cancelled_at = None
+        if p.cancelled_at:
+            try:
+                cancelled_at = datetime.fromisoformat(p.cancelled_at.replace("Z", "+00:00"))
+            except (ValueError, TypeError):
+                pass
+
         # gmv = total order value (unit_price × qty for all products)
         # p.price is already the total order value from Ozon API
         gmv = p.customer_price if p.customer_price > 0 else p.price
@@ -169,6 +176,10 @@ def sync_orders_for_store(
             available_actions=p.available_actions,
             products_json=p.products_json,
             currency_code=p.currency_code,
+            cancellation_initiator=p.cancellation_initiator,
+            cancellation_reason=p.cancellation_reason,
+            cancellation_reason_message=p.cancellation_reason_message,
+            cancelled_at=cancelled_at,
         )
         existing = order_crud.get_order_by_number(db, p.order_number)
         if existing:
@@ -195,12 +206,97 @@ def sync_orders_for_store(
                 available_actions=p.available_actions,
                 products_json=p.products_json,
                 currency_code=p.currency_code,
+                cancellation_initiator=p.cancellation_initiator,
+                cancellation_reason=p.cancellation_reason,
+                cancellation_reason_message=p.cancellation_reason_message,
+                cancelled_at=cancelled_at,
             ))
         else:
+            # Add cancelled_at to OrderCreate if available
+            order_data.cancelled_at = cancelled_at
             order_crud.create_order(db, order_data)
         count += 1
     logger.info("sync_orders[%s]: %d orders processed", store.name, count)
+
+    # Backfill cancellation details for cancelled orders that lack them
+    try:
+        backfilled = _backfill_cancellation_details(db, store)
+        if backfilled:
+            logger.info("sync_orders[%s]: backfilled cancellation details for %d orders", store.name, backfilled)
+    except Exception as exc:
+        logger.warning("sync_orders[%s]: backfill_cancellation_details failed: %s", store.name, exc)
+
     return count
+
+
+def _backfill_cancellation_details(db: Session, store: Store) -> int:
+    """Fetch cancellation details for cancelled orders that have empty fields.
+
+    The list API (/v4/posting/fbs/list) does NOT return cancellation details.
+    Only the detail API (/v3/posting/fbs/get) does.
+    This function calls the detail API for each cancelled order with empty
+    cancellation_initiator to populate the data.
+
+    Returns count of updated orders.
+    """
+    from app.models.order import Order
+
+    # Find cancelled orders with empty cancellation_initiator
+    cancelled = (
+        db.query(Order)
+        .filter(
+            Order.store_id == store.id,
+            Order.status == "cancelled",
+            (
+                (Order.cancellation_initiator == "") | (Order.cancellation_initiator.is_(None))
+                | (Order.cancelled_at.is_(None))
+                | (Order.cancellation_reason_message == "")
+                | (Order.cancellation_reason_message.is_(None))
+            ),
+        )
+        .all()
+    )
+    if not cancelled:
+        return 0
+
+    client = OzonClient(client_id=store.client_id, api_key=store.api_key)
+    updated = 0
+    for order in cancelled:
+        posting_number = order.shipment_number or order.order_number
+        detail = client.get_fbs_posting_detail(posting_number)
+        if not detail:
+            continue
+        cancellation = detail.get("cancellation", {})
+        if not isinstance(cancellation, dict):
+            continue
+        cancel_initiator = cancellation.get("cancellation_initiator", "")
+        # Ozon API uses "cancel_reason" for the reason text
+        cancel_reason = cancellation.get("cancel_reason", "")
+        cancel_reason_msg = cancellation.get("cancellation_reason_message", "") or cancel_reason
+        cancel_at = cancellation.get("cancelled_at") or detail.get("in_process_at", "")
+        # Only update if we got real data
+        if cancel_initiator or cancel_reason or cancel_reason_msg:
+            cancelled_at = None
+            if cancel_at:
+                try:
+                    cancelled_at = datetime.fromisoformat(
+                        cancel_at.replace("Z", "+00:00")
+                    )
+                except (ValueError, TypeError):
+                    pass
+            order.cancellation_initiator = cancel_initiator
+            order.cancellation_reason = cancel_reason
+            order.cancellation_reason_message = cancel_reason_msg
+            if cancelled_at:
+                order.cancelled_at = cancelled_at
+            updated += 1
+    if updated:
+        db.commit()
+        logger.info(
+            "backfill_cancellation[%s]: %d/%d orders updated",
+            store.name, updated, len(cancelled),
+        )
+    return updated
 
 
 def sync_finance_for_store(db: Session, store: Store) -> dict:

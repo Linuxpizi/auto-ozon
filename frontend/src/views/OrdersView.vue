@@ -13,6 +13,7 @@
         <n-button size="small" @click="searchOrders">搜索</n-button>
         <n-button size="small" @click="refreshOrders">刷新</n-button>
         <n-button type="primary" size="small" :loading="syncing" @click="syncOrders">一键同步</n-button>
+        <n-button size="small" :loading="exporting" @click="exportCSV">导出 CSV</n-button>
       </div>
     </div>
     <div class="card">
@@ -34,7 +35,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from "vue";
 import { NH2, NSelect, NInput, NButton, NPagination } from "naive-ui";
-import { apiPost } from "../api";
+import { apiPost, apiDownload } from "../api";
 import { useAppStore } from "../store";
 import OrderSummary from "../components/OrderSummary.vue";
 
@@ -43,6 +44,7 @@ const filterStoreId = ref<number | null>(null);
 const filterStatus = ref<string | null>(null);
 const keyword = ref("");
 const syncing = ref(false);
+const exporting = ref(false);
 const pageSizes = [
   { label: "20 条/页", value: 20 },
   { label: "50 条/页", value: 50 },
@@ -137,6 +139,23 @@ async function syncOrders() {
     alert(`同步失败: ${error?.message || "请稍后重试"}`);
   } finally {
     syncing.value = false;
+  }
+}
+
+async function exportCSV() {
+  exporting.value = true;
+  try {
+    const params: Record<string, string | number | undefined> = {};
+    if (filterStoreId.value) params.store_id = filterStoreId.value;
+    if (filterStatus.value) params.status = filterStatus.value;
+    if (keyword.value) params.keyword = keyword.value;
+    const now = new Date();
+    const dateStr = `${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, '0')}${String(now.getDate()).padStart(2, '0')}`;
+    await apiDownload('/orders/export/csv', `orders_${dateStr}.csv`, params);
+  } catch (e: any) {
+    alert(`导出失败: ${e?.message || '请稍后重试'}`);
+  } finally {
+    exporting.value = false;
   }
 }
 

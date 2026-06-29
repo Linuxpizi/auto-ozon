@@ -21,8 +21,10 @@ def get_orders(
         q = q.filter(Order.status == status)
     if keyword:
         like = f"%{keyword}%"
+        prefix_like = f"{keyword}%"
         q = q.filter(
-            Order.order_number.ilike(like)
+            Order.order_number.ilike(prefix_like)
+            | Order.order_number.ilike(like)
             | Order.shipment_number.ilike(like)
             | Order.tracking_number.ilike(like)
             | Order.product_name.ilike(like)
@@ -54,8 +56,10 @@ def count_orders(
         q = q.filter(Order.status == status)
     if keyword:
         like = f"%{keyword}%"
+        prefix_like = f"{keyword}%"
         q = q.filter(
-            Order.order_number.ilike(like)
+            Order.order_number.ilike(prefix_like)
+            | Order.order_number.ilike(like)
             | Order.shipment_number.ilike(like)
             | Order.tracking_number.ilike(like)
             | Order.product_name.ilike(like)

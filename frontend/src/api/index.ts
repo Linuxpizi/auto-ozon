@@ -51,3 +51,27 @@ export async function apiUpload<T = any>(path: string, file: File): Promise<T> {
 }
 
 export const apiUrl = (path: string) => `${API_BASE}${path}`;
+
+export async function apiDownload(path: string, filename: string, params?: Record<string, string | number | undefined>) {
+  const q = new URLSearchParams();
+  if (params) {
+    for (const [key, val] of Object.entries(params)) {
+      if (val !== undefined && val !== "") q.set(key, String(val));
+    }
+  }
+  const url = `${API_BASE}${path}${q.toString() ? "?" + q : ""}`;
+  const res = await fetch(url);
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ detail: res.statusText }));
+    throw new Error(err.detail || `请求失败 (${res.status})`);
+  }
+  const blob = await res.blob();
+  const blobUrl = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = blobUrl;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(blobUrl);
+}

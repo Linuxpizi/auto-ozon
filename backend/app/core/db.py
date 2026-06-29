@@ -91,6 +91,10 @@ def _migrate_columns(engine):
         ("scraped_product_records", "video_urls", "ALTER TABLE scraped_product_records ADD COLUMN video_urls TEXT DEFAULT '[]'"),
         ("scraped_product_records", "sku_list", "ALTER TABLE scraped_product_records ADD COLUMN sku_list TEXT DEFAULT '[]'"),
         ("scraped_product_records", "spec_list", "ALTER TABLE scraped_product_records ADD COLUMN spec_list TEXT DEFAULT '[]'"),
+        ("orders", "cancellation_initiator", "ALTER TABLE orders ADD COLUMN cancellation_initiator VARCHAR(32) DEFAULT ''"),
+        ("orders", "cancellation_reason", "ALTER TABLE orders ADD COLUMN cancellation_reason VARCHAR(128) DEFAULT ''"),
+        ("orders", "cancellation_reason_message", "ALTER TABLE orders ADD COLUMN cancellation_reason_message TEXT DEFAULT ''"),
+        ("orders", "cancelled_at", "ALTER TABLE orders ADD COLUMN cancelled_at DATETIME"),
     ]
     for table, column, sql in simple_migrations:
         columns = {c["name"] for c in inspector.get_columns(table)}

@@ -186,24 +186,17 @@
 
       <!-- Step 2: Edit Content -->
       <div v-if="currentStep === 2">
-        <n-space vertical :size="16">
-          <!-- Source images preview -->
-          <n-card size="small" title="商品图片">
-            <n-space :size="8" wrap>
-              <div
-                v-for="(img, idx) in sourceImageList"
-                :key="idx"
-                class="img-preview"
-              >
-                <img :src="img" :alt="`图片 ${idx + 1}`" @error="onImgError" />
-                <div class="img-idx">{{ idx + 1 }}</div>
-              </div>
-              <div v-if="sourceImageList.length === 0" style="color: var(--text-secondary); font-size: 13px;">
-                暂无图片
-              </div>
-            </n-space>
-          </n-card>
+        <div class="step2-layout">
+          <!-- LEFT: Source product attributes (categorized display) -->
+          <div class="step2-left">
+            <n-card size="small" title="📦 原始采集数据">
+              <SourceProductAttributes :product="sourceProductData" :loading="fetchingSource" />
+            </n-card>
+          </div>
 
+          <!-- RIGHT: Editable optimized content -->
+          <div class="step2-right">
+          <n-space vertical :size="16">
           <!-- Title translation -->
           <n-card size="small" title="标题翻译">
             <n-space vertical :size="8">
@@ -249,6 +242,8 @@
             />
           </n-card>
         </n-space>
+          </div><!-- step2-right -->
+        </div><!-- step2-layout -->
       </div>
 
       <!-- Step 3: Pricing -->
@@ -366,6 +361,7 @@ import {
 import type { DataTableColumns } from "naive-ui";
 import { useAppStore } from "../store";
 import { apiGet, apiPost, apiPut, apiDelete } from "../api";
+import SourceProductAttributes from "../components/SourceProductAttributes.vue";
 
 const appStore = useAppStore();
 const message = useMessage();
@@ -387,6 +383,7 @@ const submitResult = ref<{ ok: boolean; message: string } | null>(null);
 const scrapeUrl = ref("");
 const scraping = ref(false);
 const scrapeError = ref("");
+const sourceProductData = ref<any>(null);
 
 const form = reactive({
   mode: "copy_ozon",
@@ -528,6 +525,7 @@ function resetForm() {
   form.status = "draft";
   currentStep.value = 1;
   submitResult.value = null;
+  sourceProductData.value = null;
 }
 
 function showCreateDialog() {
@@ -561,6 +559,27 @@ function showEditDialog(task: any) {
   form.status = task.status;
   currentStep.value = 1;
   submitResult.value = null;
+  // Reconstruct sourceProductData from task for edit mode
+  sourceProductData.value = {
+    title: task.source_name || "",
+    description: task.source_description || "",
+    images: (() => {
+      try { return JSON.parse(task.source_images || "[]"); } catch { return []; }
+    })(),
+    attributes: (() => {
+      try { return JSON.parse(task.source_attributes || "[]"); } catch { return []; }
+    })(),
+    category: task.category_name || "",
+    ozon_category_id: task.category_id || 0,
+    ozon_type_id: task.type_id || 0,
+    weight: task.weight || 0,
+    depth: task.depth || 0,
+    height: task.height || 0,
+    width: task.width || 0,
+    price: task.price || "",
+    oldPrice: task.old_price || "",
+    sourceId: task.source_sku || "",
+  };
   dialogVisible.value = true;
 }
 
@@ -589,6 +608,21 @@ async function scrapeProduct() {
     form.translated_description = data.description || "";
     form.source_sku = data.source_id || "";
     if (data.weight) form.weight = parseInt(data.weight) || 0;
+    // Populate categorized source product data for the new component
+    sourceProductData.value = {
+      title: data.title || "",
+      brand: data.brand || "",
+      category: data.category || "",
+      price: data.price || "",
+      oldPrice: data.old_price || "",
+      images: data.images || [],
+      attributes: data.attributes || [],
+      rating: data.rating || 0,
+      reviewCount: data.review_count || 0,
+      sourceUrl: scrapeUrl.value,
+      sourceId: data.source_id || "",
+      weight: data.weight || 0,
+    };
     message.success(`商品已从 ${data.platform} 爬取成功`);
     currentStep.value = 2;
   } catch (e: any) {
@@ -620,6 +654,22 @@ async function fetchSourceProduct() {
     if (data.depth) form.depth = data.depth;
     if (data.height) form.height = data.height;
     if (data.width) form.width = data.width;
+    // Populate categorized source product data for the new component
+    sourceProductData.value = {
+      title: data.source_name || "",
+      description: data.source_description || "",
+      images: data.source_images || [],
+      attributes: data.source_attributes || [],
+      category: data.category_name || "",
+      ozon_category_id: data.category_id || 0,
+      ozon_type_id: data.type_id || 0,
+      weight: data.weight || 0,
+      depth: data.depth || 0,
+      height: data.height || 0,
+      width: data.width || 0,
+      sourceId: data.source_sku || "",
+      sourceUrl: data.source_url || "",
+    };
     message.success("商品信息获取成功");
     currentStep.value = 2;
   } catch (e: any) {
@@ -848,5 +898,21 @@ onMounted(() => {
   font-size: 10px;
   text-align: center;
   padding: 1px 0;
+}
+
+.step2-layout {
+  display: flex;
+  gap: 16px;
+  align-items: flex-start;
+}
+.step2-left {
+  flex: 1;
+  min-width: 0;
+  max-height: 70vh;
+  overflow-y: auto;
+}
+.step2-right {
+  flex: 1;
+  min-width: 0;
 }
 </style>

@@ -30,6 +30,10 @@ class OrderBase(BaseModel):
     in_process_at: Optional[datetime] = None
     express_delivery: bool = False
     available_actions: str = "[]"
+    cancellation_initiator: str = ""
+    cancellation_reason: str = ""
+    cancellation_reason_message: str = ""
+    cancelled_at: Optional[datetime] = None
 
 
 class OrderCreate(OrderBase):
@@ -63,6 +67,10 @@ class OrderUpdate(BaseModel):
     in_process_at: Optional[datetime] = None
     express_delivery: Optional[bool] = None
     available_actions: Optional[str] = None
+    cancellation_initiator: Optional[str] = None
+    cancellation_reason: Optional[str] = None
+    cancellation_reason_message: Optional[str] = None
+    cancelled_at: Optional[datetime] = None
 
 
 class OrderRead(OrderBase):

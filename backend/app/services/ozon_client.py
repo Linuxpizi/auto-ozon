@@ -130,6 +130,10 @@ class OzonPostingFBS:
     currency_code: str = ""
     products_json: str = "[]"
     available_actions: str = "[]"
+    cancellation_initiator: str = ""
+    cancellation_reason: str = ""
+    cancellation_reason_message: str = ""
+    cancelled_at: str = ""
 
 
 @dataclass
@@ -389,6 +393,19 @@ class OzonClient:
             available_actions = json.dumps(item.get("available_actions", []), ensure_ascii=False)
             _products_json = json.dumps(_products_json_items, ensure_ascii=False)
 
+            # Extract cancellation data if present
+            cancellation = item.get("cancellation", {})
+            if isinstance(cancellation, dict):
+                cancel_initiator = cancellation.get("cancellation_initiator", "")
+                cancel_reason = cancellation.get("cancellation_reason", "")
+                cancel_reason_msg = cancellation.get("cancellation_reason_message", "")
+                cancel_at = cancellation.get("cancelled_at", "")
+            else:
+                cancel_initiator = ""
+                cancel_reason = ""
+                cancel_reason_msg = ""
+                cancel_at = ""
+
             postings.append(
                 OzonPostingFBS(
                     posting_number=item.get("posting_number", ""),
@@ -413,6 +430,10 @@ class OzonClient:
                     currency_code=currency_code,
                     products_json=_products_json,
                     available_actions=available_actions,
+                    cancellation_initiator=cancel_initiator,
+                    cancellation_reason=cancel_reason,
+                    cancellation_reason_message=cancel_reason_msg,
+                    cancelled_at=cancel_at,
                 )
             )
         return postings, next_cursor, has_next
@@ -721,6 +742,32 @@ class OzonClient:
     # ------------------------------------------------------------------
     # FBS Ship
     # ------------------------------------------------------------------
+
+    def get_fbs_posting_detail(
+        self,
+        posting_number: str,
+    ) -> Optional[dict]:
+        """Get a single FBS posting detail.
+
+        POST /v3/posting/fbs/get
+        https://docs.ozon.ru/api/seller/zh/#operation/PostingAPI_GetPostingFBS
+
+        Returns the full posting dict including cancellation data,
+        or None on error.
+        """
+        payload = {
+            "posting_number": posting_number,
+            "with": {
+                "financial_data": True,
+                "analytics_data": True,
+            },
+        }
+        try:
+            data = self._request("POST", "/v3/posting/fbs/get", json_body=payload)
+            return data.get("result", {})
+        except Exception as exc:
+            logger.warning("get_fbs_posting_detail failed for %s: %s", posting_number, exc)
+            return None
 
     def ship_fbs_posting(
         self,

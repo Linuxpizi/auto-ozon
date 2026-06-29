@@ -17,7 +17,7 @@ const routes = [
   { path: "/orders", name: "Orders", component: OrdersView },
   { path: "/finances", name: "StoreFinance", component: StoreFinanceView },
   { path: "/products", name: "ProductManagement", component: ProductManagementView },
-  { path: "/precision-listing", name: "PrecisionListing", component: PrecisionListingView },
+  { path: "/precision-listing", name: "PrecisionListing", redirect: "/selection" },
   { path: "/intelligence", name: "Intelligence", component: IntelligenceView },
   { path: "/selection", name: "ProductSelection", component: ProductSelectionView },
   { path: "/task-configs", name: "TaskConfig", component: TaskConfigView },

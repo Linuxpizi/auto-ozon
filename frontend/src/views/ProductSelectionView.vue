@@ -1,28 +1,38 @@
 <template>
   <div class="container">
+    <n-tabs v-model:value="activeTab" type="line" style="margin-bottom: 0">
+      <n-tab-pane name="scrape" tab="采集商品">
     <div class="card">
       <div class="page-header">
-        <n-h2 class="page-title" style="margin: 0">选品中心</n-h2>
+        <n-h2 class="page-title" style="margin: 0">采集商品</n-h2>
         <n-space>
           <n-button size="small" @click="loadProducts" :loading="loading">刷新</n-button>
         </n-space>
       </div>
 
       <!-- 筛选栏 -->
-      <n-space style="margin-bottom: 12px" align="center" wrap>
-        <n-input v-model:value="keyword" placeholder="搜索名称 / SKU / 品类" clearable style="width: 220px" size="small" @keyup.enter="loadProducts" />
-        <n-select v-model:value="filterBrand" :options="brandOptions" placeholder="品牌" clearable filterable style="width: 160px" size="small" @update:value="loadProducts" />
-        <n-select v-model:value="filterPlatform" :options="platformOptions" placeholder="平台" clearable style="width: 130px" size="small" @update:value="loadProducts" />
-        <n-input-number v-model:value="minPrice" placeholder="最低价" :min="0" style="width: 110px" size="small" @update:value="loadProducts" />
-        <n-input-number v-model:value="maxPrice" placeholder="最高价" :min="0" style="width: 110px" size="small" @update:value="loadProducts" />
-        <n-input-number v-model:value="minRating" placeholder="最低评分" :min="0" :max="5" :step="0.1" style="width: 110px" size="small" @update:value="loadProducts" />
-        <n-input-number v-model:value="minReviews" placeholder="最低评论数" :min="0" style="width: 120px" size="small" @update:value="loadProducts" />
-        <n-button size="small" @click="loadProducts">搜索</n-button>
-        <n-button size="small" @click="resetFilters">重置</n-button>
-      </n-space>
+      <div class="filter-bar">
+        <div class="filter-row">
+          <div class="filter-group">
+            <n-input v-model:value="keyword" placeholder="搜索名称 / SKU / 品类" clearable size="small" @keyup.enter="loadProducts" />
+            <n-select v-model:value="filterBrand" :options="brandOptions" placeholder="品牌" clearable filterable size="small" @update:value="loadProducts" />
+            <n-select v-model:value="filterPlatform" :options="platformOptions" placeholder="平台" clearable size="small" @update:value="loadProducts" />
+          </div>
+          <div class="filter-group">
+            <n-input-number v-model:value="minPrice" placeholder="最低价" :min="0" size="small" @update:value="loadProducts" />
+            <n-input-number v-model:value="maxPrice" placeholder="最高价" :min="0" size="small" @update:value="loadProducts" />
+            <n-input-number v-model:value="minRating" placeholder="最低评分" :min="0" :max="5" :step="0.1" size="small" @update:value="loadProducts" />
+            <n-input-number v-model:value="minReviews" placeholder="最低评论数" :min="0" size="small" @update:value="loadProducts" />
+          </div>
+          <div class="filter-group filter-actions">
+            <n-button type="primary" size="small" @click="loadProducts">搜索</n-button>
+            <n-button size="small" @click="resetFilters">重置</n-button>
+          </div>
+        </div>
+      </div>
 
       <!-- 统计信息 -->
-      <div style="margin-bottom: 12px; font-size: 13px; color: var(--text-secondary)">
+      <div class="table-info">
         共 <strong>{{ totalCount }}</strong> 个商品
         <span v-if="filterBrand"> · 品牌: {{ filterBrand }}</span>
         <span v-if="keyword"> · 关键词: {{ keyword }}</span>
@@ -45,7 +55,6 @@
         @update:page-size="onPageSizeChange"
       />
     </div>
-  </div>
 
   <!-- ========== 详情抽屉 ========== -->
   <n-drawer v-model:show="drawerVisible" :width="720" placement="right" :closable="true">
@@ -276,18 +285,294 @@
       </n-space>
     </template>
   </n-modal>
+      </n-tab-pane>
+      <n-tab-pane name="precision" tab="精铺管理">
+        <div class="precision-tab">
+          <!-- 顶部:模式选择 + 输入 -->
+          <n-card size="small" style="margin-bottom: 12px">
+            <n-space align="center" :size="8">
+              <n-select
+                v-model:value="precisionMode"
+                :options="[
+                  { label: 'OZON 链接', value: 'copy_ozon' },
+                  { label: '手动填写', value: 'external' },
+                ]"
+                style="width: 130px"
+                size="small"
+              />
+              <n-input
+                v-if="precisionMode === 'copy_ozon'"
+                v-model:value="precisionSourceUrl"
+                placeholder="粘贴 OZON 商品链接"
+                size="small"
+                style="width: 420px"
+                @keyup.enter="fetchPrecisionProduct"
+              />
+              <n-input
+                v-if="precisionMode === 'external'"
+                v-model:value="precisionManualName"
+                placeholder="商品名称(中文)"
+                size="small"
+                style="width: 320px"
+              />
+              <n-button
+                v-if="precisionMode === 'copy_ozon'"
+                type="primary"
+                size="small"
+                :loading="precisionFetching"
+                @click="fetchPrecisionProduct"
+              >
+                获取
+              </n-button>
+              <n-button
+                v-if="precisionMode === 'external'"
+                type="primary"
+                size="small"
+                @click="initManualProduct"
+              >
+                开始编辑
+              </n-button>
+            </n-space>
+          </n-card>
+
+          <!-- 左右对比布局 -->
+          <div v-if="precisionOriginal" class="precision-editor">
+            <!-- 左侧:原始采集数据(只读) -->
+            <div class="precision-left">
+              <div class="panel-header">
+                <span class="panel-title">📋 原始采集数据</span>
+                <n-tag size="tiny" :bordered="false" type="info">只读</n-tag>
+              </div>
+              <SourceProductAttributes :product="precisionOriginal" />
+            </div>
+
+            <!-- 右侧:可编辑的优化表单 -->
+            <div class="precision-right">
+              <div class="panel-header">
+                <span class="panel-title">✏️ 优化编辑</span>
+                <n-tag size="tiny" :bordered="false" type="warning">可编辑</n-tag>
+              </div>
+
+              <n-collapse default-expanded-names="basic">
+                <!-- 基础信息 -->
+                <n-collapse-item title="📦 基础信息" name="basic">
+                  <div class="edit-section">
+                    <div class="field-group">
+                      <div class="field-label">
+                        商品名称
+                        <n-button size="tiny" quaternary type="primary" @click="aiOptimize('title')">
+                          🤖 AI 翻译
+                        </n-button>
+                      </div>
+                      <n-input
+                        v-model:value="precisionEdit.title"
+                        type="textarea"
+                        :rows="2"
+                        size="small"
+                        placeholder="OZON 俄语标题"
+                      />
+                      <div v-if="precisionEdit.title_cn" class="original-hint">
+                        中文: {{ precisionEdit.title_cn }}
+                      </div>
+                    </div>
+                    <div class="field-row-3">
+                      <div class="field-group">
+                        <div class="field-label">品牌</div>
+                        <n-input v-model:value="precisionEdit.brand" size="small" placeholder="品牌" />
+                      </div>
+                      <div class="field-group">
+                        <div class="field-label">类目</div>
+                        <n-input v-model:value="precisionEdit.category" size="small" placeholder="类目" />
+                      </div>
+                      <div class="field-group">
+                        <div class="field-label">类目 ID</div>
+                        <n-input-number v-model:value="precisionEdit.category_id" size="small" :show-button="false" style="width: 100%" placeholder="类目 ID" />
+                      </div>
+                    </div>
+                  </div>
+                </n-collapse-item>
+
+                <!-- 价格与促销 -->
+                <n-collapse-item title="💰 价格与促销" name="price">
+                  <div class="edit-section">
+                    <div class="field-row-3">
+                      <div class="field-group">
+                        <div class="field-label">售价 (₽)</div>
+                        <n-input-number v-model:value="precisionEdit.price" size="small" :min="0" :precision="2" style="width: 100%" />
+                      </div>
+                      <div class="field-group">
+                        <div class="field-label">原价 (₽)</div>
+                        <n-input-number v-model:value="precisionEdit.old_price" size="small" :min="0" :precision="2" style="width: 100%" />
+                      </div>
+                      <div class="field-group">
+                        <div class="field-label">VAT</div>
+                        <n-select
+                          v-model:value="precisionEdit.vat"
+                          size="small"
+                          :options="[
+                            { label: '0% (跨境默认)', value: '0' },
+                            { label: '10%', value: '0.1' },
+                            { label: '20%', value: '0.2' },
+                          ]"
+                          style="width: 100%"
+                        />
+                      </div>
+                    </div>
+                  </div>
+                </n-collapse-item>
+
+                <!-- 物理规格(顶级,默认同步第一个变体) -->
+                <n-collapse-item title="📐 物理规格 (默认变体)" name="specs">
+                  <div class="edit-section">
+                    <div class="original-hint" v-if="(precisionEdit.sku_list || []).length > 1">
+                      💡 以下为默认变体规格,每个 SKU 变体也有独立的物理规格
+                    </div>
+                    <div class="field-row-4">
+                      <div class="field-group">
+                        <div class="field-label">重量 (g)</div>
+                        <n-input-number v-model:value="precisionEdit.weight" size="small" :min="0" style="width: 100%" />
+                      </div>
+                      <div class="field-group">
+                        <div class="field-label">宽 (mm)</div>
+                        <n-input-number v-model:value="precisionEdit.width" size="small" :min="0" style="width: 100%" />
+                      </div>
+                      <div class="field-group">
+                        <div class="field-label">高 (mm)</div>
+                        <n-input-number v-model:value="precisionEdit.height" size="small" :min="0" style="width: 100%" />
+                      </div>
+                      <div class="field-group">
+                        <div class="field-label">深 (mm)</div>
+                        <n-input-number v-model:value="precisionEdit.depth" size="small" :min="0" style="width: 100%" />
+                      </div>
+                    </div>
+                  </div>
+                </n-collapse-item>
+
+                <!-- 商品属性 -->
+                <n-collapse-item title="🏷️ 商品属性" name="attrs">
+                  <div class="edit-section">
+                    <div class="field-label" style="margin-bottom: 8px">
+                      通用属性
+                      <n-button size="tiny" quaternary type="primary" @click="aiOptimize('attrs')">
+                        🤖 AI 优化属性
+                      </n-button>
+                    </div>
+                    <div v-for="(attr, idx) in (precisionEdit.attributes || [])" :key="idx" class="attr-row">
+                      <n-input v-model:value="attr.name" size="small" placeholder="属性名" style="width: 140px" />
+                      <n-input v-model:value="attr.value" size="small" placeholder="属性值" style="flex: 1" />
+                      <n-button size="tiny" quaternary type="error" @click="precisionEdit.attributes.splice(idx, 1)">
+                        ✕
+                      </n-button>
+                    </div>
+                    <n-button size="small" quaternary @click="addPrecisionAttribute">+ 添加属性</n-button>
+                  </div>
+                </n-collapse-item>
+
+                <!-- 描述内容 -->
+                <n-collapse-item title="📝 描述内容" name="desc">
+                  <div class="edit-section">
+                    <div class="field-label">
+                      商品描述 (HTML)
+                      <n-button size="tiny" quaternary type="primary" @click="aiOptimize('description')">
+                        🤖 AI 翻译描述
+                      </n-button>
+                    </div>
+                    <n-input
+                      v-model:value="precisionEdit.description"
+                      type="textarea"
+                      :rows="6"
+                      size="small"
+                      placeholder="OZON 俄语描述 (HTML)"
+                    />
+                    <div v-if="precisionEdit.description_cn" class="original-hint" style="margin-top: 6px">
+                      <div style="font-size: 12px; color: #666; margin-bottom: 4px">中文描述:</div>
+                      <div style="font-size: 12px; color: #999; max-height: 80px; overflow-y: auto" v-html="precisionEdit.description_cn" />
+                    </div>
+                  </div>
+                </n-collapse-item>
+
+                <!-- 媒体资源 -->
+                <n-collapse-item title="🖼️ 媒体资源" name="media">
+                  <div class="edit-section">
+                    <div class="field-label" style="margin-bottom: 8px">商品图片</div>
+                    <div class="gallery-row">
+                      <div
+                        v-for="(img, idx) in (precisionEdit.images || [])"
+                        :key="idx"
+                        class="gallery-item"
+                        :class="{ 'is-main': idx === 0 }"
+                      >
+                        <n-image :src="img" width="80" height="80" object-fit="cover" style="display: block" />
+                        <span v-if="idx === 0" class="main-badge">主图</span>
+                      </div>
+                      <n-empty v-if="!(precisionEdit.images || []).length" description="暂无图片" style="padding: 16px" />
+                    </div>
+                    <div class="field-group" style="margin-top: 8px">
+                      <div class="field-label">视频 URL</div>
+                      <n-input v-model:value="precisionEdit.video_url" size="small" placeholder="视频链接" />
+                    </div>
+                  </div>
+                </n-collapse-item>
+
+                <!-- SKU 变体 -->
+                <n-collapse-item title="📦 SKU 变体" name="sku">
+                  <div class="edit-section">
+                    <div v-for="(sku, idx) in (precisionEdit.sku_list || [])" :key="idx" class="attr-row" style="flex-wrap: wrap; gap: 6px">
+                      <div style="display: flex; gap: 6px; width: 100%; align-items: center">
+                        <n-input v-model:value="sku.sku" size="small" placeholder="SKU" style="width: 120px" />
+                        <n-input v-model:value="sku.barcode" size="small" placeholder="条形码" style="width: 120px" />
+                        <n-input v-model:value="sku.name" size="small" placeholder="变体名称" style="flex: 1" />
+                        <n-input-number v-model:value="sku.price" size="small" :min="0" :precision="2" placeholder="价格" style="width: 100px" />
+                        <n-input-number v-model:value="sku.stock" size="small" :min="0" placeholder="库存" style="width: 80px" />
+                        <n-button size="tiny" quaternary type="error" @click="precisionEdit.sku_list.splice(idx, 1)">✕</n-button>
+                      </div>
+                      <!-- 每个变体自带物理规格 -->
+                      <div style="display: flex; gap: 6px; width: 100%; padding-left: 4px; opacity: 0.85">
+                        <span style="font-size: 11px; color: var(--text-color-3); line-height: 28px; white-space: nowrap">📐</span>
+                        <n-input-number v-model:value="sku.weight_g" size="tiny" :min="0" placeholder="重量g" style="width: 80px" />
+                        <n-input-number v-model:value="sku.width_mm" size="tiny" :min="0" placeholder="宽mm" style="width: 80px" />
+                        <n-input-number v-model:value="sku.height_mm" size="tiny" :min="0" placeholder="高mm" style="width: 80px" />
+                        <n-input-number v-model:value="sku.depth_mm" size="tiny" :min="0" placeholder="深mm" style="width: 80px" />
+                      </div>
+                    </div>
+                    <n-button size="small" quaternary @click="addPrecisionSku">+ 添加 SKU</n-button>
+                  </div>
+                </n-collapse-item>
+              </n-collapse>
+
+              <!-- 底部操作栏 -->
+              <div style="margin-top: 16px; padding-top: 12px; border-top: 1px solid var(--n-border-color)">
+                <n-space justify="end">
+                  <n-button size="small" @click="resetPrecisionEditor">重置</n-button>
+                  <n-button size="small" :loading="precisionSaving" @click="savePrecisionDraft">保存草稿</n-button>
+                  <n-button type="primary" size="small" :loading="precisionSaving" @click="submitPrecisionListing">提交上架</n-button>
+                </n-space>
+              </div>
+            </div>
+          </div>
+
+          <!-- 空状态 -->
+          <n-empty v-if="!precisionOriginal" description="请选择商品或输入链接开始精铺编辑" style="padding: 60px 0" />
+        </div>
+      </n-tab-pane>
+    </n-tabs>
+  </div>
 </template>
 
 <script setup lang="ts">
-import { h, ref, onMounted, reactive } from "vue";
+import { h, ref, onMounted, reactive, watch } from "vue";
 import {
   NH2, NH4, NSpace, NButton, NInput, NSelect, NInputNumber,
   NDataTable, NTag, NTooltip, NImage, NPopconfirm, NModal, NDrawer, NDrawerContent,
   NCard, NForm, NFormItem, NGrid, NGi, NAlert, NEmpty, NText, NDivider,
-  NCollapse, NCollapseItem,
+  NCollapse, NCollapseItem, NTabs, NTabPane,
   useMessage, type DataTableColumns, type SelectOption,
 } from "naive-ui";
 import { apiGet, apiPost, apiPut, apiDelete } from "../api";
+import SourceProductAttributes from "../components/SourceProductAttributes.vue";
+
+// ── tab state ─────────────────────────────────────────────────────
+const activeTab = ref("scrape");
 
 // ── state ─────────────────────────────────────────────────────────
 const loading = ref(false);
@@ -334,6 +619,15 @@ const uploading = ref(false);
 const uploadProduct = ref<any>(null);
 const uploadForm = reactive({ store_id: null as number | null, offer_id: "" });
 const storeOptions = ref<SelectOption[]>([]);
+
+// ── precision editor state ────────────────────────────────────────
+const precisionMode = ref("copy_ozon");
+const precisionSourceUrl = ref("");
+const precisionManualName = ref("");
+const precisionFetching = ref(false);
+const precisionSaving = ref(false);
+const precisionOriginal = ref<any>(null);
+const precisionEdit = ref<any>(null);
 
 // ── helpers ───────────────────────────────────────────────────────
 function formatPrice(price: number | string): string {
@@ -435,7 +729,8 @@ function attrsSlot(row: any) {
 
 function actionsSlot(row: any) {
   return h(NSpace, { size: 4 }, () => [
-    h(NButton, { size: "tiny", quaternary: true, onClick: () => openDrawer(row) }, () => "详情"),
+    h(NButton, { size: "tiny", quaternary: true, type: "primary", onClick: () => goToPrecision(row) }, () => "详情"),
+    h(NButton, { size: "tiny", quaternary: true, onClick: () => openDrawer(row) }, () => "编辑"),
     h(NButton, { size: "tiny", quaternary: true, type: "info", onClick: () => openUpload(row) }, () => "上传"),
   ]);
 }
@@ -623,98 +918,534 @@ function resetFilters() {
 function onPageChange(page: number) { currentPage.value = page; loadProducts(); }
 function onPageSizeChange(size: number) { pageSize.value = size; currentPage.value = 1; loadProducts(); }
 
+// ── precision editor methods ──────────────────────────────────────
+
+/** 顶级物理规格 ↔ 第一个SKU变体 双向同步 */
+let _syncingSpecs = false;
+watch(
+  () => {
+    const e = precisionEdit.value;
+    if (!e) return null;
+    return { w: e.weight, wi: e.width, h: e.height, d: e.depth };
+  },
+  (newVals) => {
+    if (_syncingSpecs || !newVals || !precisionEdit.value) return;
+    const e = precisionEdit.value;
+    const skus = e.sku_list || [];
+    if (skus.length > 0) {
+      _syncingSpecs = true;
+      skus[0].weight_g = newVals.w || 0;
+      skus[0].width_mm = newVals.wi || 0;
+      skus[0].height_mm = newVals.h || 0;
+      skus[0].depth_mm = newVals.d || 0;
+      _syncingSpecs = false;
+    }
+  },
+);
+
+watch(
+  () => {
+    const e = precisionEdit.value;
+    if (!e || !(e.sku_list || []).length) return null;
+    const s = e.sku_list[0];
+    return { wg: s.weight_g, wm: s.width_mm, hm: s.height_mm, dm: s.depth_mm };
+  },
+  (newVals) => {
+    if (_syncingSpecs || !newVals || !precisionEdit.value) return;
+    const e = precisionEdit.value;
+    _syncingSpecs = true;
+    e.weight = newVals.wg || 0;
+    e.width = newVals.wm || 0;
+    e.height = newVals.hm || 0;
+    e.depth = newVals.dm || 0;
+    _syncingSpecs = false;
+  },
+);
+
+/** 从采集商品表格点击"详情"→ 自动切换到精铺管理 tab 并填充所有数据 */
+function goToPrecision(row: any) {
+  // 切换到精铺管理 tab
+  activeTab.value = "precision";
+  precisionMode.value = "copy_ozon";
+
+  // 填充来源链接
+  precisionSourceUrl.value = row.source_url || "";
+
+  // 构建左侧原始数据(只读展示用)
+  const original = JSON.parse(JSON.stringify(row));
+  precisionOriginal.value = original;
+
+  // ── 合并 spec_list[i] ↔ sku_list[i] 为统一变体对象 ──
+  // spec_list 和 sku_list 是平行数组: spec_list[i] 对应 sku_list[i]
+  const specs = row.spec_list || [];
+  const skus = row.sku_list || [];
+  const maxLen = Math.max(specs.length, skus.length, 1);
+  const mergedVariants: any[] = [];
+  for (let i = 0; i < maxLen; i++) {
+    const sp = specs[i] || {};
+    const sk = skus[i] || {};
+    mergedVariants.push({
+      sku: sk.sku || sk.skuId || "",
+      barcode: sk.barcode || "",
+      name: sk.name || "",
+      price: sk.price || row.price || 0,
+      stock: sk.stock || 0,
+      // 物理规格: 从 spec_list 对应条目提取,而非全局
+      weight_g: sp.weight_g || 0,
+      width_mm: sp.width_mm || 0,
+      height_mm: sp.height_mm || 0,
+      depth_mm: sp.depth_mm || 0,
+    });
+  }
+
+  // 顶级物理规格取第一个变体的值(便于全局预览)
+  const firstSpec = specs[0] || {};
+
+  // 构建右侧可编辑数据
+  const editData = {
+    title: row.title || "",
+    title_cn: row.title_cn || "",
+    brand: row.brand || "",
+    category: row.category || "",
+    category_id: row.ozon_category_id || row.category_id || null,
+    price: row.price || 0,
+    old_price: row.old_price || 0,
+    vat: row.vat || "0",
+    weight: firstSpec.weight_g || 0,
+    width: firstSpec.width_mm || 0,
+    height: firstSpec.height_mm || 0,
+    depth: firstSpec.depth_mm || 0,
+    description: row.description || "",
+    description_cn: row.description_cn || "",
+    images: row.images || [],
+    video_urls: row.video_urls || [],
+    video_url: (row.video_urls || [])[0] || "",
+    attributes: (row.attributes || []).map((a: any) => ({ name: a.name || "", value: a.value || "" })),
+    // spec_list 原始数据(保存时用于重建)
+    spec_list: specs,
+    // 合并后的变体列表(含物理规格)
+    sku_list: mergedVariants,
+  };
+
+  precisionEdit.value = editData;
+  message.success("已加载采集数据到精铺编辑器");
+}
+
+async function fetchPrecisionProduct() {
+  if (!precisionSourceUrl.value.trim()) { message.warning("请输入 OZON 商品链接"); return; }
+  precisionFetching.value = true;
+  try {
+    const data = await apiPost("/selection/products/fetch", { url: precisionSourceUrl.value.trim() });
+    precisionOriginal.value = data;
+    // 深拷贝用于编辑
+    precisionEdit.value = JSON.parse(JSON.stringify(data));
+    message.success("商品信息获取成功");
+  } catch (e: any) {
+    message.error(e.message || "获取失败");
+  } finally {
+    precisionFetching.value = false;
+  }
+}
+
+function initManualProduct() {
+  if (!precisionManualName.value.trim()) { message.warning("请输入商品名称"); return; }
+  const empty = {
+    title: precisionManualName.value,
+    title_cn: precisionManualName.value,
+    brand: "",
+    category: "",
+    category_id: null,
+    price: 0,
+    old_price: 0,
+    vat: "0",
+    weight: 0,
+    width: 0,
+    height: 0,
+    depth: 0,
+    description: "",
+    description_cn: "",
+    images: [],
+    video_urls: [],
+    video_url: "",
+    attributes: [],
+    spec_list: [],
+    sku_list: [{ sku: "", barcode: "", name: "", price: 0, stock: 0, weight_g: 0, width_mm: 0, height_mm: 0, depth_mm: 0 }],
+  };
+  precisionOriginal.value = empty;
+  precisionEdit.value = JSON.parse(JSON.stringify(empty));
+  message.info("已初始化空白编辑表单");
+}
+
+function aiOptimize(target: "title" | "attrs" | "description") {
+  const labels: Record<string, string> = {
+    title: "AI 翻译标题",
+    attrs: "AI 优化属性",
+    description: "AI 翻译描述",
+  };
+  message.info(`${labels[target]}功能即将上线,敬请期待 ✨`);
+}
+
+function addPrecisionAttribute() {
+  if (!precisionEdit.value) return;
+  if (!precisionEdit.value.attributes) precisionEdit.value.attributes = [];
+  precisionEdit.value.attributes.push({ name: "", value: "" });
+}
+
+function addPrecisionSku() {
+  if (!precisionEdit.value) return;
+  if (!precisionEdit.value.sku_list) precisionEdit.value.sku_list = [];
+  precisionEdit.value.sku_list.push({ sku: "", barcode: "", name: "", price: precisionEdit.value.price || 0, stock: 0, weight_g: 0, width_mm: 0, height_mm: 0, depth_mm: 0 });
+}
+
+function resetPrecisionEditor() {
+  if (!precisionOriginal.value) return;
+  precisionEdit.value = JSON.parse(JSON.stringify(precisionOriginal.value));
+  message.info("已重置为原始值");
+}
+
+/** 从合并后的 sku_list 拆分出 spec_list (保存前处理) */
+function prepareForSave() {
+  if (!precisionEdit.value) return;
+  const e = precisionEdit.value;
+  // 从每个 sku_list 条目中提取物理规格,重建 spec_list
+  e.spec_list = (e.sku_list || []).map((s: any) => ({
+    weight_g: s.weight_g || 0,
+    width_mm: s.width_mm || 0,
+    height_mm: s.height_mm || 0,
+    depth_mm: s.depth_mm || 0,
+  }));
+  // 同步顶级物理规格到第一个变体
+  if (e.spec_list.length > 0) {
+    e.spec_list[0].weight_g = e.weight || e.spec_list[0].weight_g;
+    e.spec_list[0].width_mm = e.width || e.spec_list[0].width_mm;
+    e.spec_list[0].height_mm = e.height || e.spec_list[0].height_mm;
+    e.spec_list[0].depth_mm = e.depth || e.spec_list[0].depth_mm;
+  }
+  // 合并 video_url 到 video_urls
+  if (e.video_url && (!e.video_urls || !e.video_urls.includes(e.video_url))) {
+    e.video_urls = [e.video_url, ...(e.video_urls || [])].filter(Boolean);
+  }
+  // 清理 sku_list 中的冗余字段
+  e.sku_list = (e.sku_list || []).map((s: any) => ({
+    sku: s.sku || "",
+    barcode: s.barcode || "",
+    name: s.name || "",
+    price: s.price || 0,
+    stock: s.stock || 0,
+  }));
+}
+
+async function savePrecisionDraft() {
+  if (!precisionEdit.value) return;
+  precisionSaving.value = true;
+  try {
+    prepareForSave();
+    await apiPost("/selection/products", {
+      ...precisionEdit.value,
+      source_url: precisionSourceUrl.value,
+      status: "draft",
+    });
+    message.success("草稿保存成功");
+  } catch (e: any) {
+    message.error("保存失败: " + e.message);
+  } finally {
+    precisionSaving.value = false;
+  }
+}
+
+async function submitPrecisionListing() {
+  if (!precisionEdit.value) return;
+  precisionSaving.value = true;
+  try {
+    prepareForSave();
+    await apiPost("/selection/products", {
+      ...precisionEdit.value,
+      source_url: precisionSourceUrl.value,
+      status: "pending",
+    });
+    message.success("已提交上架,等待审核");
+    precisionOriginal.value = null;
+    precisionEdit.value = null;
+    precisionSourceUrl.value = "";
+  } catch (e: any) {
+    message.error("提交失败: " + e.message);
+  } finally {
+    precisionSaving.value = false;
+  }
+}
+
 onMounted(() => { loadProducts(); loadBrands(); });
 </script>
 
 <style scoped>
-/* ── 指标行 ── */
-.metrics-bar {
+/* ═══════════════════════════════════════════════════════
+   选品中心 — 全局样式
+   ═══════════════════════════════════════════════════════ */
+
+/* ── 采集商品 tab ── */
+.page-header {
   display: flex;
   align-items: center;
-  gap: 16px;
+  justify-content: space-between;
+  margin-bottom: 20px;
+  padding-bottom: 16px;
+  border-bottom: 1px solid var(--border-light);
+}
+.page-title {
+  font-size: 22px;
+  font-weight: 700;
+  color: var(--text-primary);
+  letter-spacing: -0.3px;
+}
+
+/* ── 筛选栏 ── */
+.filter-bar {
+  background: var(--bg-card-hover);
+  border: 1px solid var(--border-light);
+  border-radius: var(--radius-md);
+  padding: 16px 20px;
+  margin-bottom: 16px;
+  transition: box-shadow 0.2s ease;
+}
+.filter-bar:hover {
+  box-shadow: var(--shadow-sm);
+}
+.filter-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
   flex-wrap: wrap;
 }
-.metric-item {
+.filter-group {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.filter-group :deep(.n-input),
+.filter-group :deep(.n-select) {
+  min-width: 140px;
+}
+.filter-group :deep(.n-input-number) {
+  width: 120px;
+}
+.filter-actions {
+  margin-left: auto;
+}
+
+/* ── 表格信息条 ── */
+.table-info {
+  font-size: 13px;
+  color: var(--text-secondary);
+  margin-bottom: 12px;
+  padding: 0 4px;
   display: flex;
   align-items: center;
   gap: 4px;
 }
-.metric-value {
-  font-size: 14px;
+.table-info strong {
+  color: var(--accent);
   font-weight: 600;
 }
-.metric-label {
-  font-size: 12px;
-  color: #999;
+.table-info span + span::before {
+  content: '';
+  display: inline-block;
+  width: 3px;
+  height: 3px;
+  border-radius: 50%;
+  background: var(--text-muted);
+  margin-right: 6px;
+  vertical-align: middle;
 }
 
-/* ── 图片区 ── */
+/* ═══════════════════════════════════════════════════════
+   精铺管理 — 左右分栏编辑器
+   ═══════════════════════════════════════════════════════ */
+.precision-tab {
+  width: 100%;
+}
+.precision-editor {
+  display: flex;
+  gap: 20px;
+  align-items: flex-start;
+}
+.precision-left {
+  flex: 0 0 38%;
+  min-width: 320px;
+  background: var(--bg-card);
+  border: 1px solid var(--border-light);
+  border-radius: var(--radius-lg);
+  padding: 20px;
+  max-height: calc(100vh - 260px);
+  overflow-y: auto;
+  box-shadow: var(--shadow-sm);
+  transition: box-shadow 0.25s ease;
+}
+.precision-left:hover {
+  box-shadow: var(--shadow-md);
+}
+.precision-right {
+  flex: 1;
+  min-width: 0;
+  background: var(--bg-card);
+  border: 1px solid var(--border-light);
+  border-radius: var(--radius-lg);
+  padding: 20px;
+  max-height: calc(100vh - 260px);
+  overflow-y: auto;
+  box-shadow: var(--shadow-sm);
+  transition: box-shadow 0.25s ease;
+}
+.precision-right:hover {
+  box-shadow: var(--shadow-md);
+}
+
+/* ── 面板头部 ── */
+.panel-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 16px;
+  padding-bottom: 12px;
+  border-bottom: 2px solid var(--border-light);
+}
+.panel-title {
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--text-primary);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+/* ── 编辑分区 ── */
+.edit-section {
+  padding: 12px 0;
+}
+.edit-section + .edit-section {
+  border-top: 1px dashed var(--border-light);
+}
+
+/* ═══════════════════════════════════════════════════════
+   抽屉详情 — 指标、图片、属性
+   ═══════════════════════════════════════════════════════ */
+
+/* ── 指标卡片 ── */
+.metrics-bar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  padding: 4px 0;
+}
+.metric-item {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  background: var(--bg-card-hover);
+  border: 1px solid var(--border-light);
+  border-radius: var(--radius-md);
+  padding: 10px 16px;
+  min-width: 80px;
+  transition: all 0.2s ease;
+}
+.metric-item:hover {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-light);
+  transform: translateY(-1px);
+}
+.metric-value {
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+.metric-label {
+  font-size: 11px;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+/* ── 图片画廊 ── */
 .gallery-row {
   display: flex;
   gap: 10px;
-  overflow-x: auto;
-  padding: 6px 0;
+  flex-wrap: wrap;
+  padding: 8px 0;
 }
 .gallery-item {
   position: relative;
-  flex-shrink: 0;
-  border-radius: 8px;
+  border-radius: var(--radius-sm);
   overflow: hidden;
-  border: 2px solid var(--n-border-color, #e0e0e6);
+  border: 2px solid var(--border-light);
+  transition: all 0.25s ease;
+  cursor: pointer;
+}
+.gallery-item:hover {
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.12);
+  transform: translateY(-3px);
 }
 .gallery-item.is-main {
-  border-color: #2080f0;
-  box-shadow: 0 0 0 1px #2080f033;
+  border-color: var(--accent);
 }
 .gallery-img {
   display: block;
 }
 .main-badge {
   position: absolute;
-  bottom: 2px;
-  left: 2px;
-  background: #2080f0;
-  color: #fff;
+  bottom: 6px;
+  left: 6px;
   font-size: 10px;
-  padding: 1px 6px;
-  border-radius: 4px;
   font-weight: 600;
+  background: linear-gradient(135deg, var(--accent), #7c3aed);
+  color: #fff;
+  padding: 2px 8px;
+  border-radius: 4px;
+  letter-spacing: 0.5px;
+  box-shadow: 0 2px 6px rgba(79, 70, 229, 0.4);
 }
 .img-index {
   position: absolute;
-  bottom: 2px;
-  left: 2px;
-  background: rgba(0, 0, 0, 0.45);
-  color: #fff;
+  bottom: 6px;
+  right: 6px;
   font-size: 10px;
-  padding: 1px 5px;
-  border-radius: 4px;
+  background: rgba(0, 0, 0, 0.5);
+  color: #fff;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  backdrop-filter: blur(4px);
 }
 
-/* ── 折叠面板内容 ── */
-.section-body {
-  padding: 6px 0;
-}
+/* ── 区块标签 ── */
 .section-label {
   font-size: 12px;
-  color: #999;
+  font-weight: 700;
+  color: var(--text-muted);
+  margin-bottom: 8px;
   text-transform: uppercase;
-  letter-spacing: 0.5px;
-  margin-bottom: 6px;
+  letter-spacing: 0.8px;
+}
+.section-body {
+  padding: 4px 0;
 }
 
 /* ── 表单字段组 ── */
 .field-group {
-  margin-bottom: 12px;
+  margin-bottom: 14px;
 }
 .field-label {
   display: flex;
   align-items: center;
   gap: 6px;
   font-size: 12px;
-  font-weight: 500;
-  color: #666;
-  margin-bottom: 4px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  margin-bottom: 6px;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
 }
 .field-row-2 {
   display: grid;
@@ -734,11 +1465,14 @@ onMounted(() => { loadProducts(); loadBrands(); });
 
 /* ── 原始值提示 ── */
 .original-hint {
-  margin-top: 3px;
-  padding: 3px 8px;
-  background: #fafafa;
-  border-radius: 4px;
-  border-left: 2px solid #e0e0e6;
+  margin-top: 4px;
+  padding: 5px 10px;
+  background: var(--bg-card-hover);
+  border-radius: var(--radius-sm);
+  border-left: 3px solid var(--accent);
+  font-size: 12px;
+  color: var(--text-muted);
+  line-height: 1.5;
 }
 
 /* ── 属性行 ── */
@@ -747,10 +1481,42 @@ onMounted(() => { loadProducts(); loadBrands(); });
   gap: 8px;
   align-items: center;
   margin-bottom: 8px;
+  padding: 6px 8px;
+  border-radius: var(--radius-sm);
+  transition: background 0.15s ease;
+}
+.attr-row:hover {
+  background: var(--bg-card-hover);
 }
 
 /* ── 响应式 ── */
+@media (max-width: 900px) {
+  .precision-editor {
+    flex-direction: column;
+  }
+  .precision-left {
+    flex: none;
+    width: 100%;
+    max-height: none;
+  }
+  .precision-right {
+    max-height: none;
+  }
+}
 @media (max-width: 700px) {
-  .field-row-3, .field-row-4 { grid-template-columns: 1fr 1fr; }
+  .filter-row {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  .filter-group {
+    flex-wrap: wrap;
+  }
+  .filter-actions {
+    margin-left: 0;
+    justify-content: flex-end;
+  }
+  .field-row-3, .field-row-4 {
+    grid-template-columns: 1fr 1fr;
+  }
 }
 </style>

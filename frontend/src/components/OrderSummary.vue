@@ -14,6 +14,8 @@
           <th>订单号</th>
           <th>创建日期</th>
           <th>状态</th>
+          <th>取消原因</th>
+          <th>取消时间</th>
           <th>必须发货 / 商品名称</th>
           <th>运单号 / 数量 / 成交价</th>
           <th>店铺</th>
@@ -51,6 +53,17 @@
             <n-tag :type="statusType(order.status)" size="small" round>
               {{ statusLabel(order.status) }}
             </n-tag>
+          </td>
+          <td style="font-size: 12px; max-width: 200px; word-break: break-all;">
+            <span v-if="order.status === 'cancelled'">
+              <span style="color: var(--danger); font-weight: 500;">{{ cancelInitiatorLabel(order) }}</span>
+              <span v-if="order.cancellation_reason_message"> — {{ order.cancellation_reason_message }}</span>
+            </span>
+            <span v-else style="color: var(--text-secondary);">-</span>
+          </td>
+          <td style="font-size: 12px; color: var(--text-secondary); white-space: nowrap;">
+            <span v-if="order.cancelled_at">{{ formatDateTime(order.cancelled_at) }}</span>
+            <span v-else>-</span>
           </td>
           <td>
             <div style="min-width: 0;">
@@ -168,6 +181,18 @@ function statusLabel(status: string) {
 }
 function statusType(status: string) {
   return statusMap[status]?.type || "default";
+}
+
+function cancelInitiatorLabel(order: OrderItem): string {
+  const map: Record<string, string> = {
+    seller: "卖家取消",
+    buyer: "买家取消",
+    system: "系统取消",
+    "Продавец": "卖家取消",
+    "Покупатель": "买家取消",
+    "Ozon": "平台取消",
+  };
+  return map[order.cancellation_initiator] || order.cancellation_initiator || "已取消";
 }
 
 function hasAction(order: OrderItem, action: string): boolean {

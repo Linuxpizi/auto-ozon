@@ -59,6 +59,10 @@ export interface OrderItem {
   in_process_at: string | null;
   express_delivery: boolean;
   available_actions: string;
+  cancellation_initiator: string;
+  cancellation_reason: string;
+  cancellation_reason_message: string;
+  cancelled_at: string | null;
   created_at: string;
   updated_at: string;
 }

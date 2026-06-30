@@ -8,7 +8,7 @@ const emit = defineEmits<{ refresh: [] }>()
 // --- Page info ---
 interface PageInfo {
   isSupported: boolean
-  platform?: 'ozon' | 'wb'
+  platform?: 'ozon' | 'wb' | '1688'
   isProductPage?: boolean
   isListPage?: boolean
   pageType?: string
@@ -141,7 +141,7 @@ onMounted(async () => {
         </svg>
       </div>
       <p class="text-surface-500 text-sm font-medium">当前页面不支持采集</p>
-      <p class="text-surface-400 text-xs mt-1.5">请打开 Ozon 商品页或分类列表页</p>
+      <p class="text-surface-400 text-xs mt-1.5">请打开 Ozon / WB / 1688 商品页或列表页</p>
     </div>
 
     <template v-else>
@@ -150,14 +150,14 @@ onMounted(async () => {
         <div class="flex items-center gap-3">
           <div
             class="w-10 h-10 rounded-xl flex items-center justify-center text-white font-bold text-sm"
-            :class="pageInfo.platform === 'ozon' ? 'bg-gradient-to-br from-ozon-500 to-ozon-600' : 'bg-gradient-to-br from-wb-500 to-wb-600'"
+            :class="pageInfo.platform === 'ozon' ? 'bg-gradient-to-br from-ozon-500 to-ozon-600' : pageInfo.platform === '1688' ? 'bg-gradient-to-br from-orange-500 to-orange-600' : 'bg-gradient-to-br from-wb-500 to-wb-600'"
           >
-            {{ pageInfo.platform === 'ozon' ? 'O' : 'W' }}
+            {{ pageInfo.platform === 'ozon' ? 'O' : pageInfo.platform === '1688' ? 'A' : 'W' }}
           </div>
           <div class="flex-1 min-w-0">
             <div class="flex items-center gap-2">
               <span class="text-sm font-semibold text-surface-800">
-                {{ pageInfo.platform === 'ozon' ? 'Ozon' : 'Wildberries' }}
+                {{ pageInfo.platform === 'ozon' ? 'Ozon' : pageInfo.platform === '1688' ? '1688(阿里巴巴)' : 'Wildberries' }}
               </span>
               <span v-if="pageInfo.isProductPage" class="badge-success">商品页</span>
               <span v-else-if="pageInfo.isListPage" class="badge-info">列表页</span>

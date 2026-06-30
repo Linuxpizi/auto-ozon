@@ -5,6 +5,7 @@ from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from app.api.routers import dashboard, order, store, monitor, listing, finance, task_config, precision_listing, intelligence, browser_sync, selection
+from app.api.routers import prompt_template, title_optimize, product_optimize, image_prompt
 from app.core.db import engine, Base
 from app.services.scheduler_service import lifespan as scheduler_lifespan
 
@@ -65,3 +66,9 @@ app.include_router(task_config.router, prefix="/api/task-configs", tags=["task-c
 app.include_router(intelligence.router, prefix="/api/intelligence", tags=["intelligence"])
 app.include_router(browser_sync.router, prefix="/api/browser-sync", tags=["browser-sync"])
 app.include_router(selection.router, prefix="/api/selection", tags=["selection"])
+
+# ── Prompt Engine routes ──────────────────────────────────────────────
+app.include_router(title_optimize.router, prefix="/api/v1/title", tags=["prompt-engine"])
+app.include_router(product_optimize.router, prefix="/api/v1/product", tags=["prompt-engine"])
+app.include_router(image_prompt.router, prefix="/api/v1/image", tags=["prompt-engine"])
+app.include_router(prompt_template.router, prefix="/api/v1/prompts", tags=["prompt-templates"])

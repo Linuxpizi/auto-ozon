@@ -5,13 +5,16 @@ export default defineConfig({
   modules: ['@wxt-dev/module-vue'],
   manifest: {
     name: 'Auto-Ozon 采集助手',
-    description: 'Ozon / WB 平台商品数据采集与同步工具',
+    description: 'Ozon / WB / 1688 平台商品数据采集与同步工具',
     permissions: ['storage', 'activeTab', 'tabs', 'scripting'],
     host_permissions: [
       'https://www.ozon.ru/*',
       'https://ozon.ru/*',
       'https://www.wildberries.ru/*',
       'https://wildberries.ru/*',
+      'https://detail.1688.com/*',
+      'https://s.1688.com/*',
+      'https://www.1688.com/*',
       'http://localhost:9000/*',
     ],
     action: {

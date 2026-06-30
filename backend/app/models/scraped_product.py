@@ -7,7 +7,7 @@ class ScrapedProductRecord(Base):
     __tablename__ = "scraped_product_records"
 
     id = Column(Integer, primary_key=True, index=True)
-    platform = Column(String(16), nullable=False, comment="ozon | wb")
+    platform = Column(String(16), nullable=False, comment="ozon | wb | 1688")
     source_id = Column(String(64), nullable=False, comment="平台商品 ID")
     title = Column(String(512), default="")
     price = Column(Float, default=0.0, comment="当前价格 (RUB)")
@@ -35,6 +35,12 @@ class ScrapedProductRecord(Base):
     # ── Ozon 内部分类 ──
     ozon_category_id = Column(Integer, default=0, comment="Ozon description_category_id")
     ozon_type_id = Column(Integer, default=0, comment="Ozon type_id")
+
+    # ── 1688 专用字段 ──
+    price_ranges = Column(JSON, default=list, comment="阶梯价格 [{minQty, maxQty, price}]")
+    min_order_qty = Column(Integer, default=0, comment="1688 最小起订量")
+    supplier_url = Column(String(512), default="", comment="1688 供应商主页 URL")
+    trade_quantity = Column(Integer, default=0, comment="1688 月成交量")
 
     synced = Column(Boolean, default=True, comment="是否已同步到后端")
     matched = Column(Boolean, default=False, comment="是否已比价匹配")

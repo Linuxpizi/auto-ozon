@@ -1,5 +1,5 @@
 /** 平台类型 */
-export type Platform = 'ozon' | 'wb'
+export type Platform = 'ozon' | 'wb' | '1688'
 
 /** 采集的商品数据 */
 export interface ScrapedProduct {
@@ -33,6 +33,16 @@ export interface ScrapedProduct {
   ozonCategoryId: number
   /** Ozon type_id */
   ozonTypeId: number
+
+  // ── 1688 专有字段 ──
+  /** 阶梯价格 [{minQty, maxQty, price}] */
+  priceRanges: Array<{ minQty: number; maxQty: number; price: number }>
+  /** 起订量 */
+  minOrderQty: number
+  /** 供应商店铺 URL */
+  supplierUrl: string
+  /** 成交量 */
+  tradeQuantity: number
 }
 
 export interface ProductAttribute {
@@ -71,6 +81,8 @@ export interface PluginSettings {
   ozon: PlatformScrapingConfig
   /** Wildberries 采集条件 */
   wb: PlatformScrapingConfig
+  /** 1688 采集条件 */
+  '1688': PlatformScrapingConfig
 }
 
 /** 列表采集的商品摘要(非完整商品数据) */
@@ -104,4 +116,5 @@ export const DEFAULT_SETTINGS: PluginSettings = {
   autoScrape: true,
   ozon: { ...defaultPlatformConfig },
   wb: { ...defaultPlatformConfig },
+  '1688': { ...defaultPlatformConfig },
 }

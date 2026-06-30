@@ -37,6 +37,12 @@ class ScrapedProductBase(BaseModel):
     ozon_category_id: int = 0
     ozon_type_id: int = 0
 
+    # ── 1688 专用字段 ──
+    price_ranges: List[dict] = []       # [{"minQty": 1, "maxQty": 49, "price": 12.5}]
+    min_order_qty: int = 0
+    supplier_url: str = ""
+    trade_quantity: int = 0
+
     @model_validator(mode='before')
     @classmethod
     def convert_input(cls, data):

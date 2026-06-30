@@ -728,10 +728,10 @@ function attrsSlot(row: any) {
 }
 
 function actionsSlot(row: any) {
-  return h(NSpace, { size: 4 }, () => [
-    h(NButton, { size: "tiny", quaternary: true, type: "primary", onClick: () => goToPrecision(row) }, () => "详情"),
-    h(NButton, { size: "tiny", quaternary: true, onClick: () => openDrawer(row) }, () => "编辑"),
-    h(NButton, { size: "tiny", quaternary: true, type: "info", onClick: () => openUpload(row) }, () => "上传"),
+  return h(NSpace, { size: 2, wrap: false }, () => [
+    h(NButton, { size: "tiny", secondary: true, type: "primary", onClick: () => goToPrecision(row), style: "padding: 0 6px" }, () => "详情"),
+    h(NButton, { size: "tiny", secondary: true, onClick: () => openDrawer(row), style: "padding: 0 6px" }, () => "编辑"),
+    h(NButton, { size: "tiny", secondary: true, type: "info", onClick: () => openUpload(row), style: "padding: 0 6px" }, () => "上传"),
   ]);
 }
 
@@ -744,7 +744,7 @@ const columns: DataTableColumns<any> = [
   { title: "评分", key: "rating", width: 110, render: ratingSlot },
   { title: "属性", key: "attributes", minWidth: 260, render: attrsSlot },
   { title: "分类", key: "category", width: 140, render: (row) => h("span", { style: "font-size: 12px; color: #999" }, truncateText(row.category || "", 30)) },
-  { title: "操作", key: "actions", width: 100, render: actionsSlot, fixed: "right" as const },
+  { title: "操作", key: "actions", width: 160, render: actionsSlot, fixed: "right" as const },
 ];
 
 // ── drawer ────────────────────────────────────────────────────────

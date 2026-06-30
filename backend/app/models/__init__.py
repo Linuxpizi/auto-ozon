@@ -7,3 +7,4 @@ from app.models.finance import StoreFinance
 from app.models.task_config import TaskConfig
 from app.models.store_sync_config import StoreSyncConfig
 from app.models.scraped_product import ScrapedProductRecord
+from app.models.prompt_template import PromptTemplate

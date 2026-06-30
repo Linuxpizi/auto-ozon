@@ -2,13 +2,13 @@
 export {}
 declare global {
   const ContentScriptContext: typeof import('wxt/utils/content-script-context').ContentScriptContext
-  const DEFAULT_SETTINGS: typeof import('D:/job/auto-ozon/browser-extension/src/utils/types').DEFAULT_SETTINGS
+  const DEFAULT_SETTINGS: typeof import('/Users/user/job/auto-ozon/browser-extension/src/utils/types').DEFAULT_SETTINGS
   const EffectScope: typeof import('vue').EffectScope
   const InvalidMatchPattern: typeof import('wxt/utils/match-patterns').InvalidMatchPattern
   const MatchPattern: typeof import('wxt/utils/match-patterns').MatchPattern
-  const batchTransitionPause: typeof import('D:/job/auto-ozon/browser-extension/src/utils/humanize').batchTransitionPause
+  const batchTransitionPause: typeof import('/Users/user/job/auto-ozon/browser-extension/src/utils/humanize').batchTransitionPause
   const browser: typeof import('wxt/browser').browser
-  const checkBackendHealth: typeof import('D:/job/auto-ozon/browser-extension/src/utils/api').checkBackendHealth
+  const checkBackendHealth: typeof import('/Users/user/job/auto-ozon/browser-extension/src/utils/api').checkBackendHealth
   const computed: typeof import('vue').computed
   const createApp: typeof import('vue').createApp
   const createIframeUi: typeof import('wxt/utils/content-script-ui/iframe').createIframeUi
@@ -22,25 +22,25 @@ declare global {
   const defineContentScript: typeof import('wxt/utils/define-content-script').defineContentScript
   const defineUnlistedScript: typeof import('wxt/utils/define-unlisted-script').defineUnlistedScript
   const defineWxtPlugin: typeof import('wxt/utils/define-wxt-plugin').defineWxtPlugin
-  const deleteBackendProduct: typeof import('D:/job/auto-ozon/browser-extension/src/utils/api').deleteBackendProduct
+  const deleteBackendProduct: typeof import('/Users/user/job/auto-ozon/browser-extension/src/utils/api').deleteBackendProduct
   const effectScope: typeof import('vue').effectScope
-  const enrichDelay: typeof import('D:/job/auto-ozon/browser-extension/src/utils/humanize').enrichDelay
+  const enrichDelay: typeof import('/Users/user/job/auto-ozon/browser-extension/src/utils/humanize').enrichDelay
   const fakeBrowser: typeof import('wxt/testing').fakeBrowser
-  const fetchBackendProducts: typeof import('D:/job/auto-ozon/browser-extension/src/utils/api').fetchBackendProducts
-  const generateShortId: typeof import('D:/job/auto-ozon/browser-extension/src/utils/crypto').generateShortId
+  const fetchBackendProducts: typeof import('/Users/user/job/auto-ozon/browser-extension/src/utils/api').fetchBackendProducts
+  const generateShortId: typeof import('/Users/user/job/auto-ozon/browser-extension/src/utils/crypto').generateShortId
   const getAppConfig: typeof import('wxt/utils/app-config').getAppConfig
   const getCurrentInstance: typeof import('vue').getCurrentInstance
   const getCurrentScope: typeof import('vue').getCurrentScope
   const getCurrentWatcher: typeof import('vue').getCurrentWatcher
-  const getSettings: typeof import('D:/job/auto-ozon/browser-extension/src/utils/storage').getSettings
+  const getSettings: typeof import('/Users/user/job/auto-ozon/browser-extension/src/utils/storage').getSettings
   const h: typeof import('vue').h
-  const humanClick: typeof import('D:/job/auto-ozon/browser-extension/src/utils/humanize').humanClick
-  const humanFetch: typeof import('D:/job/auto-ozon/browser-extension/src/utils/humanize').humanFetch
-  const humanLinkClick: typeof import('D:/job/auto-ozon/browser-extension/src/utils/humanize').humanLinkClick
-  const humanScroll: typeof import('D:/job/auto-ozon/browser-extension/src/utils/humanize').humanScroll
-  const humanScrollTo: typeof import('D:/job/auto-ozon/browser-extension/src/utils/humanize').humanScrollTo
-  const humanScrollToBottom: typeof import('D:/job/auto-ozon/browser-extension/src/utils/humanize').humanScrollToBottom
-  const humanScrollToTop: typeof import('D:/job/auto-ozon/browser-extension/src/utils/humanize').humanScrollToTop
+  const humanClick: typeof import('/Users/user/job/auto-ozon/browser-extension/src/utils/humanize').humanClick
+  const humanFetch: typeof import('/Users/user/job/auto-ozon/browser-extension/src/utils/humanize').humanFetch
+  const humanLinkClick: typeof import('/Users/user/job/auto-ozon/browser-extension/src/utils/humanize').humanLinkClick
+  const humanScroll: typeof import('/Users/user/job/auto-ozon/browser-extension/src/utils/humanize').humanScroll
+  const humanScrollTo: typeof import('/Users/user/job/auto-ozon/browser-extension/src/utils/humanize').humanScrollTo
+  const humanScrollToBottom: typeof import('/Users/user/job/auto-ozon/browser-extension/src/utils/humanize').humanScrollToBottom
+  const humanScrollToTop: typeof import('/Users/user/job/auto-ozon/browser-extension/src/utils/humanize').humanScrollToTop
   const inject: typeof import('vue').inject
   const injectScript: typeof import('wxt/utils/inject-script').injectScript
   const isProxy: typeof import('vue').isProxy
@@ -49,10 +49,10 @@ declare global {
   const isRef: typeof import('vue').isRef
   const isShallow: typeof import('vue').isShallow
   const markRaw: typeof import('vue').markRaw
-  const microPause: typeof import('D:/job/auto-ozon/browser-extension/src/utils/humanize').microPause
+  const microPause: typeof import('/Users/user/job/auto-ozon/browser-extension/src/utils/humanize').microPause
   const nextTick: typeof import('vue').nextTick
-  const normalDelay: typeof import('D:/job/auto-ozon/browser-extension/src/utils/humanize').normalDelay
-  const occasionalLongPause: typeof import('D:/job/auto-ozon/browser-extension/src/utils/humanize').occasionalLongPause
+  const normalDelay: typeof import('/Users/user/job/auto-ozon/browser-extension/src/utils/humanize').normalDelay
+  const occasionalLongPause: typeof import('/Users/user/job/auto-ozon/browser-extension/src/utils/humanize').occasionalLongPause
   const onActivated: typeof import('vue').onActivated
   const onBeforeMount: typeof import('vue').onBeforeMount
   const onBeforeUnmount: typeof import('vue').onBeforeUnmount
@@ -68,26 +68,26 @@ declare global {
   const onUpdated: typeof import('vue').onUpdated
   const onWatcherCleanup: typeof import('vue').onWatcherCleanup
   const provide: typeof import('vue').provide
-  const randomDelay: typeof import('D:/job/auto-ozon/browser-extension/src/utils/humanize').randomDelay
+  const randomDelay: typeof import('/Users/user/job/auto-ozon/browser-extension/src/utils/humanize').randomDelay
   const reactive: typeof import('vue').reactive
-  const readingPause: typeof import('D:/job/auto-ozon/browser-extension/src/utils/humanize').readingPause
+  const readingPause: typeof import('/Users/user/job/auto-ozon/browser-extension/src/utils/humanize').readingPause
   const readonly: typeof import('vue').readonly
   const ref: typeof import('vue').ref
   const resolveComponent: typeof import('vue').resolveComponent
-  const saveSettings: typeof import('D:/job/auto-ozon/browser-extension/src/utils/storage').saveSettings
-  const scrollPause: typeof import('D:/job/auto-ozon/browser-extension/src/utils/humanize').scrollPause
+  const saveSettings: typeof import('/Users/user/job/auto-ozon/browser-extension/src/utils/storage').saveSettings
+  const scrollPause: typeof import('/Users/user/job/auto-ozon/browser-extension/src/utils/humanize').scrollPause
   const shallowReactive: typeof import('vue').shallowReactive
   const shallowReadonly: typeof import('vue').shallowReadonly
   const shallowRef: typeof import('vue').shallowRef
-  const simulateHover: typeof import('D:/job/auto-ozon/browser-extension/src/utils/humanize').simulateHover
-  const simulateMouseLeave: typeof import('D:/job/auto-ozon/browser-extension/src/utils/humanize').simulateMouseLeave
+  const simulateHover: typeof import('/Users/user/job/auto-ozon/browser-extension/src/utils/humanize').simulateHover
+  const simulateMouseLeave: typeof import('/Users/user/job/auto-ozon/browser-extension/src/utils/humanize').simulateMouseLeave
   const storage: typeof import('wxt/utils/storage').storage
-  const syncProducts: typeof import('D:/job/auto-ozon/browser-extension/src/utils/api').syncProducts
+  const syncProducts: typeof import('/Users/user/job/auto-ozon/browser-extension/src/utils/api').syncProducts
   const toRaw: typeof import('vue').toRaw
   const toRef: typeof import('vue').toRef
   const toRefs: typeof import('vue').toRefs
   const toValue: typeof import('vue').toValue
-  const transitionPause: typeof import('D:/job/auto-ozon/browser-extension/src/utils/humanize').transitionPause
+  const transitionPause: typeof import('/Users/user/job/auto-ozon/browser-extension/src/utils/humanize').transitionPause
   const triggerRef: typeof import('vue').triggerRef
   const unref: typeof import('vue').unref
   const useAppConfig: typeof import('wxt/utils/app-config').useAppConfig
@@ -136,21 +136,21 @@ declare global {
   export type { Component, Slot, Slots, ComponentPublicInstance, ComputedRef, DirectiveBinding, ExtractDefaultPropTypes, ExtractPropTypes, ExtractPublicPropTypes, InjectionKey, PropType, Ref, ShallowRef, MaybeRef, MaybeRefOrGetter, VNode, WritableComputedRef } from 'vue'
   import('vue')
   // @ts-ignore
-  export type { Platform, ScrapedProduct, ProductAttribute, PlatformScrapingConfig, PluginSettings, ListProductSummary } from 'D:/job/auto-ozon/browser-extension/src/utils/types'
-  import('D:/job/auto-ozon/browser-extension/src/utils/types')
+  export type { Platform, ScrapedProduct, ProductAttribute, PlatformScrapingConfig, PluginSettings, ListProductSummary } from '/Users/user/job/auto-ozon/browser-extension/src/utils/types'
+  import('/Users/user/job/auto-ozon/browser-extension/src/utils/types')
 }
 // for vue template auto import
 import { UnwrapRef } from 'vue'
 declare module 'vue' {
   interface ComponentCustomProperties {
     readonly ContentScriptContext: UnwrapRef<typeof import('wxt/utils/content-script-context')['ContentScriptContext']>
-    readonly DEFAULT_SETTINGS: UnwrapRef<typeof import('D:/job/auto-ozon/browser-extension/src/utils/types')['DEFAULT_SETTINGS']>
+    readonly DEFAULT_SETTINGS: UnwrapRef<typeof import('/Users/user/job/auto-ozon/browser-extension/src/utils/types')['DEFAULT_SETTINGS']>
     readonly EffectScope: UnwrapRef<typeof import('vue')['EffectScope']>
     readonly InvalidMatchPattern: UnwrapRef<typeof import('wxt/utils/match-patterns')['InvalidMatchPattern']>
     readonly MatchPattern: UnwrapRef<typeof import('wxt/utils/match-patterns')['MatchPattern']>
-    readonly batchTransitionPause: UnwrapRef<typeof import('D:/job/auto-ozon/browser-extension/src/utils/humanize')['batchTransitionPause']>
+    readonly batchTransitionPause: UnwrapRef<typeof import('/Users/user/job/auto-ozon/browser-extension/src/utils/humanize')['batchTransitionPause']>
     readonly browser: UnwrapRef<typeof import('wxt/browser')['browser']>
-    readonly checkBackendHealth: UnwrapRef<typeof import('D:/job/auto-ozon/browser-extension/src/utils/api')['checkBackendHealth']>
+    readonly checkBackendHealth: UnwrapRef<typeof import('/Users/user/job/auto-ozon/browser-extension/src/utils/api')['checkBackendHealth']>
     readonly computed: UnwrapRef<typeof import('vue')['computed']>
     readonly createApp: UnwrapRef<typeof import('vue')['createApp']>
     readonly createIframeUi: UnwrapRef<typeof import('wxt/utils/content-script-ui/iframe')['createIframeUi']>
@@ -164,25 +164,25 @@ declare module 'vue' {
     readonly defineContentScript: UnwrapRef<typeof import('wxt/utils/define-content-script')['defineContentScript']>
     readonly defineUnlistedScript: UnwrapRef<typeof import('wxt/utils/define-unlisted-script')['defineUnlistedScript']>
     readonly defineWxtPlugin: UnwrapRef<typeof import('wxt/utils/define-wxt-plugin')['defineWxtPlugin']>
-    readonly deleteBackendProduct: UnwrapRef<typeof import('D:/job/auto-ozon/browser-extension/src/utils/api')['deleteBackendProduct']>
+    readonly deleteBackendProduct: UnwrapRef<typeof import('/Users/user/job/auto-ozon/browser-extension/src/utils/api')['deleteBackendProduct']>
     readonly effectScope: UnwrapRef<typeof import('vue')['effectScope']>
-    readonly enrichDelay: UnwrapRef<typeof import('D:/job/auto-ozon/browser-extension/src/utils/humanize')['enrichDelay']>
+    readonly enrichDelay: UnwrapRef<typeof import('/Users/user/job/auto-ozon/browser-extension/src/utils/humanize')['enrichDelay']>
     readonly fakeBrowser: UnwrapRef<typeof import('wxt/testing')['fakeBrowser']>
-    readonly fetchBackendProducts: UnwrapRef<typeof import('D:/job/auto-ozon/browser-extension/src/utils/api')['fetchBackendProducts']>
-    readonly generateShortId: UnwrapRef<typeof import('D:/job/auto-ozon/browser-extension/src/utils/crypto')['generateShortId']>
+    readonly fetchBackendProducts: UnwrapRef<typeof import('/Users/user/job/auto-ozon/browser-extension/src/utils/api')['fetchBackendProducts']>
+    readonly generateShortId: UnwrapRef<typeof import('/Users/user/job/auto-ozon/browser-extension/src/utils/crypto')['generateShortId']>
     readonly getAppConfig: UnwrapRef<typeof import('wxt/utils/app-config')['getAppConfig']>
     readonly getCurrentInstance: UnwrapRef<typeof import('vue')['getCurrentInstance']>
     readonly getCurrentScope: UnwrapRef<typeof import('vue')['getCurrentScope']>
     readonly getCurrentWatcher: UnwrapRef<typeof import('vue')['getCurrentWatcher']>
-    readonly getSettings: UnwrapRef<typeof import('D:/job/auto-ozon/browser-extension/src/utils/storage')['getSettings']>
+    readonly getSettings: UnwrapRef<typeof import('/Users/user/job/auto-ozon/browser-extension/src/utils/storage')['getSettings']>
     readonly h: UnwrapRef<typeof import('vue')['h']>
-    readonly humanClick: UnwrapRef<typeof import('D:/job/auto-ozon/browser-extension/src/utils/humanize')['humanClick']>
-    readonly humanFetch: UnwrapRef<typeof import('D:/job/auto-ozon/browser-extension/src/utils/humanize')['humanFetch']>
-    readonly humanLinkClick: UnwrapRef<typeof import('D:/job/auto-ozon/browser-extension/src/utils/humanize')['humanLinkClick']>
-    readonly humanScroll: UnwrapRef<typeof import('D:/job/auto-ozon/browser-extension/src/utils/humanize')['humanScroll']>
-    readonly humanScrollTo: UnwrapRef<typeof import('D:/job/auto-ozon/browser-extension/src/utils/humanize')['humanScrollTo']>
-    readonly humanScrollToBottom: UnwrapRef<typeof import('D:/job/auto-ozon/browser-extension/src/utils/humanize')['humanScrollToBottom']>
-    readonly humanScrollToTop: UnwrapRef<typeof import('D:/job/auto-ozon/browser-extension/src/utils/humanize')['humanScrollToTop']>
+    readonly humanClick: UnwrapRef<typeof import('/Users/user/job/auto-ozon/browser-extension/src/utils/humanize')['humanClick']>
+    readonly humanFetch: UnwrapRef<typeof import('/Users/user/job/auto-ozon/browser-extension/src/utils/humanize')['humanFetch']>
+    readonly humanLinkClick: UnwrapRef<typeof import('/Users/user/job/auto-ozon/browser-extension/src/utils/humanize')['humanLinkClick']>
+    readonly humanScroll: UnwrapRef<typeof import('/Users/user/job/auto-ozon/browser-extension/src/utils/humanize')['humanScroll']>
+    readonly humanScrollTo: UnwrapRef<typeof import('/Users/user/job/auto-ozon/browser-extension/src/utils/humanize')['humanScrollTo']>
+    readonly humanScrollToBottom: UnwrapRef<typeof import('/Users/user/job/auto-ozon/browser-extension/src/utils/humanize')['humanScrollToBottom']>
+    readonly humanScrollToTop: UnwrapRef<typeof import('/Users/user/job/auto-ozon/browser-extension/src/utils/humanize')['humanScrollToTop']>
     readonly inject: UnwrapRef<typeof import('vue')['inject']>
     readonly injectScript: UnwrapRef<typeof import('wxt/utils/inject-script')['injectScript']>
     readonly isProxy: UnwrapRef<typeof import('vue')['isProxy']>
@@ -191,10 +191,10 @@ declare module 'vue' {
     readonly isRef: UnwrapRef<typeof import('vue')['isRef']>
     readonly isShallow: UnwrapRef<typeof import('vue')['isShallow']>
     readonly markRaw: UnwrapRef<typeof import('vue')['markRaw']>
-    readonly microPause: UnwrapRef<typeof import('D:/job/auto-ozon/browser-extension/src/utils/humanize')['microPause']>
+    readonly microPause: UnwrapRef<typeof import('/Users/user/job/auto-ozon/browser-extension/src/utils/humanize')['microPause']>
     readonly nextTick: UnwrapRef<typeof import('vue')['nextTick']>
-    readonly normalDelay: UnwrapRef<typeof import('D:/job/auto-ozon/browser-extension/src/utils/humanize')['normalDelay']>
-    readonly occasionalLongPause: UnwrapRef<typeof import('D:/job/auto-ozon/browser-extension/src/utils/humanize')['occasionalLongPause']>
+    readonly normalDelay: UnwrapRef<typeof import('/Users/user/job/auto-ozon/browser-extension/src/utils/humanize')['normalDelay']>
+    readonly occasionalLongPause: UnwrapRef<typeof import('/Users/user/job/auto-ozon/browser-extension/src/utils/humanize')['occasionalLongPause']>
     readonly onActivated: UnwrapRef<typeof import('vue')['onActivated']>
     readonly onBeforeMount: UnwrapRef<typeof import('vue')['onBeforeMount']>
     readonly onBeforeUnmount: UnwrapRef<typeof import('vue')['onBeforeUnmount']>
@@ -210,26 +210,26 @@ declare module 'vue' {
     readonly onUpdated: UnwrapRef<typeof import('vue')['onUpdated']>
     readonly onWatcherCleanup: UnwrapRef<typeof import('vue')['onWatcherCleanup']>
     readonly provide: UnwrapRef<typeof import('vue')['provide']>
-    readonly randomDelay: UnwrapRef<typeof import('D:/job/auto-ozon/browser-extension/src/utils/humanize')['randomDelay']>
+    readonly randomDelay: UnwrapRef<typeof import('/Users/user/job/auto-ozon/browser-extension/src/utils/humanize')['randomDelay']>
     readonly reactive: UnwrapRef<typeof import('vue')['reactive']>
-    readonly readingPause: UnwrapRef<typeof import('D:/job/auto-ozon/browser-extension/src/utils/humanize')['readingPause']>
+    readonly readingPause: UnwrapRef<typeof import('/Users/user/job/auto-ozon/browser-extension/src/utils/humanize')['readingPause']>
     readonly readonly: UnwrapRef<typeof import('vue')['readonly']>
     readonly ref: UnwrapRef<typeof import('vue')['ref']>
     readonly resolveComponent: UnwrapRef<typeof import('vue')['resolveComponent']>
-    readonly saveSettings: UnwrapRef<typeof import('D:/job/auto-ozon/browser-extension/src/utils/storage')['saveSettings']>
-    readonly scrollPause: UnwrapRef<typeof import('D:/job/auto-ozon/browser-extension/src/utils/humanize')['scrollPause']>
+    readonly saveSettings: UnwrapRef<typeof import('/Users/user/job/auto-ozon/browser-extension/src/utils/storage')['saveSettings']>
+    readonly scrollPause: UnwrapRef<typeof import('/Users/user/job/auto-ozon/browser-extension/src/utils/humanize')['scrollPause']>
     readonly shallowReactive: UnwrapRef<typeof import('vue')['shallowReactive']>
     readonly shallowReadonly: UnwrapRef<typeof import('vue')['shallowReadonly']>
     readonly shallowRef: UnwrapRef<typeof import('vue')['shallowRef']>
-    readonly simulateHover: UnwrapRef<typeof import('D:/job/auto-ozon/browser-extension/src/utils/humanize')['simulateHover']>
-    readonly simulateMouseLeave: UnwrapRef<typeof import('D:/job/auto-ozon/browser-extension/src/utils/humanize')['simulateMouseLeave']>
+    readonly simulateHover: UnwrapRef<typeof import('/Users/user/job/auto-ozon/browser-extension/src/utils/humanize')['simulateHover']>
+    readonly simulateMouseLeave: UnwrapRef<typeof import('/Users/user/job/auto-ozon/browser-extension/src/utils/humanize')['simulateMouseLeave']>
     readonly storage: UnwrapRef<typeof import('wxt/utils/storage')['storage']>
-    readonly syncProducts: UnwrapRef<typeof import('D:/job/auto-ozon/browser-extension/src/utils/api')['syncProducts']>
+    readonly syncProducts: UnwrapRef<typeof import('/Users/user/job/auto-ozon/browser-extension/src/utils/api')['syncProducts']>
     readonly toRaw: UnwrapRef<typeof import('vue')['toRaw']>
     readonly toRef: UnwrapRef<typeof import('vue')['toRef']>
     readonly toRefs: UnwrapRef<typeof import('vue')['toRefs']>
     readonly toValue: UnwrapRef<typeof import('vue')['toValue']>
-    readonly transitionPause: UnwrapRef<typeof import('D:/job/auto-ozon/browser-extension/src/utils/humanize')['transitionPause']>
+    readonly transitionPause: UnwrapRef<typeof import('/Users/user/job/auto-ozon/browser-extension/src/utils/humanize')['transitionPause']>
     readonly triggerRef: UnwrapRef<typeof import('vue')['triggerRef']>
     readonly unref: UnwrapRef<typeof import('vue')['unref']>
     readonly useAppConfig: UnwrapRef<typeof import('wxt/utils/app-config')['useAppConfig']>

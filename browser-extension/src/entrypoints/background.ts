@@ -116,12 +116,14 @@ export default defineBackground(() => {
     const url = tab.url
     const isOzon = /ozon\.ru/.test(url) && /\/\d+\/?$/.test(url)
     const isWB = /wildberries\.ru/.test(url) && /\/\d+\/?$/.test(url)
+    const is1688 = /detail\.1688\.com\/offer\//.test(url) || /s\.1688\.com\/selloffer/.test(url) || /s\.1688\.com\/offer_search/.test(url)
 
-    if (isOzon || isWB) {
+    if (isOzon || isWB || is1688) {
       try {
+        const file = is1688 ? 'content-scripts/ali1688.js' : isOzon ? 'content-scripts/ozon.js' : 'content-scripts/wb.js'
         await browser.scripting.executeScript({
           target: { tabId },
-          files: [isOzon ? 'content-scripts/ozon.js' : 'content-scripts/wb.js'],
+          files: [file],
         })
       } catch (e) {
         console.warn('[Auto-Ozon] 注入 content script 失败:', e)
@@ -222,16 +224,19 @@ async function checkCurrentPage() {
     const url = tab.url
     const isOzon = /ozon\.ru/.test(url)
     const isWB = /wildberries\.ru/.test(url)
+    const is1688 = /1688\.com/.test(url)
 
-    if (!isOzon && !isWB) return { isSupported: false }
+    if (!isOzon && !isWB && !is1688) return { isSupported: false }
+
+    const platform = isOzon ? 'ozon' : isWB ? 'wb' : '1688'
 
     // 先发消息让 content script 检测页面类型
     try {
       const pageCheck = await browser.tabs.sendMessage(tab.id!, { action: 'checkPage' })
       return {
         isSupported: true,
-        platform: pageCheck.platform || (isOzon ? 'ozon' : 'wb'),
-        isProductPage: pageCheck.isProductPage ?? /\/\d+\/?$/.test(url),
+        platform: pageCheck.platform || platform,
+        productPage: pageCheck.isProductPage ?? (is1688 ? /detail\.1688\.com\/offer\//.test(url) : /\/\d+\/?$/.test(url)),
         isListPage: pageCheck.isListPage ?? false,
         pageType: pageCheck.pageType || 'unknown',
         tabId: tab.id,
@@ -239,11 +244,13 @@ async function checkCurrentPage() {
       }
     } catch {
       // content script 未加载,用 URL 猜测
-      const isProductPage = /\/\d+\/?$/.test(url)
-      const isListPage = /\/(category|brand|search|seller|collection)\//i.test(url)
+      const isProductPage = is1688 ? /detail\.1688\.com\/offer\//.test(url) : /\/\d+\/?$/.test(url)
+      const isListPage = is1688
+        ? /s\.1688\.com\/(selloffer|offer_search|company)/.test(url)
+        : /\/(category|brand|search|seller|collection)\//i.test(url)
       return {
         isSupported: true,
-        platform: isOzon ? 'ozon' : 'wb',
+        platform,
         isProductPage,
         isListPage,
         pageType: isProductPage ? 'product' : isListPage ? 'list' : 'unknown',

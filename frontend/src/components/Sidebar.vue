@@ -56,6 +56,7 @@ const menuOptions: MenuOption[] = [
   { label: "智囊", key: "Intelligence", icon: renderIcon("🧠") },
   { type: "divider", key: "d1" },
   { label: "选品中心", key: "ProductSelection", icon: renderIcon("🔍") },
+  { label: "优图 Prompt 引擎", key: "PromptEngine", icon: renderIcon("🤖") },
   { type: "divider", key: "d2" },
   { label: "定时任务", key: "TaskConfig", icon: renderIcon("⚙️") },
 ];

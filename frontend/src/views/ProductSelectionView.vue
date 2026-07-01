@@ -112,7 +112,7 @@
          左侧:原始数据 (只读)
          右侧:编辑数据 + AI按钮
          ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ -->
-    <n-drawer v-model:show="drawerVisible" :width="1100" placement="right" :closable="true">
+    <n-drawer v-model:show="drawerVisible" :width="1100" placement="right" :closable="true" :theme-overrides="drawerThemeOverrides">
       <n-drawer-content :title="null" :native-scrollbar="false" closable>
         <template #header>
           <div style="display:flex; align-items:center; gap:8px;">
@@ -584,17 +584,29 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, computed, h, onMounted, nextTick } from "vue";
+import { ref, reactive, computed, h, onMounted, nextTick, watch } from "vue";
 import {
   NButton, NTag, NSpace, NInput, NInputNumber, NSelect, NDataTable,
   NPopconfirm, NPagination, NDrawer, NDrawerContent, NImage, NDivider,
   NModal, NForm, NFormItem, NGrid, NGi, NH2, NAlert,
   NTreeSelect, NA, NSpin, NDatePicker,
+  type GlobalThemeOverrides,
 } from "naive-ui";
 import { apiGet, apiPost, apiPut, apiDelete } from "../api";
 import { useMessage } from "naive-ui";
 
 const message = useMessage();
+
+// ── 抽屉主题:确保深色模式下背景正确 ──
+const drawerThemeOverrides = computed<GlobalThemeOverrides>(() => {
+  const dark = document.documentElement.getAttribute("data-theme") === "dark";
+  return {
+    Drawer: {
+      color: dark ? "#1a1a2e" : undefined,
+      bodyColor: dark ? "#1a1a2e" : undefined,
+    },
+  };
+});
 
 // ── 左右面板滚动锚点联动 ──
 const panelLeftRef = ref<HTMLElement | null>(null);
@@ -1034,10 +1046,26 @@ async function loadStoreOptions() {
   } catch { /* ignore */ }
 }
 
-async function loadCategoryTree() {
+function transformCategoryNodes(nodes: any[]): any[] {
+  return (nodes || []).map((n) => ({
+    key: n.description_category_id ?? n.category_id ?? n.key,
+    label: n.category_name ?? n.label ?? String(n.description_category_id ?? n.category_id ?? n.key),
+    children: n.children?.length ? transformCategoryNodes(n.children) : undefined,
+    disabled: !!n.disabled,
+  }));
+}
+
+async function loadCategoryTree(storeId?: number) {
   try {
-    categoryTree.value = await apiGet("/selection/ozon-categories");
-  } catch { /* ignore */ }
+    const params = new URLSearchParams();
+    params.set('category_id', '0');
+    if (storeId) params.set('store_id', String(storeId));
+    const resp = await apiGet<any>(`/selection/ozon-categories?${params}`);
+    const raw = Array.isArray(resp) ? resp : (resp?.categories || []);
+    categoryTree.value = transformCategoryNodes(raw);
+  } catch (e) {
+    console.error("loadCategoryTree failed:", e);
+  }
 }
 
 function onPageSizeChange(size: number) {
@@ -1051,6 +1079,13 @@ onMounted(() => {
   loadBrands();
   loadStoreOptions();
   loadCategoryTree();
+});
+
+// Reload category tree when store is selected in upload dialog
+watch(() => uploadForm.store_id, (newStoreId) => {
+  if (newStoreId && newStoreId > 0) {
+    loadCategoryTree(newStoreId);
+  }
 });
 </script>
 
@@ -1311,7 +1346,7 @@ onMounted(() => {
 }
 
 .image-add:hover {
-  background: #f8f9fa;
+  background: var(--bg-card-hover, #f8f9fa);
 }
 
 /* ── 属性行 ── */
@@ -1326,7 +1361,7 @@ onMounted(() => {
 }
 
 .attr-row:hover {
-  background: #f8f9fa;
+  background: var(--bg-card-hover, #f8f9fa);
 }
 
 .attr-row.readonly {
@@ -1382,6 +1417,31 @@ onMounted(() => {
     border-right: none;
     border-bottom: 1px solid var(--border-color);
   }
+}
+
+/* ── 深色模式: 抽屉及内部组件适配 ── */
+[data-theme="dark"] .n-drawer {
+  --n-color: var(--bg-main, #1a1a2e) !important;
+}
+[data-theme="dark"] .n-drawer-content {
+  background-color: var(--bg-main, #1a1a2e) !important;
+}
+[data-theme="dark"] .n-drawer-header {
+  background-color: var(--bg-main, #1a1a2e) !important;
+  border-bottom-color: var(--border-color, rgba(255,255,255,0.08)) !important;
+}
+[data-theme="dark"] .n-drawer-footer {
+  background-color: var(--bg-main, #1a1a2e) !important;
+  border-top-color: var(--border-color, rgba(255,255,255,0.08)) !important;
+}
+[data-theme="dark"] .n-collapse-item {
+  --n-title-font-size: 14px;
+}
+[data-theme="dark"] .attr-row:hover {
+  background: var(--bg-card-hover, #1c2048) !important;
+}
+[data-theme="dark"] .image-add:hover {
+  background: var(--bg-card-hover, #1c2048) !important;
 }
 
 @media (max-width: 700px) {

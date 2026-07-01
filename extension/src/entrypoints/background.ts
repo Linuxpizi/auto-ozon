@@ -277,7 +277,7 @@ async function checkCurrentPage() {
       return {
         isSupported: true,
         platform: pageCheck.platform || platform,
-        isProductPage: pageCheck.isProductPage ?? (is1688 ? /detail\.1688\.com\/offer\//.test(url) : /\/\d+\/?$/.test(url)),
+        isProductPage: pageCheck.isProductPage ?? (is1688 ? /detail\.1688\.com\/offer\//.test(url) : /\/product\//i.test(url) || /\/\d+\/?$/.test(url) || /\-\d+\/?$/.test(new URL(url).pathname)),
         isListPage: pageCheck.isListPage ?? false,
         pageType: pageCheck.pageType || 'unknown',
         tabId: tab.id,
@@ -285,7 +285,7 @@ async function checkCurrentPage() {
       }
     } catch {
       // content script 未加载,用 URL 猜测
-      const isProductPage = is1688 ? /detail\.1688\.com\/offer\//.test(url) : /\/\d+\/?$/.test(url)
+      const isProductPage = is1688 ? /detail\.1688\.com\/offer\//.test(url) : /\/product\//i.test(url) || /\/\d+\/?$/.test(url) || /\-\d+\/?$/.test(new URL(url).pathname)
       const isListPage = is1688
         ? /s\.1688\.com\/(selloffer|offer_search|company)/.test(url)
         : /\/(category|brand|search|seller|collection)\//i.test(url)

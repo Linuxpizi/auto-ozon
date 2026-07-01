@@ -28,11 +28,20 @@ function detectPageType(): 'product' | 'list' | 'unknown' {
   if (/\/(category|brand|search|seller|collection|c)\//i.test(path)) {
     return 'list'
   }
-  // 商品详情页:路径片段数>=2 且最后一段是纯数字(如 /product/xxx-123456/)
-  // 但要排除 category/brand 等列表页前缀
-  if (/\/\d+\/?$/.test(path) &&
-      path.split('/').filter(Boolean).length >= 2) {
-    return 'product'
+  // 商品详情页检测:
+  // 1. 纯数字结尾: /3087144237/
+  // 2. slug结尾带数字: /product/tyul-shtory-...-3087144237/
+  // 3. /product/ 路径下任何详情页
+  const segments = path.split('/').filter(Boolean)
+  if (segments.length >= 2) {
+    const lastSeg = segments[segments.length - 1]
+    const secondSeg = segments[0]
+    // /product/xxx-123/ — 直接匹配
+    if (secondSeg === 'product') return 'product'
+    // 最后一段是纯数字 (老式 URL)
+    if (/^\d+\/?$/.test(lastSeg)) return 'product'
+    // 最后一段以数字结尾 (slug URL, 如 xxx-1234567/)
+    if (/\-\d+\/?$/.test(lastSeg)) return 'product'
   }
   return 'unknown'
 }
@@ -42,7 +51,8 @@ function detectPageType(): 'product' | 'list' | 'unknown' {
 // ═══════════════════════════════════════════════════════════════
 
 function extractDetailSourceId(): string {
-  const match = location.pathname.match(/\/(\d+)\/?$/)
+  // 支持 slug URL: /product/xxx-3087144237/ 和旧式 /3087144237/
+  const match = location.pathname.match(/(\d{5,})\s*\/?\s*$/)
   return match?.[1] || ''
 }
 
@@ -133,35 +143,25 @@ async function extractDetailAttributes(): Promise<ProductAttribute[]> {
     }
   }
 
-  // 策略 2: 多种选择器尝试匹配属性区域
-  const selectors = [
-    '[data-widget="webCharacteristics"]',
-    '[class*="characteristic"]',
-    '[class*="specification"]',
-    '[class*="product-detail"] [class*="param"]',
-    '[class*="pdp-page"] [class*="attr"]',
-  ]
-  for (const sel of selectors) {
-    const container = document.querySelector(sel)
-    if (!container) continue
-    // 尝试多种行结构
-    const rows = container.querySelectorAll('div > div, dl > div, tr, li')
-    rows.forEach((row) => {
-      const children = Array.from(row.children)
-      if (children.length >= 2) {
-        const name = children[0]?.textContent?.trim() || ''
-        const value = children[1]?.textContent?.trim() || ''
+  // 策略 2: 从 <dl><dt><dd> 解析属性(Ozon 标准格式:webCharacteristics 内含多个 dl)
+  const charWidget = document.querySelector('[data-widget="webCharacteristics"], [class*="characteristic"]')
+  if (charWidget) {
+    for (const dl of Array.from(charWidget.querySelectorAll('dl'))) {
+      for (const dt of Array.from(dl.querySelectorAll('dt'))) {
+        const name = dt.textContent?.trim() || ''
+        const dd = dt.nextElementSibling
+        const value = dd?.textContent?.trim() || ''
         if (name && value && name.length < 100 && value.length < 200 && name !== value) {
-          attrs.push({ name, value })
+          if (!attrs.some((a) => a.name === name)) attrs.push({ name, value })
         }
       }
-    })
-    if (attrs.length > 0) break
+    }
   }
 
-  // 策略 3: 通用名值对检测 — 查找所有 dt/dd 或 name:value 格式的元素
+  // 策略 3: 回退 — 全局 dt/dd 或 div 名值对
   if (attrs.length === 0) {
-    document.querySelectorAll('dt, [class*="param-name"], [class*="attr-name"]').forEach((el) => {
+    // dt/dd 方式
+    document.querySelectorAll('dt').forEach((el) => {
       const name = el.textContent?.trim() || ''
       const valueEl = el.nextElementSibling
       const value = valueEl?.textContent?.trim() || ''
@@ -169,6 +169,22 @@ async function extractDetailAttributes(): Promise<ProductAttribute[]> {
         attrs.push({ name, value })
       }
     })
+    // div 名值对兜底
+    if (attrs.length === 0) {
+      const container = charWidget || document.querySelector('[class*="specification"]')
+      if (container) {
+        container.querySelectorAll('div > div, tr, li').forEach((row) => {
+          const children = Array.from(row.children)
+          if (children.length >= 2) {
+            const name = children[0]?.textContent?.trim() || ''
+            const value = children[1]?.textContent?.trim() || ''
+            if (name && value && name.length < 100 && value.length < 200 && name !== value) {
+              attrs.push({ name, value })
+            }
+          }
+        })
+      }
+    }
   }
 
   return attrs

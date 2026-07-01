@@ -486,7 +486,7 @@ const variantColumns: DataTableColumns<any> = [
   display: flex;
   align-items: flex-start;
   padding: 6px 0;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+  border-bottom: 1px solid var(--border-color, rgba(255, 255, 255, 0.04));
   gap: 12px;
 }
 
@@ -569,7 +569,7 @@ const variantColumns: DataTableColumns<any> = [
   aspect-ratio: 4 / 5;
   border-radius: 6px;
   overflow: hidden;
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  border: 1px solid var(--border-color, rgba(255, 255, 255, 0.08));
   position: relative;
   cursor: pointer;
   transition: border-color 0.2s;

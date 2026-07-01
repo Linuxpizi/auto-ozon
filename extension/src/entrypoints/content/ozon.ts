@@ -220,8 +220,65 @@ function extractSellerName(): string {
 }
 
 /* ================================================================
+ *  Seller URL — /seller/{id}/ link on page
+ * ================================================================ */
+
+function extractSellerUrl(): string {
+  const link = q<HTMLAnchorElement>('a[href*="/seller/"]')
+  if (link) {
+    const href = link.getAttribute('href') || ''
+    return href.startsWith('http') ? href : `https://www.ozon.ru${href}`
+  }
+  return ''
+}
+
+/* ================================================================
  *  Attributes — from webAspects / webShortCharacteristics
  * ================================================================ */
+
+function extractSpecList(): Array<{ weight_g: number; depth_mm: number; height_mm: number; width_mm: number; [key: string]: any }> {
+  const specs: Record<string, any> = { weight_g: 0, depth_mm: 0, height_mm: 0, width_mm: 0 }
+
+  const aspects = widget('webAspects')
+  if (aspects) {
+    const items = aspects.querySelectorAll('.pdp_a1h')
+    for (const item of items) {
+      const keyEl = item.querySelector('[class*="k9"]')
+      const valEl = item.querySelector('[class*="q5"]')
+      if (keyEl && valEl) {
+        const key = keyEl.textContent.trim().replace(/[:\s]+$/, '')
+        const val = valEl.textContent.trim()
+        if (/вес/i.test(key)) specs.weight_g = parseFloat(val.replace(',', '.').replace(/[^\d.]/g, '')) || 0
+        else if (/длин|глуб/i.test(key)) specs.depth_mm = parseFloat(val.replace(',', '.').replace(/[^\d.]/g, '')) || 0
+        else if (/высот/i.test(key)) specs.height_mm = parseFloat(val.replace(',', '.').replace(/[^\d.]/g, '')) || 0
+        else if (/шир/i.test(key)) specs.width_mm = parseFloat(val.replace(',', '.').replace(/[^\d.]/g, '')) || 0
+        else specs[key] = val
+      }
+    }
+  }
+
+  const shortChars = widget('webShortCharacteristics')
+  if (shortChars) {
+    const items = shortChars.querySelectorAll('.pdp_a1h')
+    for (const item of items) {
+      const keyEl = item.querySelector('[class*="k9"]')
+      const valEl = item.querySelector('[class*="q5"]')
+      if (keyEl && valEl) {
+        const key = keyEl.textContent.trim().replace(/[:\s]+$/, '')
+        const val = valEl.textContent.trim()
+        if (!(key in specs) || specs[key] === 0 || specs[key] === '') {
+          if (/вес/i.test(key)) specs.weight_g = parseFloat(val.replace(',', '.').replace(/[^\d.]/g, '')) || 0
+          else if (/длин|глуб/i.test(key)) specs.depth_mm = parseFloat(val.replace(',', '.').replace(/[^\d.]/g, '')) || 0
+          else if (/высот/i.test(key)) specs.height_mm = parseFloat(val.replace(',', '.').replace(/[^\d.]/g, '')) || 0
+          else if (/шир/i.test(key)) specs.width_mm = parseFloat(val.replace(',', '.').replace(/[^\d.]/g, '')) || 0
+          else specs[key] = val
+        }
+      }
+    }
+  }
+
+  return [specs as any]
+}
 
 function extractAttributes(): ProductAttribute[] {
   const attrs: ProductAttribute[] = []
@@ -339,11 +396,14 @@ export function scrapeOzonProduct(): ScrapedProduct | null {
     brand: extractBrand(),
     category: extractCategory(),
     sellerName: extractSellerName(),
-    sellerUrl: '',
+    sellerUrl: extractSellerUrl(),
     attributes: allAttributes,
     description: extractDescription(),
     sourceUrl: location.href,
     scrapedAt: new Date().toISOString(),
+    videoUrls: extractVideoUrls(),
+    skuList: extractSkuList(),
+    specList: extractSpecList(),
   }
 }
 

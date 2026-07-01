@@ -627,97 +627,34 @@ export function scan1688ListCards(): ListCard1688[] {
   const cards: ListCard1688[] = []
   const seen = new Set<string>()
 
-  // ── Strategy 1: extract from window.__INIT_DATA__ / globalData ──
-  try {
-    const w = window as any
-    const initData = w.__INIT_DATA__ || w.__DATA__ || w.globalData
-    if (initData) {
-      const tryPaths = [
-        initData?.data?.offerList,
-        initData?.data?.mainData?.offerList,
-        initData?.data?.resultList,
-        initData?.offerList,
-        initData?.result?.data?.offerList,
-        initData?.content?.offerList,
-      ]
-      for (const list of tryPaths) {
-        if (Array.isArray(list) && list.length > 0) {
-          for (const item of list) {
-            const offerId = String(item?.offerId || item?.id || item?.offer?.offerId || '')
-            if (!offerId || seen.has(offerId)) continue
-            seen.add(offerId)
-            cards.push({
-              sourceId: offerId,
-              title: item?.subject || item?.title || item?.offer?.subject || '',
-              price: parseFloat(item?.price || item?.offer?.price || item?.promotionPrice || '0') || 0,
-              oldPrice: 0,
-              imageUrl: item?.imageUrl || item?.image || item?.offer?.imageUrl || '',
-              sourceUrl: `https://detail.1688.com/offer/${offerId}.html`,
-            })
-          }
-          if (cards.length > 0) return cards
-        }
-      }
-    }
-  } catch { /* ignore */ }
-
-  // ── Strategy 2: scan ALL <a> tags by href pattern (no CSS class dependency) ──
-  const allLinks = document.querySelectorAll('a[href]') as NodeListOf<HTMLAnchorElement>
-  for (const a of allLinks) {
-    const href = a.href || a.getAttribute('href') || ''
-    const idMatch = href.match(/(?:detail\.1688\.com\/offer\/|\/offer\/)(\d{6,})/)
-    if (!idMatch) continue
-    const sourceId = idMatch[1]
+  // Modern 1688 search pages render each product as:
+  //   <a class="search-offer-item" href="detail.m.1688.com/page/index.html?offerId=XXX">
+  // The card IS the <a> tag itself — offerId lives in the card's own href.
+  const cardEls = document.querySelectorAll('.search-offer-item')
+  for (const el of cardEls) {
+    const card = el as HTMLAnchorElement
+    const href = card.href || card.getAttribute('href') || ''
+    const m = href.match(/offerId=(\d+)/)
+    if (!m) continue
+    const sourceId = m[1]
     if (seen.has(sourceId)) continue
     seen.add(sourceId)
 
-    // Walk up DOM to find the card container (has image + price)
-    let container: HTMLElement | null = a.parentElement
-    for (let i = 0; i < 8 && container; i++) {
-      const hasImg = container.querySelector('img')
-      const hasPrice = container.querySelector('[class*="price"], [class*="Price"]') || /[\d.]+/.test(container.textContent || '')
-      if (hasImg && hasPrice) break
-      container = container.parentElement
-    }
-    if (!container) container = a.parentElement
-    if (!container) continue
+    const titleEl = card.querySelector('[class*="title"]')
+    const priceEl = card.querySelector('[class*="price"]')
+    const imgEl = card.querySelector('img')
 
-    const imgEl = container.querySelector('img') as HTMLImageElement
-    const priceEl = container.querySelector('[class*="price"], [class*="Price"]')
-    const titleText = a.textContent?.trim()
-      || container.querySelector('[class*="title"], [class*="Title"], h3, h4')?.textContent?.trim()
-      || ''
+    let imageUrl = imgEl?.src || imgEl?.getAttribute('data-src') || ''
+    if (imageUrl && !imageUrl.startsWith('http')) imageUrl = 'https:' + imageUrl
 
     cards.push({
       sourceId,
-      title: titleText,
+      title: titleEl?.textContent?.trim() || '',
       price: parsePrice(priceEl?.textContent || ''),
       oldPrice: 0,
-      imageUrl: imgEl?.src || imgEl?.getAttribute('data-src') || '',
-      sourceUrl: href.startsWith('http') ? href : `https://detail.1688.com/offer/${sourceId}.html`,
+      imageUrl,
+      sourceUrl: `https://detail.1688.com/offer/${sourceId}.html`,
     })
-  }
-
-  // ── Strategy 3: scan elements with data-offer-id / data-id attributes ──
-  if (cards.length === 0) {
-    const dataEls = document.querySelectorAll('[data-offer-id], [data-id], [data-offerid]')
-    for (const el of dataEls) {
-      const sid = el.getAttribute('data-offer-id') || el.getAttribute('data-id') || el.getAttribute('data-offerid') || ''
-      if (!sid || seen.has(sid)) continue
-      seen.add(sid)
-      const ctr = el as HTMLElement
-      const img = ctr.querySelector('img') as HTMLImageElement
-      const prEl = ctr.querySelector('[class*="price"], [class*="Price"]')
-      const ttlEl = ctr.querySelector('[class*="title"], [class*="Title"]')
-      cards.push({
-        sourceId: sid,
-        title: ttlEl?.textContent?.trim() || '',
-        price: parsePrice(prEl?.textContent || ''),
-        oldPrice: 0,
-        imageUrl: img?.src || img?.getAttribute('data-src') || '',
-        sourceUrl: `https://detail.1688.com/offer/${sid}.html`,
-      })
-    }
   }
 
   return cards

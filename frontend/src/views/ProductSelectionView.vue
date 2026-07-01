@@ -631,10 +631,13 @@ const precisionOriginal = ref<any>(null);
 const precisionEdit = ref<any>(null);
 
 // ── helpers ───────────────────────────────────────────────────────
-function formatPrice(price: number | string): string {
+const _CURRENCY_MAP: Record<string, string> = { RUB: '₽', CNY: '¥', USD: '$', EUR: '€' };
+
+function formatPrice(price: number | string, currency?: string): string {
   const num = typeof price === "string" ? parseFloat(price) : price;
   if (!num) return "—";
-  return num.toLocaleString("ru-RU") + " ₽";
+  const sym = _CURRENCY_MAP[(currency || '').toUpperCase()] || '₽';
+  return num.toLocaleString('zh-CN') + ' ' + sym;
 }
 
 function calcDiscount(price: number, oldPrice: number): string {
@@ -690,10 +693,11 @@ function nameSlot(row: any) {
 
 function priceSlot(row: any) {
   const discount = calcDiscount(row.price, row.old_price);
+  const cur = row.currency || '';
   return h("div", { style: "white-space: nowrap" }, [
-    h("div", { style: "font-weight: 600; font-size: 13px" }, formatPrice(row.price)),
+    h("div", { style: "font-weight: 600; font-size: 13px" }, formatPrice(row.price, cur)),
     row.old_price && row.old_price > row.price
-      ? h("div", { style: "font-size: 11px; color: #999; text-decoration: line-through" }, formatPrice(row.old_price))
+      ? h("div", { style: "font-size: 11px; color: #999; text-decoration: line-through" }, formatPrice(row.old_price, cur))
       : null,
     discount
       ? h(NTag, { type: "error", size: "tiny", style: "margin-top: 2px" }, () => discount)
@@ -1056,6 +1060,7 @@ function initManualProduct() {
     brand: "",
     category: "",
     category_id: null,
+    currency: "",
     price: 0,
     old_price: 0,
     vat: "0",

@@ -258,7 +258,7 @@
                 style="width: 260px;"
               />
             </n-form-item>
-            <n-form-item label="售价 (₽)">
+            <n-form-item label="售价">
               <n-input-number
                 v-model:value="form.priceNum"
                 :min="0"
@@ -267,7 +267,7 @@
                 style="width: 200px;"
               />
             </n-form-item>
-            <n-form-item label="划线价 (₽)">
+            <n-form-item label="划线价">
               <n-input-number
                 v-model:value="form.oldPriceNum"
                 :min="0"
@@ -563,6 +563,7 @@ function showEditDialog(task: any) {
   sourceProductData.value = {
     title: task.source_name || "",
     description: task.source_description || "",
+    currency: task.currency || "",
     images: (() => {
       try { return JSON.parse(task.source_images || "[]"); } catch { return []; }
     })(),
@@ -613,6 +614,7 @@ async function scrapeProduct() {
       title: data.title || "",
       brand: data.brand || "",
       category: data.category || "",
+      currency: data.currency || "",
       price: data.price || "",
       oldPrice: data.old_price || "",
       images: data.images || [],
@@ -658,6 +660,7 @@ async function fetchSourceProduct() {
     sourceProductData.value = {
       title: data.source_name || "",
       description: data.source_description || "",
+      currency: data.currency || "",
       images: data.source_images || [],
       attributes: data.source_attributes || [],
       category: data.category_name || "",

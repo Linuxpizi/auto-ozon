@@ -24,6 +24,30 @@ export default defineContentScript({
       `[Auto-Ozon] 1688 content script loaded (${isDetail ? 'detail' : 'list'} page)`,
     )
 
+    // ── 列表页: 检查是否有跨页采集状态需要恢复 ──
+    if (isList) {
+      const raw = localStorage.getItem(STORAGE_KEY_1688)
+      if (raw) {
+        try {
+          const saved: PersistedScrapingState = JSON.parse(raw)
+          console.log(`[Auto-Ozon] 1688 发现已保存的采集状态: 第${saved.pageCount}页, ${saved.seenIds.length}个已知ID, 已同步${saved.totalCreated}件`)
+          localStorage.removeItem(STORAGE_KEY_1688) // 取出后立即清除
+          // 等待页面稳定后恢复采集
+          setTimeout(() => {
+            runListScraping(saved.maxItems, saved.scrollDelay, saved.batchSize, {
+              seenIds: saved.seenIds,
+              pageCount: saved.pageCount,
+              totalCreated: saved.totalCreated,
+              totalSkipped: saved.totalSkipped,
+            })
+          }, 2000)
+        } catch (e) {
+          console.error('[Auto-Ozon] 1688 恢复采集状态失败:', e)
+          localStorage.removeItem(STORAGE_KEY_1688)
+        }
+      }
+    }
+
     // ── 注入悬浮采集按钮 (商品详情页) ──
     if (isDetail) {
       injectFloatingButton(async () => {
@@ -90,17 +114,67 @@ export default defineContentScript({
 // ── 列表采集状态 ──
 let stopListScraping = false
 
-async function runListScraping(maxItems: number, scrollDelay: number, batchSize: number) {
+// ── 跨页状态持久化 (localStorage) ──
+const STORAGE_KEY_1688 = 'auto-ozon-1688-scraping-state'
+
+interface PersistedScrapingState {
+  maxItems: number
+  scrollDelay: number
+  batchSize: number
+  seenIds: string[]
+  allItemsData: Array<{ sourceId: string; title: string; price: string; sourceUrl: string }>
+  pageCount: number
+  totalCreated: number
+  totalSkipped: number
+}
+
+/**
+ * 通过URL参数 beginPage 翻页。
+ * 1688搜索页固定使用 beginPage 参数控制页码（如 beginPage=2）。
+ * 不依赖任何DOM选择器。
+ * 返回 true 表示导航成功（页面会重载）。
+ */
+function navigateToNextPage1688(): boolean {
+  // 使用纯字符串替换避免 new URL() 的中文编码问题
+  const href = window.location.href
+  const match = href.match(/[?&]beginPage=(\d+)/)
+  const currentPage = match ? parseInt(match[1], 10) : 1
+  const nextPage = currentPage + 1
+  let newUrl: string
+  if (match) {
+    newUrl = href.replace(/beginPage=\d+/, `beginPage=${nextPage}`)
+  } else {
+    newUrl = href + (href.includes('?') ? '&' : '?') + `beginPage=${nextPage}`
+  }
+  console.log(`[Auto-Ozon] 1688 翻页: 第${currentPage}页 → 第${nextPage}页`)
+  window.location.href = newUrl
+  return true
+}
+
+async function runListScraping(
+  maxItems: number,
+  scrollDelay: number,
+  batchSize: number,
+  restored?: {
+    seenIds: string[]
+    pageCount: number
+    totalCreated: number
+    totalSkipped: number
+  },
+) {
   stopListScraping = false
-  const seen = new Set<string>()
+  const seen = new Set<string>(restored?.seenIds || [])
   const allItems: ListCard1688[] = []
   let lastHeight = 0
   let staleCount = 0
-  const maxStale = 10 // 连续10次滚动无新内容则停止 (现代1688懒加载较慢)
+  const maxStale = 5 // 连续5次滚动无新内容则尝试翻页
+  let totalCreated = restored?.totalCreated || 0
+  let totalSkipped = restored?.totalSkipped || 0
+  let pageCount = restored?.pageCount || 1
 
-  console.log(`[Auto-Ozon] 1688 列表采集开始 (maxItems=${maxItems})`)
+  console.log(`[Auto-Ozon] 1688 列表采集开始 (maxItems=${maxItems}, 恢复自第${pageCount}页, 已有${seen.size}个已知ID)`)
 
-  while (allItems.length < maxItems && !stopListScraping && staleCount < maxStale) {
+  while (allItems.length < maxItems && !stopListScraping) {
     // 采集当前可见商品
     const items = scan1688ListCards()
     let newCount = 0
@@ -125,6 +199,7 @@ async function runListScraping(maxItems: number, scrollDelay: number, batchSize:
 
     if (allItems.length >= maxItems) break
 
+
     // 滚动加载更多
     // 增量滚动: 每次滚动窗口高度的 60%,触发懒加载
     const scrollStep = Math.max(window.innerHeight * 0.6, 400)
@@ -141,9 +216,68 @@ async function runListScraping(maxItems: number, scrollDelay: number, batchSize:
     const newHeight = document.documentElement.scrollHeight
     if (newHeight === lastHeight) {
       staleCount++
+      console.log(`[Auto-Ozon] 1688 无新内容 (${staleCount}/${maxStale})`)
     } else {
       staleCount = 0
       lastHeight = newHeight
+    }
+
+    // 当前页滚动到底且无新内容 → 保存状态并翻页
+    // 必须有采集到数据才翻页，0条数据说明采集失败，不应翻页
+    if (staleCount >= maxStale && allItems.length > 0 && allItems.length < maxItems) {
+      // 先把当前页采集的数据同步到后端
+      if (allItems.length > 0) {
+        const products: ScrapedProduct[] = allItems.map((item) => ({
+          platform: '1688' as const,
+          currency: 'CNY',
+          sourceId: item.sourceId,
+          title: item.title,
+          price: item.price,
+          oldPrice: item.oldPrice,
+          images: item.imageUrl ? [item.imageUrl] : [],
+          rating: 0,
+          reviewCount: 0,
+          salesCount: 0,
+          shippingInfo: '',
+          location: '',
+          attributes: [],
+          description: '',
+          sourceUrl: item.sourceUrl,
+          scrapedAt: new Date().toISOString(),
+          videoUrls: [],
+          skuList: [],
+          specList: [],
+          ozonCategoryId: 0,
+          ozonTypeId: 0,
+          priceRanges: [],
+          minOrderQty: 0,
+          supplierUrl: '',
+          tradeQuantity: 0,
+        }))
+        try {
+          const result = await browser.runtime.sendMessage({ action: 'batchSyncProducts', products })
+          totalCreated += result?.created || 0
+          totalSkipped += result?.skipped || 0
+        } catch { /* ignore */ }
+      }
+
+      // 保存跨页状态到 localStorage
+      const state: PersistedScrapingState = {
+        maxItems,
+        scrollDelay,
+        batchSize,
+        seenIds: Array.from(seen),
+        allItemsData: allItems.map(i => ({ sourceId: i.sourceId, title: i.title, price: i.price, sourceUrl: i.sourceUrl })),
+        pageCount: pageCount + 1,
+        totalCreated,
+        totalSkipped,
+      }
+      localStorage.setItem(STORAGE_KEY_1688, JSON.stringify(state))
+      console.log(`[Auto-Ozon] 1688 保存状态到localStorage (${seen.size}个ID, 第${pageCount}页 → 第${pageCount + 1}页)`)
+
+      // URL跳转翻页 (页面会重载，当前函数终止)
+      navigateToNextPage1688()
+      return // 页面跳转后content script会重新加载
     }
   }
 
@@ -183,7 +317,9 @@ async function runListScraping(maxItems: number, scrollDelay: number, batchSize:
         action: 'batchSyncProducts',
         products,
       })
-      console.log(`[Auto-Ozon] 1688 列表采集完成: ${allItems.length} 件, 同步: ${result?.created || 0} 件`)
+      totalCreated += result?.created || 0
+      totalSkipped += result?.skipped || 0
+      console.log(`[Auto-Ozon] 1688 批量同步: ${allItems.length} 件, 同步: ${result?.created || 0} 件`)
     } catch (e) {
       console.error('[Auto-Ozon] 1688 列表采集同步失败:', e)
     }
@@ -196,6 +332,8 @@ async function runListScraping(maxItems: number, scrollDelay: number, batchSize:
       platform: '1688',
       current: allItems.length,
       total: allItems.length,
+      created: totalCreated,
+      skipped: totalSkipped,
       newCount: 0,
       done: true,
     })

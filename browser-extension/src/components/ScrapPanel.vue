@@ -75,7 +75,29 @@ async function doScrape() {
       const cfg = platformConfig.value
       const progressListener = (msg: any) => {
         if (msg.action === 'scrapingProgress') {
-          progress.value = msg.progress
+          if (msg.progress) {
+            // Ozon format: { action, progress: { scraped, enriched, synced, total, phase } }
+            progress.value = msg.progress
+          } else {
+            // 1688 format: { action, platform, current, total, created, skipped, done? }
+            progress.value = {
+              scraped: msg.current || 0,
+              enriched: 0,
+              synced: 0,
+              total: msg.total || 0,
+              phase: msg.done ? 'done' : 'scroll',
+            }
+          }
+          // ★ 1688 done 消息带有 created/skipped → 设置 result 让模板显示结果
+          if (msg.done && msg.platform === '1688') {
+            result.value = {
+              success: true,
+              count: msg.total || msg.current || 0,
+              created: msg.created ?? 0,
+              skipped: msg.skipped ?? 0,
+            }
+            emit('refresh')
+          }
         }
       }
       browser.runtime.onMessage.addListener(progressListener)
@@ -211,13 +233,13 @@ onMounted(async () => {
             <!-- Price range -->
             <div class="grid grid-cols-2 gap-2">
               <div>
-                <label class="text-[11px] text-surface-500 mb-1 block">最低价格 (₽)</label>
+                <label class="text-[11px] text-surface-500 mb-1 block">最低价格</label>
                 <input v-model.number="platformConfig.priceMin" type="number" min="0"
                   class="w-full text-xs px-2.5 py-1.5 rounded-lg border border-surface-200 bg-white focus:border-ozon-400 focus:ring-1 focus:ring-ozon-200 outline-none"
                   @change="savePlatformConfig" />
               </div>
               <div>
-                <label class="text-[11px] text-surface-500 mb-1 block">最高价格 (₽)</label>
+                <label class="text-[11px] text-surface-500 mb-1 block">最高价格</label>
                 <input v-model.number="platformConfig.priceMax" type="number" min="0"
                   class="w-full text-xs px-2.5 py-1.5 rounded-lg border border-surface-200 bg-white focus:border-ozon-400 focus:ring-1 focus:ring-ozon-200 outline-none"
                   @change="savePlatformConfig" />
@@ -419,10 +441,10 @@ onMounted(async () => {
               <p class="text-sm font-medium text-surface-800 line-clamp-2 leading-snug">{{ result.data.title }}</p>
               <div class="flex items-center gap-2 mt-1.5">
                 <span class="text-brand-600 font-bold text-sm">
-                  {{ result.data.price ? `₽${result.data.price.toLocaleString()}` : '—' }}
+                  {{ result.data.price ? (result.data.platform === '1688' ? `¥${result.data.price.toLocaleString()}` : `₽${result.data.price.toLocaleString()}`) : '—' }}
                 </span>
                 <span v-if="result.data.oldPrice && result.data.oldPrice > result.data.price"
-                  class="text-surface-400 text-xs line-through">₽{{ result.data.oldPrice.toLocaleString() }}</span>
+                  class="text-surface-400 text-xs line-through">{{ result.data.platform === '1688' ? '¥' : '₽' }}{{ result.data.oldPrice.toLocaleString() }}</span>
               </div>
             </div>
           </div>

@@ -5,7 +5,7 @@
 
 export type ButtonState = 'idle' | 'scraping' | 'success' | 'error'
 
-const BTN_ID = 'auto-ozon-scrape-btn'
+const BTN_ID = 'jingzhi-ai-scrape-btn'
 
 const STYLES = `
 #${BTN_ID} {
@@ -133,7 +133,7 @@ export function injectFloatingButton(onScrape: () => Promise<void>): void {
       setState('success')
       setTimeout(() => setState('idle'), 2500)
     } catch (err) {
-      console.error('[Auto-Ozon] 浮窗采集失败:', err)
+      console.error('[鲸智 AI] 浮窗采集失败:', err)
       setState('error')
       setTimeout(() => setState('idle'), 3000)
     }

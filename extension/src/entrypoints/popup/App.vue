@@ -43,8 +43,8 @@ watch(activeTab, (tab) => {
               </svg>
             </div>
             <div>
-              <h1 class="text-white font-semibold text-sm tracking-tight">Auto-Ozon</h1>
-              <p class="text-white/60 text-[11px]">智能采集助手</p>
+              <h1 class="text-white font-semibold text-sm tracking-tight">鲸智 AI</h1>
+              <p class="text-white/60 text-[11px]">跨境电商智能工具</p>
             </div>
           </div>
           <div v-if="backendOk === true" class="flex items-center gap-1.5 bg-white/15 backdrop-blur-sm rounded-full px-2.5 py-1">

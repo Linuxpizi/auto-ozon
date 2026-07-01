@@ -10,8 +10,8 @@
   >
     <div class="sidebar-layout">
       <div class="sidebar-brand">
-        <div class="brand-icon">O</div>
-        <span class="brand-text">Ozon 跨境</span>
+        <img class="brand-icon" src="/logo.png" alt="鲸智 AI" />
+        <span class="brand-text">鲸智 AI</span>
       </div>
       <div class="sidebar-menu-wrap">
         <n-menu
@@ -95,13 +95,7 @@ function handleMenuClick(key: string) {
   width: 36px;
   height: 36px;
   border-radius: 10px;
-  background: linear-gradient(135deg, #6366f1, #8b5cf6);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-weight: 800;
-  font-size: 18px;
-  color: #fff;
+  object-fit: contain;
   flex-shrink: 0;
 }
 

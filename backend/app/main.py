@@ -64,7 +64,7 @@ async def lifespan(app: FastAPI):
         yield
 
 
-app = FastAPI(title="auto-ozon backend", lifespan=lifespan)
+app = FastAPI(title="鲸智 AI backend", lifespan=lifespan)
 
 
 @app.exception_handler(Exception)

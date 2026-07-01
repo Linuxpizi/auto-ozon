@@ -18,7 +18,7 @@ async function updateBadge() {
 }
 
 export default defineBackground(() => {
-  console.log('[Auto-Ozon] Background service worker started')
+  console.log('[鲸智 AI] Background service worker started')
 
   // 初始化 badge
   updateBadge()
@@ -126,7 +126,7 @@ export default defineBackground(() => {
           files: [file],
         })
       } catch (e) {
-        console.warn('[Auto-Ozon] 注入 content script 失败:', e)
+        console.warn('[鲸智 AI] 注入 content script 失败:', e)
       }
     }
   })
@@ -142,7 +142,7 @@ async function handleProductScraped(product: ScrapedProduct) {
     await updateBadge()
     return { success: true, created: result.created, skipped: result.skipped }
   } catch (e) {
-    console.error('[Auto-Ozon] 直接保存到后端失败:', e)
+    console.error('[鲸智 AI] 直接保存到后端失败:', e)
     return { success: false, error: String(e) }
   }
 }
@@ -171,7 +171,7 @@ async function ensureContentScript(tabId: number, url?: string): Promise<boolean
       await new Promise((resolve) => setTimeout(resolve, 300))
       return true
     } catch (e) {
-      console.warn('[Auto-Ozon] 自动注入 content script 失败:', e)
+      console.warn('[鲸智 AI] 自动注入 content script 失败:', e)
       return false
     }
   }
@@ -211,7 +211,7 @@ async function handleBatchSync(products: ScrapedProduct[]) {
     await updateBadge()
     return { success: true, created: result.created, skipped: result.skipped }
   } catch (e) {
-    console.error('[Auto-Ozon] 批量同步到后端失败:', e)
+    console.error('[鲸智 AI] 批量同步到后端失败:', e)
     return { success: false, error: String(e) }
   }
 }

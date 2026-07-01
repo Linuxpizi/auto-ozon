@@ -4,8 +4,8 @@ export default defineConfig({
   srcDir: 'src',
   modules: ['@wxt-dev/module-vue'],
   manifest: {
-    name: 'Auto-Ozon 采集助手',
-    description: 'Ozon / WB / 1688 平台商品数据采集与同步工具',
+    name: '鲸智 AI',
+    description: '鲸智 AI — 跨境电商智能采集与管理工具',
     permissions: ['storage', 'activeTab', 'tabs', 'scripting'],
     host_permissions: [
       'https://www.ozon.ru/*',

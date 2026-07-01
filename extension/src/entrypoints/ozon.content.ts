@@ -408,7 +408,7 @@ function scanListCards(): ListCard[] {
     const els = document.querySelectorAll(sel)
     if (els.length === 0) continue
 
-    console.log(`[Auto-Ozon] scanListCards: selector "${sel}" matched ${els.length} elements`)
+    console.log(`[鲸智 AI] scanListCards: selector "${sel}" matched ${els.length} elements`)
 
     els.forEach((el) => {
       // 如果元素本身不是卡片容器,向上找一层
@@ -425,9 +425,9 @@ function scanListCards(): ListCard[] {
 
   // 最终兜底:扫描页面上所有包含 product 链接的最近卡片容器
   if (cards.length === 0) {
-    console.log('[Auto-Ozon] scanListCards: primary selectors failed, trying fallback')
+    console.log('[鲸智 AI] scanListCards: primary selectors failed, trying fallback')
     const allLinks = document.querySelectorAll('a[href*="/product/"]')
-    console.log(`[Auto-Ozon] scanListCards: found ${allLinks.length} product links on page`)
+    console.log(`[鲸智 AI] scanListCards: found ${allLinks.length} product links on page`)
     allLinks.forEach((a) => {
       // 向上遍历找到最近的合理卡片容器(有子图片或子链接的 div)
       let container: HTMLElement | null = a.parentElement
@@ -444,7 +444,7 @@ function scanListCards(): ListCard[] {
     })
   }
 
-  console.log(`[Auto-Ozon] scanListCards: found ${cards.length} cards total`)
+  console.log(`[鲸智 AI] scanListCards: found ${cards.length} cards total`)
   return cards
 }
 
@@ -470,7 +470,7 @@ async function findAndClickNextPage(): Promise<boolean> {
         return text === 'Далее' || text === '>' || text === '»'
       }) as HTMLElement
     if (nextBtn) {
-      console.log('[Auto-Ozon] Found next page button via paginator:', nextBtn.textContent?.trim())
+      console.log('[鲸智 AI] Found next page button via paginator:', nextBtn.textContent?.trim())
       // ★ 拟人化:先 hover,再延时点击
       await humanLinkClick(nextBtn)
       return true
@@ -480,7 +480,7 @@ async function findAndClickNextPage(): Promise<boolean> {
   // 策略 2: 全局查找 rel="next"
   const relNext = document.querySelector('a[rel="next"]') as HTMLElement | null
   if (relNext) {
-    console.log('[Auto-Ozon] Found next page via rel="next"')
+    console.log('[鲸智 AI] Found next page via rel="next"')
     await humanLinkClick(relNext)
     return true
   }
@@ -496,7 +496,7 @@ async function findAndClickNextPage(): Promise<boolean> {
   for (const link of allLinks) {
     const href = link.getAttribute('href') || ''
     if (new RegExp(`[?&]page=${nextPage}(?:&|$)`).test(href)) {
-      console.log(`[Auto-Ozon] Found next page link: page=${nextPage}`)
+      console.log(`[鲸智 AI] Found next page link: page=${nextPage}`)
       await humanLinkClick(link)
       return true
     }
@@ -515,14 +515,14 @@ async function findAndClickNextPage(): Promise<boolean> {
       // 确认它是分页按钮(附近有数字按钮)
       const parent = btn.closest('[class*="paginator"], [class*="pagination"], nav')
       if (parent) {
-        console.log(`[Auto-Ozon] Found next page button: "${text || ariaLabel}"`)
+        console.log(`[鲸智 AI] Found next page button: "${text || ariaLabel}"`)
         await humanLinkClick(btn as HTMLElement)
         return true
       }
     }
   }
 
-  console.log('[Auto-Ozon] No next page button found')
+  console.log('[鲸智 AI] No next page button found')
   return false
 }
 
@@ -564,7 +564,7 @@ async function scrollAndCollect(
   while (allCards.size < maxItems && maxPages > 0) {
     // 检查停止信号
     if (shouldStop && shouldStop()) {
-      console.log('[Auto-Ozon] scrollAndCollect: stopped by user')
+      console.log('[鲸智 AI] scrollAndCollect: stopped by user')
       break
     }
 
@@ -628,17 +628,17 @@ async function scrollAndCollect(
 
     const clicked = findAndClickNextPage()
     if (!clicked) {
-      console.log(`[Auto-Ozon] No more pages. Collected ${allCards.size} products total.`)
+      console.log(`[鲸智 AI] No more pages. Collected ${allCards.size} products total.`)
       break
     }
 
-    console.log(`[Auto-Ozon] Clicked next page, waiting for content update...`)
+    console.log(`[鲸智 AI] Clicked next page, waiting for content update...`)
     maxPages--
 
     // 等待页面内容更新
     const updated = await waitForPageUpdate(oldFirstId)
     if (!updated) {
-      console.log(`[Auto-Ozon] Page did not update after clicking next. Stopping.`)
+      console.log(`[鲸智 AI] Page did not update after clicking next. Stopping.`)
       break
     }
 
@@ -667,7 +667,7 @@ async function fetchProductDetailFromHtml(sourceId: string, sourceUrl?: string):
   const productUrl = sourceUrl || `https://www.ozon.ru/product/${sourceId}/`
   try {
     await randomDelay(300, 800)
-    console.log(`[Auto-Ozon] HTML 降级: fetching ${productUrl}`)
+    console.log(`[鲸智 AI] HTML 降级: fetching ${productUrl}`)
     const resp = await fetch(productUrl, {
       credentials: 'include',
       headers: {
@@ -676,7 +676,7 @@ async function fetchProductDetailFromHtml(sourceId: string, sourceUrl?: string):
       },
     })
     if (!resp.ok) {
-      console.warn(`[Auto-Ozon] HTML 降级 ${sourceId} 返回 ${resp.status}`)
+      console.warn(`[鲸智 AI] HTML 降级 ${sourceId} 返回 ${resp.status}`)
       return null
     }
     const html = await resp.text()
@@ -779,11 +779,11 @@ async function fetchProductDetailFromHtml(sourceId: string, sourceUrl?: string):
       }
     }
 
-    console.log(`[Auto-Ozon] HTML 降级 ${sourceId}: brand=${result.brand}, title=${result.title?.substring(0, 50)}, attrs=${result.attributes!.length}`)
+    console.log(`[鲸智 AI] HTML 降级 ${sourceId}: brand=${result.brand}, title=${result.title?.substring(0, 50)}, attrs=${result.attributes!.length}`)
     // 至少有标题或品牌才算成功
     return (result.title || result.brand) ? result : null
   } catch (e) {
-    console.warn(`[Auto-Ozon] HTML 降级 ${sourceId} 失败:`, e)
+    console.warn(`[鲸智 AI] HTML 降级 ${sourceId} 失败:`, e)
     return null
   }
 }
@@ -805,16 +805,16 @@ async function fetchProductDetailFromApi(sourceId: string, sourceUrl?: string): 
       },
       credentials: 'include',
     })
-    console.log(`[Auto-Ozon] fetchProductDetailFromApi ${sourceId}: status=${resp.status}`)
+    console.log(`[鲸智 AI] fetchProductDetailFromApi ${sourceId}: status=${resp.status}`)
     if (resp.ok) {
       const data = await resp.json()
       const result = parseInternalApiResponse(data, sourceId)
       if (result) return result
     } else {
-      console.warn(`[Auto-Ozon] API ${sourceId} returned ${resp.status}`)
+      console.warn(`[鲸智 AI] API ${sourceId} returned ${resp.status}`)
     }
   } catch (e) {
-    console.warn(`[Auto-Ozon] JSON API ${sourceId} 请求失败:`, e)
+    console.warn(`[鲸智 AI] JSON API ${sourceId} 请求失败:`, e)
   }
 
   // HTML 页面降级 (用真实 URL)
@@ -1220,7 +1220,7 @@ function parseInternalApiResponse(data: any, sourceId: string): Partial<ScrapedP
     }
   }
 
-  console.log(`[Auto-Ozon] parseResult ${sourceId}:`, {
+  console.log(`[鲸智 AI] parseResult ${sourceId}:`, {
     title: result.title?.substring(0, 50),
     brand: result.brand,
     rating: result.rating,
@@ -1275,7 +1275,7 @@ async function enrichProductsFromApi(
 export default defineContentScript({
   matches: ['*://*.ozon.ru/*'],
   main() {
-    console.log('[Auto-Ozon] Ozon content script loaded, path:', location.pathname)
+    console.log('[鲸智 AI] Ozon content script loaded, path:', location.pathname)
 
     // SPA 导航时动态更新 pageType (Ozon 是 SPA,URL 变化不触发 content script 重载)
     let pageType = detectPageType()
@@ -1296,7 +1296,7 @@ export default defineContentScript({
       const newType = detectPageType()
       if (newType !== pageType) {
         pageType = newType
-        console.log('[Auto-Ozon] Page type changed to:', pageType)
+        console.log('[鲸智 AI] Page type changed to:', pageType)
       }
     }
     window.addEventListener('popstate', onNavigate)
@@ -1309,7 +1309,7 @@ export default defineContentScript({
       // 后台补全:通过 Ozon 内部 JSON API 获取商品详情 (不需要打开页面)
       if (message.action === 'enrichProducts') {
         const products = message.products || []
-        console.log(`[Auto-Ozon] enrichProducts: ${products.length} items to enrich`)
+        console.log(`[鲸智 AI] enrichProducts: ${products.length} items to enrich`)
         enrichProductsFromApi(products, (done, total, current) => {
           browser.runtime.sendMessage({ action: 'enrichProgress', done, total, current }).catch(() => {})
         }).then((results) => {
@@ -1346,14 +1346,14 @@ export default defineContentScript({
         const batchSize = message.batchSize || 10
         scrapeStopFlag = false
 
-        console.log(`[Auto-Ozon] scrapeList: pageType=${pageType}, maxItems=${maxItems}, scrollDelay=${scrollDelay}, batchSize=${batchSize}`)
+        console.log(`[鲸智 AI] scrapeList: pageType=${pageType}, maxItems=${maxItems}, scrollDelay=${scrollDelay}, batchSize=${batchSize}`)
 
         // 先扫描一次看当前有多少
         const initialCards = scanListCards()
-        console.log(`[Auto-Ozon] scrapeList: initial scan found ${initialCards.length} cards`)
+        console.log(`[鲸智 AI] scrapeList: initial scan found ${initialCards.length} cards`)
 
         if (initialCards.length === 0 && pageType !== 'list') {
-          console.log('[Auto-Ozon] scrapeList: aborting — not a list page and no cards found')
+          console.log('[鲸智 AI] scrapeList: aborting — not a list page and no cards found')
           sendResponse({ success: false, error: '当前页面不是列表页' })
           return true
         }
@@ -1392,7 +1392,7 @@ export default defineContentScript({
           // 增量批量: 每 batchSize 个商品,补全详情后立即上报后端
           for (let batchStart = 0; batchStart < total; batchStart += batchSize) {
             if (scrapeStopFlag) {
-              console.log('[Auto-Ozon] scrapeList: stopped by user')
+              console.log('[鲸智 AI] scrapeList: stopped by user')
               break
             }
 
@@ -1427,7 +1427,7 @@ export default defineContentScript({
                   reviewCount: detail.reviewCount || p.reviewCount,
                 }
                 enriched++
-                console.log(`[Auto-Ozon] scrapeList: enriched ${p.sourceId} — brand=${batch[i].brand}`)
+                console.log(`[鲸智 AI] scrapeList: enriched ${p.sourceId} — brand=${batch[i].brand}`)
               }
               // ★ 拟人化:使用渐进加速延时 + 偶尔长停顿
               if (i < batch.length - 1) {
@@ -1442,10 +1442,10 @@ export default defineContentScript({
               const syncResult = await browser.runtime.sendMessage({ action: 'batchSyncProducts', products: batch })
               if (syncResult?.success) {
                 synced += batch.length
-                console.log(`[Auto-Ozon] scrapeList: synced batch ${batchStart}-${batchEnd} (${synced}/${total})`)
+                console.log(`[鲸智 AI] scrapeList: synced batch ${batchStart}-${batchEnd} (${synced}/${total})`)
               }
             } catch (e) {
-              console.error('[Auto-Ozon] scrapeList: batch sync failed', e)
+              console.error('[鲸智 AI] scrapeList: batch sync failed', e)
             }
 
             browser.runtime.sendMessage({ action: 'scrapingProgress', progress: { scraped: total, enriched, synced, total, phase: 'sync' } })

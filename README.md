@@ -1,10 +1,10 @@
 <div align="center">
 
-# Auto-Ozon
+# 鲸智 AI
 
-### Ozon 电商多店铺智能管理系统
+### 跨境电商智能管理系统
 
-一站式解决 Ozon 平台卖家的店铺管理、订单跟踪、资金对账与数据监控需求。
+一站式解决多平台卖家的店铺管理、商品采集、选品分析与数据监控需求。
 
 ![Vue 3](https://img.shields.io/badge/Vue-3-42b883?logo=vue.js&logoColor=white)
 ![FastAPI](https://img.shields.io/badge/FastAPI-0.115-009688?logo=fastapi&logoColor=white)
@@ -206,6 +206,6 @@ auto-ozon/
 
 ---
 
-**Auto-Ozon** © 2024 · MIT License
+**鲸智 AI** © 2024 · MIT License
 
 </div>

@@ -1,8 +1,8 @@
 {
-  "name": "auto-ozon-plugin",
-  "displayName": "Auto-Ozon 采集助手",
+  "name": "jingzhi-ai-plugin",
+  "displayName": "鲸智 AI",
   "version": "0.1.0",
-  "description": "Ozon/WB 浏览器数据采集插件",
+  "description": "鲸智 AI — Ozon/WB/1688 浏览器数据采集插件",
   "type": "module",
   "scripts": {
     "dev": "wxt",

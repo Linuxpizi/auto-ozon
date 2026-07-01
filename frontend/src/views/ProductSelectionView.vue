@@ -416,13 +416,13 @@
           <div class="upload-section">
             <div class="upload-section__title">🏪 店铺与分类</div>
             <n-grid :cols="2" :x-gap="16" :y-gap="12">
-              <n-gi :span="2">
+              <n-gi>
                 <div class="upload-field">
                   <label class="upload-field__label">Ozon 店铺 <span class="required">*</span></label>
                   <n-select v-model:value="uploadForm.store_id" :options="storeOptions" placeholder="选择店铺" />
                 </div>
               </n-gi>
-              <n-gi :span="2">
+              <n-gi>
                 <div class="upload-field">
                   <label class="upload-field__label">商品分类 <span class="required">*</span></label>
                   <n-tree-select
@@ -432,6 +432,12 @@
                     default-expand-all
                     filterable
                   />
+                </div>
+              </n-gi>
+              <n-gi>
+                <div class="upload-field">
+                  <label class="upload-field__label">Offer ID</label>
+                  <n-input v-model:value="uploadForm.offer_id" placeholder="留空自动生成" />
                 </div>
               </n-gi>
             </n-grid>
@@ -444,7 +450,7 @@
               <label class="upload-field__label">商品名称</label>
               <n-input v-model:value="uploadForm.name" placeholder="Ozon 上显示的商品名" />
             </div>
-            <div class="upload-field">
+            <div class="upload-field" style="margin-top: 8px;">
               <label class="upload-field__label">商品描述</label>
               <n-input v-model:value="uploadForm.description" type="textarea" :rows="3" placeholder="HTML / Markdown 描述" />
             </div>
@@ -478,6 +484,12 @@
               <n-gi>
                 <div class="upload-field">
                   <label class="upload-field__label">物流 (₽)</label>
+                  <n-input-number v-model:value="uploadForm.logistics_rub" :min="0" style="width: 100%" @update:value="calcUploadPrice" />
+                </div>
+              </n-gi>
+              <n-gi>
+                <div class="upload-field">
+                  <label class="upload-field__label">物流费 (₽)</label>
                   <n-input-number v-model:value="uploadForm.logistics_rub" :min="0" style="width: 100%" @update:value="calcUploadPrice" />
                 </div>
               </n-gi>
@@ -550,15 +562,6 @@
                 </div>
               </n-gi>
             </n-grid>
-          </div>
-
-          <!-- ── ⚙️ 其他 ── -->
-          <div class="upload-section">
-            <div class="upload-section__title">⚙️ 其他</div>
-            <div class="upload-field">
-              <label class="upload-field__label">Offer ID</label>
-              <n-input v-model:value="uploadForm.offer_id" placeholder="留空自动生成" />
-            </div>
           </div>
 
         </div>
@@ -1397,7 +1400,12 @@ onMounted(() => {
 
 /* ── 上传弹窗 ── */
 .upload-modal {
-  width: 720px !important;
+  width: 860px !important;
+}
+
+.upload-modal .n-card-body {
+  max-height: 65vh;
+  overflow-y: auto;
 }
 
 .upload-modal .n-card-header {
@@ -1474,10 +1482,15 @@ onMounted(() => {
   flex-direction: column;
   align-items: center;
   gap: 4px;
-  padding: 10px 8px;
+  padding: 12px 10px;
   background: var(--card-bg, #fff);
   border-radius: 8px;
   border: 1px solid var(--border-color, #e0e0e0);
+  transition: border-color 0.2s;
+}
+
+.price-card:hover {
+  border-color: #18a058;
 }
 
 .price-card__label {
@@ -1504,5 +1517,6 @@ onMounted(() => {
   display: flex;
   justify-content: flex-end;
   gap: 12px;
+  padding-top: 4px;
 }
 </style>

@@ -21,7 +21,7 @@ export default defineContentScript({
     if (!isDetail && !isList) return
 
     console.log(
-      `[Auto-Ozon] 1688 content script loaded (${isDetail ? 'detail' : 'list'} page)`,
+      `[鲸智 AI] 1688 content script loaded (${isDetail ? 'detail' : 'list'} page)`,
     )
 
     // ── 列表页: 检查是否有跨页采集状态需要恢复 ──
@@ -30,7 +30,7 @@ export default defineContentScript({
       if (raw) {
         try {
           const saved: PersistedScrapingState = JSON.parse(raw)
-          console.log(`[Auto-Ozon] 1688 发现已保存的采集状态: 第${saved.pageCount}页, ${saved.seenIds.length}个已知ID, 已同步${saved.totalCreated}件`)
+          console.log(`[鲸智 AI] 1688 发现已保存的采集状态: 第${saved.pageCount}页, ${saved.seenIds.length}个已知ID, 已同步${saved.totalCreated}件`)
           localStorage.removeItem(STORAGE_KEY_1688) // 取出后立即清除
           // 等待页面稳定后恢复采集
           setTimeout(() => {
@@ -42,7 +42,7 @@ export default defineContentScript({
             })
           }, 2000)
         } catch (e) {
-          console.error('[Auto-Ozon] 1688 恢复采集状态失败:', e)
+          console.error('[鲸智 AI] 1688 恢复采集状态失败:', e)
           localStorage.removeItem(STORAGE_KEY_1688)
         }
       }
@@ -115,7 +115,7 @@ export default defineContentScript({
 let stopListScraping = false
 
 // ── 跨页状态持久化 (localStorage) ──
-const STORAGE_KEY_1688 = 'auto-ozon-1688-scraping-state'
+const STORAGE_KEY_1688 = 'jingzhi-ai-1688-scraping-state'
 
 interface PersistedScrapingState {
   maxItems: number
@@ -146,7 +146,7 @@ function navigateToNextPage1688(): boolean {
   } else {
     newUrl = href + (href.includes('?') ? '&' : '?') + `beginPage=${nextPage}`
   }
-  console.log(`[Auto-Ozon] 1688 翻页: 第${currentPage}页 → 第${nextPage}页`)
+  console.log(`[鲸智 AI] 1688 翻页: 第${currentPage}页 → 第${nextPage}页`)
   window.location.href = newUrl
   return true
 }
@@ -176,7 +176,7 @@ async function runListScraping(
   let noNewDataCount = 0
   const maxNoNewData = 3 // 连续3次扫描无新数据则停止
 
-  console.log(`[Auto-Ozon] 1688 列表采集开始 (maxItems=${maxItems}, 恢复自第${pageCount}页, 已有${seen.size}个已知ID)`)
+  console.log(`[鲸智 AI] 1688 列表采集开始 (maxItems=${maxItems}, 恢复自第${pageCount}页, 已有${seen.size}个已知ID)`)
 
   while (seen.size < maxItems && !stopListScraping && scrollCount < maxScrolls) {
     // 采集当前可见商品
@@ -193,7 +193,7 @@ async function runListScraping(
     // 空扫计数器: 连续无新数据则停止
     if (newCount === 0) {
       noNewDataCount++
-      console.log(`[Auto-Ozon] 1688 无新数据 (${noNewDataCount}/${maxNoNewData})`)
+      console.log(`[鲸智 AI] 1688 无新数据 (${noNewDataCount}/${maxNoNewData})`)
     } else {
       noNewDataCount = 0
     }
@@ -228,7 +228,7 @@ async function runListScraping(
     const newHeight = document.documentElement.scrollHeight
     if (newHeight === lastHeight) {
       staleCount++
-      console.log(`[Auto-Ozon] 1688 无新内容 (${staleCount}/${maxStale})`)
+      console.log(`[鲸智 AI] 1688 无新内容 (${staleCount}/${maxStale})`)
     } else {
       staleCount = 0
       lastHeight = newHeight
@@ -284,7 +284,7 @@ async function runListScraping(
         totalSkipped,
       }
       localStorage.setItem(STORAGE_KEY_1688, JSON.stringify(state))
-      console.log(`[Auto-Ozon] 1688 保存状态到localStorage (${seen.size}个ID, 第${pageCount}页 → 第${pageCount + 1}页)`)
+      console.log(`[鲸智 AI] 1688 保存状态到localStorage (${seen.size}个ID, 第${pageCount}页 → 第${pageCount + 1}页)`)
 
       // URL跳转翻页 (页面会重载，当前函数终止)
       navigateToNextPage1688()
@@ -330,9 +330,9 @@ async function runListScraping(
       })
       totalCreated += result?.created || 0
       totalSkipped += result?.skipped || 0
-      console.log(`[Auto-Ozon] 1688 批量同步: ${seen.size} 件(本次${allItems.length}), 同步: ${result?.created || 0} 件`)
+      console.log(`[鲸智 AI] 1688 批量同步: ${seen.size} 件(本次${allItems.length}), 同步: ${result?.created || 0} 件`)
     } catch (e) {
-      console.error('[Auto-Ozon] 1688 列表采集同步失败:', e)
+      console.error('[鲸智 AI] 1688 列表采集同步失败:', e)
     }
   }
 

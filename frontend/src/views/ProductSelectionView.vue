@@ -78,11 +78,11 @@
             <n-tag type="error" size="small" round>{{ detailProduct.discount }}</n-tag>
           </div>
           <div v-if="detailProduct.old_price && detailProduct.old_price > (detailProduct.price || 0)" class="metric-item">
-            <span class="metric-label" style="text-decoration: line-through">{{ detailProduct.old_price?.toLocaleString() }} ₽</span>
-            <span class="metric-value">{{ detailProduct.price?.toLocaleString() }} ₽</span>
+            <span class="metric-label" style="text-decoration: line-through">{{ detailProduct.old_price?.toLocaleString() }} {{ (detailProduct.currency || '').toUpperCase() === 'CNY' ? '¥' : '₽' }}</span>
+            <span class="metric-value">{{ detailProduct.price?.toLocaleString() }} {{ (detailProduct.currency || '').toUpperCase() === 'CNY' ? '¥' : '₽' }}</span>
           </div>
           <div v-else class="metric-item">
-            <span class="metric-value">{{ detailProduct.price?.toLocaleString() || '—' }} ₽</span>
+            <span class="metric-value">{{ detailProduct.price?.toLocaleString() || '—' }} {{ (detailProduct.currency || '').toUpperCase() === 'CNY' ? '¥' : '₽' }}</span>
           </div>
           <div v-if="detailProduct.stock" class="metric-item">
             <n-tag size="small" round :bordered="false">{{ detailProduct.stock }}</n-tag>
@@ -147,17 +147,17 @@
               </div>
               <div class="field-row-2">
                 <div class="field-group">
-                  <label class="field-label">现价 (₽)</label>
+                  <label class="field-label">现价 ({{ (detailProduct?.currency || '').toUpperCase() === 'CNY' ? '¥' : '₽' }})</label>
                   <n-input-number v-model:value="detailProduct.price" :min="0" size="small" style="width: 100%" />
                   <div v-if="isModified('price')" class="original-hint">
-                    <n-text depth="3" tag="span" style="font-size: 11px">原始：{{ originalProduct?.price?.toLocaleString() || '无' }} ₽</n-text>
+                    <n-text depth="3" tag="span" style="font-size: 11px">原始：{{ originalProduct?.price?.toLocaleString() || '无' }} {{ (detailProduct?.currency || '').toUpperCase() === 'CNY' ? '¥' : '₽' }}</n-text>
                   </div>
                 </div>
                 <div class="field-group">
-                  <label class="field-label">原价 (₽)</label>
+                  <label class="field-label">原价 ({{ (detailProduct?.currency || '').toUpperCase() === 'CNY' ? '¥' : '₽' }})</label>
                   <n-input-number v-model:value="detailProduct.old_price" :min="0" size="small" style="width: 100%" />
                   <div v-if="isModified('old_price')" class="original-hint">
-                    <n-text depth="3" tag="span" style="font-size: 11px">原始：{{ originalProduct?.old_price?.toLocaleString() || '无' }} ₽</n-text>
+                    <n-text depth="3" tag="span" style="font-size: 11px">原始：{{ originalProduct?.old_price?.toLocaleString() || '无' }} {{ (detailProduct?.currency || '').toUpperCase() === 'CNY' ? '¥' : '₽' }}</n-text>
                   </div>
                 </div>
               </div>
@@ -594,6 +594,7 @@ const platformOptions = [
   { label: "全部平台", value: "" },
   { label: "Ozon", value: "ozon" },
   { label: "Wildberries", value: "wb" },
+  { label: "1688", value: "1688" },
 ];
 
 const message = useMessage();

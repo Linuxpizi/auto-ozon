@@ -6,6 +6,8 @@ export interface ScrapedProduct {
   platform: Platform
   sourceId: string
   title: string
+  /** 币种: CNY/RUB/USD 等,默认根据平台推断 */
+  currency: string
   price: number
   oldPrice: number
   images: string[]

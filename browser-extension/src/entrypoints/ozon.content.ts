@@ -1,4 +1,5 @@
 import type { ProductAttribute, ScrapedProduct } from '@/utils/types'
+import { injectFloatingButton } from '@/utils/floating-button'
 import {
   randomDelay, normalDelay, microPause, readingPause, occasionalLongPause,
   humanScroll, humanScrollTo, humanScrollToTop, humanScrollToBottom,
@@ -263,6 +264,7 @@ async function scrapeOzonProduct(): Promise<ScrapedProduct | null> {
     platform: 'ozon',
     sourceId,
     title: getText('h1') || getText('[data-widget="webProductHeading"] span'),
+    currency: 'RUB',
     price: extractDetailPrice(),
     oldPrice: extractDetailOldPrice(),
     images: extractDetailImages(),
@@ -682,6 +684,7 @@ async function fetchProductDetailFromHtml(sourceId: string, sourceUrl?: string):
     const result: Partial<ScrapedProduct> = {
       platform: 'ozon',
       sourceId,
+      currency: 'RUB',
       attributes: [],
       images: [],
     }
@@ -825,6 +828,7 @@ function parseInternalApiResponse(data: any, sourceId: string): Partial<ScrapedP
   const result: Partial<ScrapedProduct> = {
     platform: 'ozon',
     sourceId,
+    currency: 'RUB',
     attributes: [],
     images: [],
     videoUrls: [],
@@ -1275,6 +1279,16 @@ export default defineContentScript({
 
     // SPA 导航时动态更新 pageType (Ozon 是 SPA,URL 变化不触发 content script 重载)
     let pageType = detectPageType()
+
+    // ── 注入悬浮采集按钮 (商品详情页) ──
+    if (pageType === 'product') {
+      injectFloatingButton(async () => {
+        const product = await scrapeOzonProduct()
+        if (!product) throw new Error('采集失败: 无法提取商品信息')
+        const result = await browser.runtime.sendMessage({ action: 'productScraped', data: product })
+        if (!result?.success) throw new Error(result?.error || '上报失败')
+      })
+    }
     let scrapeStopFlag = false
 
     // 监听 URL 变化 (popstate + pushState)
@@ -1352,6 +1366,7 @@ export default defineContentScript({
             platform: 'ozon' as const,
             sourceId: c.sourceId,
             title: c.title,
+            currency: 'RUB',
             price: c.price,
             oldPrice: c.oldPrice,
             images: c.imageUrl ? [c.imageUrl] : [],

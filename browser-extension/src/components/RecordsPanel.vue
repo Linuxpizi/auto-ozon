@@ -12,7 +12,7 @@ interface BackendProduct extends ScrapedProduct {
 const products = ref<BackendProduct[]>([])
 const loading = ref(false)
 const searchQuery = ref('')
-const filterPlatform = ref<'all' | 'ozon' | 'wb'>('all')
+const filterPlatform = ref<'all' | 'ozon' | 'wb' | '1688'>('all')
 
 const filteredProducts = computed(() => {
   let list = products.value
@@ -79,13 +79,13 @@ onMounted(loadProducts)
       <div class="flex items-center gap-2">
         <div class="flex bg-surface-50 rounded-lg p-0.5 flex-1">
           <button
-            v-for="f in (['all', 'ozon', 'wb'] as const)"
+            v-for="f in (['all', 'ozon', 'wb', '1688'] as const)"
             :key="f"
             @click="filterPlatform = f"
             class="flex-1 py-1.5 text-[11px] font-medium rounded-md transition-all duration-200"
             :class="filterPlatform === f ? 'bg-white text-surface-800 shadow-sm' : 'text-surface-400 hover:text-surface-600'"
           >
-            {{ f === 'all' ? '全部' : f === 'ozon' ? 'Ozon' : 'WB' }}
+            {{ f === 'all' ? '全部' : f === 'ozon' ? 'Ozon' : f === '1688' ? '1688' : 'WB' }}
           </button>
         </div>
         <button
@@ -150,12 +150,12 @@ onMounted(loadProducts)
               <div class="flex items-center gap-1.5 mt-1">
                 <span
                   class="text-[10px] font-semibold px-1.5 py-0.5 rounded"
-                  :class="product.platform === 'ozon' ? 'bg-ozon-50 text-ozon-600' : 'bg-wb-50 text-wb-600'"
+                  :class="product.platform === 'ozon' ? 'bg-ozon-50 text-ozon-600' : product.platform === '1688' ? 'bg-orange-50 text-orange-600' : 'bg-wb-50 text-wb-600'"
                 >
-                  {{ product.platform === 'ozon' ? 'Ozon' : 'WB' }}
+                  {{ product.platform === 'ozon' ? 'Ozon' : product.platform === '1688' ? '1688' : 'WB' }}
                 </span>
                 <span class="text-brand-600 text-xs font-bold">
-                  {{ product.price ? `₽${product.price.toLocaleString()}` : '—' }}
+                  {{ product.price ? (product.platform === '1688' ? `¥${product.price.toLocaleString()}` : `₽${product.price.toLocaleString()}`) : '—' }}
                 </span>
               </div>
             </div>

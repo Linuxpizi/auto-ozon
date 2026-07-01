@@ -1,4 +1,5 @@
 import type { ProductAttribute, ScrapedProduct } from '@/utils/types'
+import { injectFloatingButton } from '@/utils/floating-button'
 
 function extractSourceId(): string {
   const match = location.pathname.match(/\/(\d+)\/?$/)
@@ -110,6 +111,7 @@ function scrapeWBProduct(): ScrapedProduct | null {
   return {
     platform: 'wb',
     sourceId,
+    currency: 'RUB',
     title:
       document.querySelector(
         '[class*="product-page__title"], h1',
@@ -135,6 +137,14 @@ export default defineContentScript({
   main() {
     const isProductPage = /\/\d+\/?$/.test(location.pathname)
     if (!isProductPage) return
+
+    // ── 注入悬浮采集按钮 (商品详情页) ──
+    injectFloatingButton(async () => {
+      const product = scrapeWBProduct()
+      if (!product) throw new Error('采集失败: 无法提取商品信息')
+      const result = await browser.runtime.sendMessage({ action: 'productScraped', data: product })
+      if (!result?.success) throw new Error(result?.error || '上报失败')
+    })
 
     browser.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       if (message.action === 'scrape') {

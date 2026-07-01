@@ -165,8 +165,6 @@ def _apply_product_filters(q, platform=None, brand=None, keyword=None,
 
     if platform:
         q = q.filter(ScrapedProductRecord.platform == platform)
-    else:
-        q = q.filter(ScrapedProductRecord.platform == "ozon")
     if brand:
         q = q.filter(ScrapedProductRecord.brand == brand)
     if keyword:
@@ -238,7 +236,7 @@ def list_brands(db: Session = Depends(get_db)):
 
     rows = (
         db.query(ScrapedProductRecord.brand, func.count(ScrapedProductRecord.id))
-        .filter(ScrapedProductRecord.platform == "ozon", ScrapedProductRecord.brand != "")
+        .filter(ScrapedProductRecord.brand != "")
         .group_by(ScrapedProductRecord.brand)
         .order_by(func.count(ScrapedProductRecord.id).desc())
         .all()

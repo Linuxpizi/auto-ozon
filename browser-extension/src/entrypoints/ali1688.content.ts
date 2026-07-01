@@ -1,4 +1,5 @@
 import type { ScrapedProduct } from '@/utils/types'
+import { injectFloatingButton } from '@/utils/floating-button'
 import {
   is1688DetailPage,
   is1688ListPage,
@@ -22,6 +23,16 @@ export default defineContentScript({
     console.log(
       `[Auto-Ozon] 1688 content script loaded (${isDetail ? 'detail' : 'list'} page)`,
     )
+
+    // ── 注入悬浮采集按钮 (商品详情页) ──
+    if (isDetail) {
+      injectFloatingButton(async () => {
+        const product = scrape1688Product()
+        if (!product) throw new Error('采集失败: 无法提取商品信息')
+        const result = await browser.runtime.sendMessage({ action: 'productScraped', data: product })
+        if (!result?.success) throw new Error(result?.error || '上报失败')
+      })
+    }
 
     browser.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       // ── 检测页面类型 ──
@@ -85,7 +96,7 @@ async function runListScraping(maxItems: number, scrollDelay: number, batchSize:
   const allItems: ListCard1688[] = []
   let lastHeight = 0
   let staleCount = 0
-  const maxStale = 5 // 连续5次滚动无新内容则停止
+  const maxStale = 10 // 连续10次滚动无新内容则停止 (现代1688懒加载较慢)
 
   console.log(`[Auto-Ozon] 1688 列表采集开始 (maxItems=${maxItems})`)
 
@@ -115,8 +126,17 @@ async function runListScraping(maxItems: number, scrollDelay: number, batchSize:
     if (allItems.length >= maxItems) break
 
     // 滚动加载更多
-    window.scrollTo(0, document.documentElement.scrollHeight)
+    // 增量滚动: 每次滚动窗口高度的 60%,触发懒加载
+    const scrollStep = Math.max(window.innerHeight * 0.6, 400)
+    const currentPos = window.scrollY
+    window.scrollBy({ top: scrollStep, behavior: 'smooth' })
     await new Promise((r) => setTimeout(r, scrollDelay))
+
+    // 如果已接近底部,尝试滚动到更下方以触发加载
+    if (window.scrollY + window.innerHeight >= document.documentElement.scrollHeight - 200) {
+      window.scrollTo(0, document.documentElement.scrollHeight)
+      await new Promise((r) => setTimeout(r, scrollDelay * 1.5))
+    }
 
     const newHeight = document.documentElement.scrollHeight
     if (newHeight === lastHeight) {
@@ -131,6 +151,7 @@ async function runListScraping(maxItems: number, scrollDelay: number, batchSize:
   if (allItems.length > 0) {
     const products: ScrapedProduct[] = allItems.map((item) => ({
       platform: '1688' as const,
+      currency: 'CNY',
       sourceId: item.sourceId,
       title: item.title,
       price: item.price,

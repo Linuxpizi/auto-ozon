@@ -56,13 +56,13 @@
             <div class="attr-section">
               <div class="attr-row">
                 <span class="attr-label">当前价格</span>
-                <span class="attr-value attr-value--price">₽{{ product.price || '-' }}</span>
+                <span class="attr-value attr-value--price">{{ currencySymbol }}{{ product.price || '-' }}</span>
               </div>
               <div class="attr-row">
                 <span class="attr-label">原价</span>
                 <span class="attr-value attr-value--old-price">
                   <template v-if="product.oldPrice || product.old_price">
-                    <span class="strikethrough">₽{{ product.oldPrice || product.old_price }}</span>
+                    <span class="strikethrough">{{ currencySymbol }}{{ product.oldPrice || product.old_price }}</span>
                   </template>
                   <template v-else>-</template>
                 </span>
@@ -81,7 +81,7 @@
               </div>
               <div class="attr-row">
                 <span class="attr-label">货币</span>
-                <span class="attr-value">{{ product.currency || 'RUB' }}</span>
+                <span class="attr-value">{{ product.platform === '1688' ? (product.currency || 'CNY') : (product.currency || 'RUB') }}</span>
               </div>
             </div>
           </n-collapse-item>
@@ -345,6 +345,15 @@ const discountPercent = computed(() => {
     return Math.round(((oldPrice - price) / oldPrice) * 100);
   }
   return 0;
+});
+
+const CURRENCY_MAP: Record<string, string> = { RUB: '₽', CNY: '¥', USD: '$', EUR: '€' };
+
+const currencySymbol = computed(() => {
+  const p = product.value;
+  if (!p) return '₽';
+  const cur = (p.currency || '').toUpperCase();
+  return CURRENCY_MAP[cur] || '₽';
 });
 
 const stockLabel = computed(() => {

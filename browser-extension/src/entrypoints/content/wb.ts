@@ -82,6 +82,7 @@ export function scrapeWBProduct(): ScrapedProduct | null {
     platform: 'wb',
     sourceId,
     title: document.querySelector('[class*="product-page__title"], h1')?.textContent?.trim() || '',
+    currency: 'RUB',
     price: extractPrice(),
     oldPrice: extractOldPrice(),
     images: extractImages(),

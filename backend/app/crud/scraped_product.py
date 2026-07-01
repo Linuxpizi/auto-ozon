@@ -36,6 +36,7 @@ def create_scraped_product(db: Session, product: ScrapedProductCreate) -> Scrape
         title=product.title,
         price=product.price,
         old_price=product.old_price,
+        currency=product.currency or ("CNY" if product.platform == "1688" else "RUB"),
         images=product.images,
         rating=product.rating,
         review_count=product.review_count,
@@ -91,6 +92,7 @@ def bulk_create_scraped_products(
                 title=product.title,
                 price=product.price,
                 old_price=product.old_price,
+                currency=product.currency or ("CNY" if product.platform == "1688" else "RUB"),
                 images=product.images,
                 rating=product.rating,
                 review_count=product.review_count,
@@ -163,6 +165,11 @@ def bulk_create_scraped_products(
                 changed = True
             if product.old_price and product.old_price != record.old_price:
                 record.old_price = product.old_price
+                changed = True
+
+            # 币种
+            if product.currency and product.currency != record.currency:
+                record.currency = product.currency
                 changed = True
 
             # 卖家

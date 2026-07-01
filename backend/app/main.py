@@ -24,6 +24,39 @@ logger = logging.getLogger(__name__)
 
 Base.metadata.create_all(bind=engine)
 
+# ── Auto-migration: ensure columns added after model updates ────────────
+def _ensure_scraped_product_columns():
+    """Add any columns missing from scraped_product_records (SQLite ALTER TABLE)."""
+    import sqlite3 as _sqlite3
+    from app.core.config import DATABASE_URL
+    db_path = DATABASE_URL.replace("sqlite:///", "")
+    try:
+        conn = _sqlite3.connect(db_path)
+        cur = conn.cursor()
+        cur.execute("PRAGMA table_info(scraped_product_records)")
+        existing = {row[1] for row in cur.fetchall()}
+        if not existing:
+            conn.close()
+            return
+        needed = {
+            "price_ranges": 'TEXT DEFAULT "[]"',
+            "min_order_qty": "INTEGER DEFAULT 0",
+            "supplier_url": 'VARCHAR(512) DEFAULT ""',
+            "trade_quantity": "INTEGER DEFAULT 0",
+            "currency": 'VARCHAR(8) DEFAULT ""',
+        }
+        for col, typedef in needed.items():
+            if col not in existing:
+                cur.execute(f"ALTER TABLE scraped_product_records ADD COLUMN {col} {typedef}")
+                logger.info("DB migration: added column %s", col)
+        conn.commit()
+        conn.close()
+    except Exception as e:
+        logger.warning("Auto-migration skipped: %s", e)
+
+_ensure_scraped_product_columns()
+# ────────────────────────────────────────────────────────────────────────
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):

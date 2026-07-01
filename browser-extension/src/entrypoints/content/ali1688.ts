@@ -16,7 +16,7 @@ function getAllTexts(selector: string, parent: Element | Document = document): s
 function parsePrice(text: string): number {
   const cleaned = text.replace(/[¥￥\s,]/g, '').trim()
   const match = cleaned.match(/(\d+\.?\d*)/)
-  return match ? parseFloat(match[1]) : 0
+  return match ? Math.round(parseFloat(match[1]) * 100) / 100 : 0
 }
 
 // ─── 页面类型检测 ──────────────────────────────────────────
@@ -26,9 +26,13 @@ export function is1688DetailPage(): boolean {
 }
 
 export function is1688ListPage(): boolean {
-  return /s\.1688\.com\/selloffer/.test(location.href) ||
-    /s\.1688\.com\/offer_search/.test(location.href) ||
-    /s\.1688\.com\/company/.test(location.href)
+  const h = location.href
+  return /s\.1688\.com\/selloffer/.test(h) ||
+    /s\.1688\.com\/offer_search/.test(h) ||
+    /s\.1688\.com\/company/.test(h) ||
+    /www\.1688\.com\/chanpin/.test(h) ||
+    /s\.1688\.com\/search/.test(h) ||
+    /s\.1688\.com\/offer/.test(h)
 }
 
 // ─── INIT_DATA 提取 ────────────────────────────────────────
@@ -58,16 +62,49 @@ interface InitDataOffer {
 function getInitData(): InitDataOffer | null {
   try {
     const w = window as any
-    // 1688 stores data in window.INIT_DATA or window.__INIT_DATA
-    const initObj = w.INIT_DATA || w.__INIT_DATA
-    if (!initObj) return null
 
-    // INIT_DATA may be nested: { data: { offerDetail: {...} } }
-    const data = initObj.data || initObj
-    if (data.offerDetail) return data.offerDetail as InitDataOffer
-    if (data.detailData) return data.detailData as InitDataOffer
-    // Direct offer object
-    if (data.offerId || data.subject || data.title) return data as InitDataOffer
+    // 1) Try legacy window.INIT_DATA / window.__INIT_DATA
+    const initObj = w.INIT_DATA || w.__INIT_DATA
+    if (initObj) {
+      const data = initObj.data || initObj
+      if (data.offerDetail) return data.offerDetail as InitDataOffer
+      if (data.detailData) return data.detailData as InitDataOffer
+      if (data.offerId || data.subject || data.title) return data as InitDataOffer
+    }
+
+    // 2) Modern 1688: data is in window.context.result.data
+    //    The product offer is embedded inside <script> tags as window.context = {...}
+    const ctx = w.context
+    if (ctx?.result?.data) {
+      const rd = ctx.result.data
+      // Check for offerDetail inside nested module data
+      if (rd.offerDetail) return rd.offerDetail as InitDataOffer
+      // Scan module keys for offer data
+      for (const key of Object.keys(rd)) {
+        const val = rd[key]
+        if (val && typeof val === 'object') {
+          if (val.offerId || val.subject) return val as InitDataOffer
+          if (val.fields?.offerDetail) return val.fields.offerDetail as InitDataOffer
+        }
+      }
+    }
+
+    // 3) Fallback: parse inline script tags for product data
+    const scripts = document.querySelectorAll('script')
+    for (const s of scripts) {
+      const t = s.textContent || ''
+      if (t.includes('offerDetail') && t.includes('subject')) {
+        // Try to extract offerDetail JSON from the script
+        const match = t.match(/offerDetail['":\s]*=(\{[\s\S]*?\})\s*[,;\n]/)
+        if (match) {
+          try {
+            const obj = JSON.parse(match[1])
+            if (obj.subject || obj.offerId) return obj as InitDataOffer
+          } catch { /* ignore parse errors */ }
+        }
+      }
+    }
+
     return null
   } catch {
     return null
@@ -312,69 +349,133 @@ function extractAttributes(initData: InitDataOffer | null): ProductAttribute[] {
   }
 
   const attrs: ProductAttribute[] = []
-  // Real 1688 DOM: attribute items contain concatenated "name+value" text
-  // e.g. "款式紧身款", "主面料成分真丝"
-  // They are inside [class*="attr"] containers
-  const selectors = [
-    '[class*="attr"] [class*="item"]',
-    '[class*="attr"] li',
-    '.obj-attr dl',
-    '[class*="attribute"] dl',
-    '[class*="attr-list"] li',
-    '.detail-attributes-list li',
-    '[class*="detail-info"] tr',
-  ]
 
-  for (const sel of selectors) {
-    const rows = document.querySelectorAll(sel)
-    if (rows.length === 0) continue
-    rows.forEach((row) => {
-      // DL format: <dt>Name</dt><dd>Value</dd>
-      const dt = row.querySelector('dt')
-      const dd = row.querySelector('dd')
-      if (dt && dd) {
-        const name = dt.textContent?.trim().replace(/[:：]$/, '') || ''
-        const value = dd.textContent?.trim() || ''
-        if (name && value) attrs.push({ name, value })
-        return
-      }
-      // TR format
-      const cells = row.querySelectorAll('td, th')
-      if (cells.length >= 2) {
-        const name = cells[0].textContent?.trim().replace(/[:：]$/, '') || ''
+  // ── Priority 1: Ant-design table rows (most reliable on modern 1688) ──
+  const antTableRows = document.querySelectorAll('.ant-descriptions-view tr, .ant-table-content tr')
+  antTableRows.forEach((row) => {
+    const cells = row.querySelectorAll('td, th')
+    if (cells.length >= 2) {
+      const name = cells[0].textContent?.trim().replace(/[::]$/, '') || ''
+      const value = cells[1].textContent?.trim() || ''
+      if (name && value && name !== value) attrs.push({ name, value })
+    }
+  })
+  if (attrs.length > 0) return attrs
+
+  // ── Priority 2: LI items inside attribute containers ──
+  const attrLis = document.querySelectorAll('[class*="obj-attr"] li, [class*="attr-list"] li, .detail-attributes-list li, [class*="detail-info"] li')
+  attrLis.forEach((li) => {
+    const children = Array.from(li.children)
+    if (children.length >= 2) {
+      const name = children[0].textContent?.trim().replace(/[::]$/, '') || ''
+      const value = children[1].textContent?.trim() || ''
+      if (name && value && name !== value) attrs.push({ name, value })
+    }
+  })
+  if (attrs.length > 0) return attrs
+
+  // ── Priority 3: DL format ──
+  document.querySelectorAll('.obj-attr dl, [class*="attribute"] dl').forEach((row) => {
+    const dt = row.querySelector('dt')
+    const dd = row.querySelector('dd')
+    if (dt && dd) {
+      const name = dt.textContent?.trim().replace(/[::]$/, '') || ''
+      const value = dd.textContent?.trim() || ''
+      if (name && value) attrs.push({ name, value })
+    }
+  })
+  if (attrs.length > 0) return attrs
+
+  // ── Priority 4: Any 2-column table with short name / longer value ──
+  document.querySelectorAll('table').forEach((table) => {
+    table.querySelectorAll('tr').forEach((row) => {
+      const cells = row.querySelectorAll('td')
+      if (cells.length === 2) {
+        const name = cells[0].textContent?.trim().replace(/[::]$/, '') || ''
         const value = cells[1].textContent?.trim() || ''
-        if (name && value) { attrs.push({ name, value }); return }
-      }
-      // Inline format: child elements with separate name/value
-      const children = Array.from(row.children)
-      if (children.length >= 2) {
-        const name = children[0].textContent?.trim().replace(/[::]$/, '') || ''
-        const value = children[1].textContent?.trim() || ''
-        if (name && value && name !== value) { attrs.push({ name, value }); return }
-      }
-      // Last resort: split concatenated text "款式紧身款"
-      const text = row.textContent?.trim() || ''
-      const attrMatch = text.match(/^([\u4e00-\u9fa5]{2,8})\s*(.+)$/)
-      if (attrMatch && attrMatch[1] !== attrMatch[2].trim()) {
-        attrs.push({ name: attrMatch[1], value: attrMatch[2].trim() })
+        if (name && value && name !== value && name.length <= 20 && value.length <= 100) {
+          attrs.push({ name, value })
+        }
       }
     })
-    if (attrs.length) break
-  }
+  })
+
   return attrs
 }
 
+function extractSpecList(attrs: ProductAttribute[]): Array<{ weight_g: number; depth_mm: number; height_mm: number; width_mm: number; [key: string]: any }> {
+  const spec: Record<string, any> = { weight_g: 0, depth_mm: 0, height_mm: 0, width_mm: 0 }
+
+  for (const attr of attrs) {
+    const name = attr.name.toLowerCase()
+    const val = attr.value
+
+    // 重量提取: 支持 kg/g/克/千克
+    if (name.includes('重量') || name.includes('毛重') || name.includes('净重')) {
+      const kgMatch = val.match(/([\d.]+)\s*(?:kg|千克)/i)
+      const gMatch = val.match(/([\d.]+)\s*(?:g|克)/i)
+      if (kgMatch) {
+        spec.weight_g = Math.round(parseFloat(kgMatch[1]) * 1000)
+      } else if (gMatch) {
+        spec.weight_g = Math.round(parseFloat(gMatch[1]))
+      } else {
+        const num = parseFloat(val.replace(/[^\d.]/g, ''))
+        if (!isNaN(num) && num > 0) {
+          // Default to grams if no unit
+          spec.weight_g = num > 100 ? Math.round(num) : Math.round(num * 1000)
+        }
+      }
+    }
+
+    // 尺寸提取
+    if (name.includes('尺寸') || name.includes('长宽高') || name.includes('规格')) {
+      const dimMatch = val.match(/([\d.]+)\s*[×x*]\s*([\d.]+)\s*[×x*]\s*([\d.]+)/i)
+      if (dimMatch) {
+        spec.depth_mm = Math.round(parseFloat(dimMatch[1]))
+        spec.width_mm = Math.round(parseFloat(dimMatch[2]))
+        spec.height_mm = Math.round(parseFloat(dimMatch[3]))
+      }
+    }
+  }
+
+  return [spec]
+}
+
 function extractBrand(): string {
-  // 1688 products often don't have brand, but check attributes
+  // Check DOM for brand element first
   const brandEl = document.querySelector('[class*="brand"] a, [class*="brand"] span')
-  return brandEl?.textContent?.trim() || ''
+  const domBrand = brandEl?.textContent?.trim() || ''
+  if (domBrand) return domBrand
+
+  // Fallback: extract from attributes - look for "品牌" key
+  const attrs = extractAttributes(null)
+  const brandAttr = attrs.find(a => a.name.includes('品牌'))
+  return brandAttr?.value || ''
 }
 
 function extractCategory(): string {
+  // Try breadcrumbs first
   const crumbs = Array.from(
     document.querySelectorAll('.bread-crumbs a, [class*="breadcrumb"] a, [class*="crumb"] a')
   ).map((a) => a.textContent?.trim()).filter(Boolean)
-  return crumbs.join(' > ')
+  if (crumbs.length > 0) return crumbs.join(' > ')
+
+  // Fallback: look for category in the page's navigation or tab area
+  // Modern 1688 has category info in [class*="category"] or [class*="classify"]
+  const catEl = document.querySelector('[class*="category-name"], [class*="classify-name"], [class*="cat-name"]')
+  if (catEl) return catEl.textContent?.trim() || ''
+
+  // Extract from URL pattern: /offer/ has no category in URL
+  // Last resort: check meta tags
+  const meta = document.querySelector('meta[name="keywords"]')
+  if (meta) {
+    const keywords = meta.getAttribute('content') || ''
+    // First keyword is often the category
+    const firstKeyword = keywords.split(',')[0]?.trim()
+    if (firstKeyword && firstKeyword.length < 20) return firstKeyword
+  }
+
+  return ''
 }
 
 function extractSellerName(initData: InitDataOffer | null): string {
@@ -418,25 +519,50 @@ function extractSellerUrl(): string {
 }
 
 function extractDescription(): string {
-  // Real 1688 DOM: description images may be lazy-loaded
-  // Try multiple selectors including data-src for lazy loading
-  const selectors = [
+  // Extract description images (lazy-loaded) from the detail description section
+  const imgSelectors = [
     '.detail-desc img',
     '[class*="offer-detail"] img',
     '#detail-desc img',
     '.detail-desc-content img',
+    '[class*="desc-content"] img',
     '[class*="desc"] img',
   ]
-  for (const sel of selectors) {
-    const imgs = Array.from(document.querySelectorAll(sel))
+  const imgs: string[] = []
+  for (const sel of imgSelectors) {
+    const found = Array.from(document.querySelectorAll(sel))
       .map((img) => {
         const el = img as HTMLImageElement
         return el.getAttribute('data-src') || el.getAttribute('data-lazy-img') || el.src || ''
       })
       .filter((src) => src && src.startsWith('http') && !src.includes('icon') && !src.includes('logo'))
-    if (imgs.length) return [...new Set(imgs)].join('\n')
+    if (found.length) {
+      imgs.push(...found)
+      break
+    }
   }
-  return ''
+
+  // Also extract text content from the description section
+  const descSelectors = [
+    '.detail-desc-content',
+    '.detail-desc',
+    '#detail-desc',
+    '[class*="offer-detail-desc"]',
+  ]
+  let descText = ''
+  for (const sel of descSelectors) {
+    const el = document.querySelector(sel)
+    if (el) {
+      descText = el.textContent?.trim() || ''
+      if (descText.length > 10) break
+    }
+  }
+
+  // Combine: image URLs + text
+  const parts: string[] = []
+  if (imgs.length) parts.push(...[...new Set(imgs)])
+  if (descText) parts.push(descText)
+  return parts.join('\n')
 }
 
 function extractVideoUrls(): string[] {
@@ -453,11 +579,13 @@ export function scrape1688Product(): ScrapedProduct | null {
   if (!offerId) return null
 
   const initData = getInitData()
+  const attrs = extractAttributes(initData)
 
   return {
     platform: '1688',
     sourceId: offerId,
     title: extractTitle(initData),
+    currency: 'CNY',
     price: extractPrice(initData),
     oldPrice: extractOldPrice(),
     images: extractImages(initData),
@@ -467,13 +595,13 @@ export function scrape1688Product(): ScrapedProduct | null {
     category: extractCategory(),
     sellerName: extractSellerName(initData),
     sellerUrl: extractSellerUrl(),
-    attributes: extractAttributes(initData),
+    attributes: attrs,
     description: extractDescription(),
     sourceUrl: location.href,
     scrapedAt: new Date().toISOString(),
     videoUrls: extractVideoUrls(),
     skuList: extractSkus(initData),
-    specList: [],
+    specList: extractSpecList(attrs),
     ozonCategoryId: 0,
     ozonTypeId: 0,
     // 1688-specific
@@ -499,79 +627,97 @@ export function scan1688ListCards(): ListCard1688[] {
   const cards: ListCard1688[] = []
   const seen = new Set<string>()
 
-  // 1688 search result selectors
-  const selectors = [
-    '.sm-offer-item',
-    '[class*="offer-list"] [class*="item"]',
-    '.offer-list-row .item',
-    '[class*="card-container"]',
-    '[class*="search-result"] [class*="item"]',
-  ]
+  // ── Strategy 1: extract from window.__INIT_DATA__ / globalData ──
+  try {
+    const w = window as any
+    const initData = w.__INIT_DATA__ || w.__DATA__ || w.globalData
+    if (initData) {
+      const tryPaths = [
+        initData?.data?.offerList,
+        initData?.data?.mainData?.offerList,
+        initData?.data?.resultList,
+        initData?.offerList,
+        initData?.result?.data?.offerList,
+        initData?.content?.offerList,
+      ]
+      for (const list of tryPaths) {
+        if (Array.isArray(list) && list.length > 0) {
+          for (const item of list) {
+            const offerId = String(item?.offerId || item?.id || item?.offer?.offerId || '')
+            if (!offerId || seen.has(offerId)) continue
+            seen.add(offerId)
+            cards.push({
+              sourceId: offerId,
+              title: item?.subject || item?.title || item?.offer?.subject || '',
+              price: parseFloat(item?.price || item?.offer?.price || item?.promotionPrice || '0') || 0,
+              oldPrice: 0,
+              imageUrl: item?.imageUrl || item?.image || item?.offer?.imageUrl || '',
+              sourceUrl: `https://detail.1688.com/offer/${offerId}.html`,
+            })
+          }
+          if (cards.length > 0) return cards
+        }
+      }
+    }
+  } catch { /* ignore */ }
 
-  for (const sel of selectors) {
-    const items = document.querySelectorAll(sel)
-    if (items.length === 0) continue
+  // ── Strategy 2: scan ALL <a> tags by href pattern (no CSS class dependency) ──
+  const allLinks = document.querySelectorAll('a[href]') as NodeListOf<HTMLAnchorElement>
+  for (const a of allLinks) {
+    const href = a.href || a.getAttribute('href') || ''
+    const idMatch = href.match(/(?:detail\.1688\.com\/offer\/|\/offer\/)(\d{6,})/)
+    if (!idMatch) continue
+    const sourceId = idMatch[1]
+    if (seen.has(sourceId)) continue
+    seen.add(sourceId)
 
-    items.forEach((item) => {
-      const linkEl = item.querySelector('a[href*="detail.1688.com"]') as HTMLAnchorElement
-      if (!linkEl) return
+    // Walk up DOM to find the card container (has image + price)
+    let container: HTMLElement | null = a.parentElement
+    for (let i = 0; i < 8 && container; i++) {
+      const hasImg = container.querySelector('img')
+      const hasPrice = container.querySelector('[class*="price"], [class*="Price"]') || /[\d.]+/.test(container.textContent || '')
+      if (hasImg && hasPrice) break
+      container = container.parentElement
+    }
+    if (!container) container = a.parentElement
+    if (!container) continue
 
-      const href = linkEl.href || ''
-      const idMatch = href.match(/\/offer\/(\d+)/)
-      if (!idMatch) return
-      const sourceId = idMatch[1]
-      if (seen.has(sourceId)) return
-      seen.add(sourceId)
+    const imgEl = container.querySelector('img') as HTMLImageElement
+    const priceEl = container.querySelector('[class*="price"], [class*="Price"]')
+    const titleText = a.textContent?.trim()
+      || container.querySelector('[class*="title"], [class*="Title"], h3, h4')?.textContent?.trim()
+      || ''
 
-      const titleEl = item.querySelector('[class*="title"] a, [class*="title"], h4, h3')
-      const priceEl = item.querySelector('[class*="price"] [class*="value"], [class*="price"]')
-      const imgEl = item.querySelector('img') as HTMLImageElement
-      const oldPriceEl = item.querySelector('del, [class*="origin"], [class*="old-price"]')
-
-      cards.push({
-        sourceId,
-        title: titleEl?.textContent?.trim() || '',
-        price: parsePrice(priceEl?.textContent || ''),
-        oldPrice: parsePrice(oldPriceEl?.textContent || ''),
-        imageUrl: imgEl?.src || imgEl?.getAttribute('data-lazy-img') || '',
-        sourceUrl: href,
-      })
+    cards.push({
+      sourceId,
+      title: titleText,
+      price: parsePrice(priceEl?.textContent || ''),
+      oldPrice: 0,
+      imageUrl: imgEl?.src || imgEl?.getAttribute('data-src') || '',
+      sourceUrl: href.startsWith('http') ? href : `https://detail.1688.com/offer/${sourceId}.html`,
     })
-
-    if (cards.length > 0) break
   }
 
-  // Fallback: look for all detail links
+  // ── Strategy 3: scan elements with data-offer-id / data-id attributes ──
   if (cards.length === 0) {
-    const allLinks = document.querySelectorAll('a[href*="detail.1688.com/offer/"]')
-    allLinks.forEach((a) => {
-      const href = (a as HTMLAnchorElement).href || ''
-      const idMatch = href.match(/\/offer\/(\d+)/)
-      if (!idMatch) return
-      const sourceId = idMatch[1]
-      if (seen.has(sourceId)) return
-      seen.add(sourceId)
-
-      // Find container
-      let container: HTMLElement | null = a.parentElement
-      for (let i = 0; i < 5 && container; i++) {
-        if (container.querySelector('img') || container.querySelectorAll('a[href*="detail.1688.com"]').length <= 3) break
-        container = container.parentElement
-      }
-      if (!container) return
-
-      const imgEl = container.querySelector('img') as HTMLImageElement
-      const priceEl = container.querySelector('[class*="price"]')
-
+    const dataEls = document.querySelectorAll('[data-offer-id], [data-id], [data-offerid]')
+    for (const el of dataEls) {
+      const sid = el.getAttribute('data-offer-id') || el.getAttribute('data-id') || el.getAttribute('data-offerid') || ''
+      if (!sid || seen.has(sid)) continue
+      seen.add(sid)
+      const ctr = el as HTMLElement
+      const img = ctr.querySelector('img') as HTMLImageElement
+      const prEl = ctr.querySelector('[class*="price"], [class*="Price"]')
+      const ttlEl = ctr.querySelector('[class*="title"], [class*="Title"]')
       cards.push({
-        sourceId,
-        title: a.textContent?.trim() || container.querySelector('[class*="title"]')?.textContent?.trim() || '',
-        price: parsePrice(priceEl?.textContent || ''),
+        sourceId: sid,
+        title: ttlEl?.textContent?.trim() || '',
+        price: parsePrice(prEl?.textContent || ''),
         oldPrice: 0,
-        imageUrl: imgEl?.src || '',
-        sourceUrl: href,
+        imageUrl: img?.src || img?.getAttribute('data-src') || '',
+        sourceUrl: `https://detail.1688.com/offer/${sid}.html`,
       })
-    })
+    }
   }
 
   return cards

@@ -22,7 +22,6 @@ const pageInfo = ref<PageInfo>({ isSupported: false })
 const scraping = ref(false)
 const stopping = ref(false)
 const errorMsg = ref('')
-const settingsOpen = ref(false)
 
 // Batch progress
 const progress = ref({ scraped: 0, enriched: 0, synced: 0, total: 0, phase: '' as string })
@@ -168,24 +167,17 @@ onMounted(async () => {
         </div>
       </div>
 
-      <!-- Per-platform settings (collapsible, for list pages) -->
+      <!-- Per-platform settings (always visible, for list pages) -->
       <div v-if="pageInfo.isListPage && platformConfig" class="card overflow-hidden">
-        <button
-          @click="settingsOpen = !settingsOpen"
-          class="w-full flex items-center justify-between px-3 py-2.5 text-xs font-medium text-surface-600 hover:bg-surface-50 transition-colors"
-        >
-          <span class="flex items-center gap-1.5">
+        <div class="px-3 pt-2.5 pb-1">
+          <span class="flex items-center gap-1.5 text-xs font-medium text-surface-600">
             <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
               <path stroke-linecap="round" stroke-linejoin="round" d="M10.5 6h9.75M10.5 6a1.5 1.5 0 11-3 0m3 0a1.5 1.5 0 10-3 0M3.75 6H7.5m3 12h9.75m-9.75 0a1.5 1.5 0 01-3 0m3 0a1.5 1.5 0 00-3 0m-3.75 0H7.5m9-6h3.75m-3.75 0a1.5 1.5 0 01-3 0m3 0a1.5 1.5 0 00-3 0m-9.75 0h9.75" />
             </svg>
             采集条件设置
           </span>
-          <svg class="w-4 h-4 transition-transform" :class="{ 'rotate-180': settingsOpen }" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-            <path stroke-linecap="round" stroke-linejoin="round" d="M19.5 8.25l-7.5 7.5-7.5-7.5" />
-          </svg>
-        </button>
-        <Transition name="settings">
-          <div v-if="settingsOpen" class="px-3 pb-3 space-y-2.5 border-t border-surface-100">
+        </div>
+        <div class="px-3 pb-3 space-y-2.5 border-t border-surface-100">
             <!-- Max items -->
             <div class="pt-2.5">
               <label class="text-[11px] text-surface-500 mb-1 block">最大采集数量</label>
@@ -265,7 +257,34 @@ onMounted(async () => {
                 class="w-full text-xs px-2.5 py-1.5 rounded-lg border border-surface-200 bg-white focus:border-ozon-400 focus:ring-1 focus:ring-ozon-200 outline-none" />
             </div>
           </div>
-        </Transition>
+      </div>
+
+      <!-- Platform usage tips -->
+      <div class="card p-3">
+        <div class="flex items-center gap-1.5 mb-2">
+          <svg class="w-3.5 h-3.5 text-ozon-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M11.25 11.25l.041-.02a.75.75 0 011.063.852l-.708 2.836a.75.75 0 001.063.853l.041-.021M21 12a9 9 0 11-18 0 9 9 0 0118 0zm-9-3.75h.008v.008H12V8.25z" />
+          </svg>
+          <span class="text-xs font-medium text-surface-600">使用提示</span>
+        </div>
+        <div class="text-[11px] text-surface-400 space-y-1.5">
+          <template v-if="pageInfo.platform === 'ozon'">
+            <p>• 打开 <span class="text-surface-600 font-medium">Ozon</span> 商品页或搜索列表页,点击「一键采集商品」</p>
+            <p>• 商品页:自动提取标题、图片、价格、规格等</p>
+            <p>• 列表页:可批量滚动采集,支持价格/评分过滤</p>
+          </template>
+          <template v-else-if="pageInfo.platform === 'wb'">
+            <p>• 打开 <span class="text-surface-600 font-medium">Wildberries</span> 商品页或搜索列表页,点击「一键采集商品」</p>
+            <p>• 商品页:自动提取标题、图片、价格、规格等</p>
+            <p>• 列表页:可批量滚动采集,支持价格/评分过滤</p>
+          </template>
+          <template v-else-if="pageInfo.platform === '1688'">
+            <p>• 打开 <span class="text-surface-600 font-medium">1688</span> 商品页或搜索列表页,点击「一键采集商品」</p>
+            <p>• 商品页:自动提取标题、图片、价格、SKU 等</p>
+            <p>• 列表页:可批量滚动采集,支持价格过滤</p>
+            <p>• 价格单位为人民币 ¥,导入后可自动换算</p>
+          </template>
+        </div>
       </div>
 
       <!-- Main action button (not scraping) -->
@@ -413,20 +432,4 @@ onMounted(async () => {
   </div>
 </template>
 
-<style scoped>
-.settings-enter-active,
-.settings-leave-active {
-  transition: all 0.2s ease;
-  overflow: hidden;
-}
-.settings-enter-from,
-.settings-leave-to {
-  opacity: 0;
-  max-height: 0;
-}
-.settings-enter-to,
-.settings-leave-from {
-  opacity: 1;
-  max-height: 600px;
-}
-</style>
+

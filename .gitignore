@@ -34,3 +34,5 @@ backend/tests/mail.py
 backend/tests/test_ozon_api.py
 
 .copilot-hub
+
+*/.output/

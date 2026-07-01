@@ -107,6 +107,7 @@ export function scrapeOzonProduct(): ScrapedProduct | null {
     platform: 'ozon',
     sourceId,
     title: getText('h1') || getText('[data-widget="webProductHeading"] span'),
+    currency: 'RUB',
     price: extractPrice(),
     oldPrice: extractOldPrice(),
     images: extractImages(),

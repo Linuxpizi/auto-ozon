@@ -147,11 +147,45 @@ async function handleProductScraped(product: ScrapedProduct) {
   }
 }
 
+/** 根据 URL 判断平台并返回对应的 content script 文件 */
+function getContentScriptFile(url: string): string | null {
+  if (/detail\.1688\.com\/offer\//.test(url) || /s\.1688\.com\/selloffer/.test(url) || /s\.1688\.com\/offer_search/.test(url)) return 'content-scripts/ali1688.js'
+  if (/ozon\.ru/.test(url)) return 'content-scripts/ozon.js'
+  if (/wildberries\.ru/.test(url)) return 'content-scripts/wb.js'
+  return null
+}
+
+/** 确保 content script 已注入:先尝试发消息,失败则注入并等待初始化 */
+async function ensureContentScript(tabId: number, url?: string): Promise<boolean> {
+  try {
+    // 先试探 content script 是否已加载
+    await browser.tabs.sendMessage(tabId, { action: 'checkPage' })
+    return true
+  } catch {
+    // content script 未加载,尝试注入
+    const scriptFile = url ? getContentScriptFile(url) : null
+    if (!scriptFile) return false
+    try {
+      await browser.scripting.executeScript({ target: { tabId }, files: [scriptFile] })
+      // 等待 content script 初始化
+      await new Promise((resolve) => setTimeout(resolve, 300))
+      return true
+    } catch (e) {
+      console.warn('[Auto-Ozon] 自动注入 content script 失败:', e)
+      return false
+    }
+  }
+}
+
 async function triggerScrapeInTab(tabId: number) {
   try {
     const [tab] = await browser.tabs.query({ active: true, currentWindow: true })
     const targetId = tabId || tab?.id
     if (!targetId) return { success: false, error: '无活动标签页' }
+
+    // ★ 关键修复:确保 content script 已注入,解决偶尔为空的问题
+    const injected = await ensureContentScript(targetId, tab.url)
+    if (!injected) return { success: false, error: '无法注入采集脚本,请刷新页面后重试' }
 
     const resp = await browser.tabs.sendMessage(targetId, { action: 'scrape' })
 
@@ -200,6 +234,10 @@ async function triggerListScrapeInTab(tabId?: number, maxItems = 50, scrollDelay
     const targetId = tabId || tab?.id
     if (!targetId) return { success: false, error: '无活动标签页' }
 
+    // ★ 关键修复:确保 content script 已注入
+    const injected = await ensureContentScript(targetId, tab.url)
+    if (!injected) return { success: false, error: '无法注入采集脚本,请刷新页面后重试' }
+
     // content script 内部会增量批量上报,background 不再做最终批量保存
     const resp = await browser.tabs.sendMessage(targetId, {
       action: 'scrapeList',
@@ -230,13 +268,16 @@ async function checkCurrentPage() {
 
     const platform = isOzon ? 'ozon' : isWB ? 'wb' : '1688'
 
+    // ★ 关键修复:确保 content script 已注入再检测,避免偶尔返回空
+    await ensureContentScript(tab.id!, url)
+
     // 先发消息让 content script 检测页面类型
     try {
       const pageCheck = await browser.tabs.sendMessage(tab.id!, { action: 'checkPage' })
       return {
         isSupported: true,
         platform: pageCheck.platform || platform,
-        productPage: pageCheck.isProductPage ?? (is1688 ? /detail\.1688\.com\/offer\//.test(url) : /\/\d+\/?$/.test(url)),
+        isProductPage: pageCheck.isProductPage ?? (is1688 ? /detail\.1688\.com\/offer\//.test(url) : /\/\d+\/?$/.test(url)),
         isListPage: pageCheck.isListPage ?? false,
         pageType: pageCheck.pageType || 'unknown',
         tabId: tab.id,

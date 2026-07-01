@@ -14,6 +14,7 @@ class ScrapedProductBase(BaseModel):
     title: str = ""
     price: float = 0.0
     old_price: float = 0.0
+    currency: str = ""  # CNY/RUB/USD — 由调用方按平台设置
     images: List[str] = []
     rating: float = 0.0
     review_count: int = 0

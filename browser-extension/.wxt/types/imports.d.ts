@@ -42,6 +42,7 @@ declare global {
   const humanScrollToBottom: typeof import('/Users/user/job/auto-ozon/browser-extension/src/utils/humanize').humanScrollToBottom
   const humanScrollToTop: typeof import('/Users/user/job/auto-ozon/browser-extension/src/utils/humanize').humanScrollToTop
   const inject: typeof import('vue').inject
+  const injectFloatingButton: typeof import('/Users/user/job/auto-ozon/browser-extension/src/utils/floating-button').injectFloatingButton
   const injectScript: typeof import('wxt/utils/inject-script').injectScript
   const isProxy: typeof import('vue').isProxy
   const isReactive: typeof import('vue').isReactive
@@ -136,6 +137,9 @@ declare global {
   export type { Component, Slot, Slots, ComponentPublicInstance, ComputedRef, DirectiveBinding, ExtractDefaultPropTypes, ExtractPropTypes, ExtractPublicPropTypes, InjectionKey, PropType, Ref, ShallowRef, MaybeRef, MaybeRefOrGetter, VNode, WritableComputedRef } from 'vue'
   import('vue')
   // @ts-ignore
+  export type { ButtonState } from '/Users/user/job/auto-ozon/browser-extension/src/utils/floating-button'
+  import('/Users/user/job/auto-ozon/browser-extension/src/utils/floating-button')
+  // @ts-ignore
   export type { Platform, ScrapedProduct, ProductAttribute, PlatformScrapingConfig, PluginSettings, ListProductSummary } from '/Users/user/job/auto-ozon/browser-extension/src/utils/types'
   import('/Users/user/job/auto-ozon/browser-extension/src/utils/types')
 }
@@ -184,6 +188,7 @@ declare module 'vue' {
     readonly humanScrollToBottom: UnwrapRef<typeof import('/Users/user/job/auto-ozon/browser-extension/src/utils/humanize')['humanScrollToBottom']>
     readonly humanScrollToTop: UnwrapRef<typeof import('/Users/user/job/auto-ozon/browser-extension/src/utils/humanize')['humanScrollToTop']>
     readonly inject: UnwrapRef<typeof import('vue')['inject']>
+    readonly injectFloatingButton: UnwrapRef<typeof import('/Users/user/job/auto-ozon/browser-extension/src/utils/floating-button')['injectFloatingButton']>
     readonly injectScript: UnwrapRef<typeof import('wxt/utils/inject-script')['injectScript']>
     readonly isProxy: UnwrapRef<typeof import('vue')['isProxy']>
     readonly isReactive: UnwrapRef<typeof import('vue')['isReactive']>

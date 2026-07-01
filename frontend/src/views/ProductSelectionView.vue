@@ -112,7 +112,7 @@
          左侧:原始数据 (只读)
          右侧:编辑数据 + AI按钮
          ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ -->
-    <n-drawer v-model:value="drawerVisible" :width="1100" placement="right" :closable="true">
+    <n-drawer v-model:show="drawerVisible" :width="1100" placement="right" :closable="true">
       <n-drawer-content :title="null" :native-scrollbar="false" closable>
         <template #header>
           <div style="display:flex; align-items:center; gap:8px;">
@@ -126,7 +126,7 @@
 
         <div v-if="editProduct" class="edit-drawer-body">
           <!-- 左栏: 原始数据 (只读) -->
-          <div class="panel-left">
+          <div ref="panelLeftRef" class="panel-left" @scroll="handlePanelScroll('left')">
             <div class="panel-title">📋 原始数据</div>
 
             <div class="section-block">
@@ -213,7 +213,7 @@
           </div>
 
           <!-- 右栏: 编辑数据 -->
-          <div class="panel-right">
+          <div ref="panelRightRef" class="panel-right" @scroll="handlePanelScroll('right')">
             <div class="panel-title">✨ 优化数据</div>
 
             <!-- 标题 -->
@@ -396,118 +396,221 @@
       </n-drawer-content>
     </n-drawer>
 
-    <!-- ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+        <!-- ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
          上传到 Ozon 弹窗
          ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ -->
-    <n-modal v-model:value="uploadVisible" preset="card" title="🚀 上传到 Ozon" style="width: 600px" :bordered="false">
+    <n-modal v-model:show="uploadVisible" preset="card" class="upload-modal" :bordered="false">
+      <template #header>
+        <div class="upload-modal__header">
+          <span class="upload-modal__title">🚀 上传到 Ozon</span>
+          <n-tag v-if="editProduct" size="small" :bordered="false" type="info">
+            {{ editProduct.title?.slice(0, 30) }}{{ editProduct.title?.length > 30 ? '...' : '' }}
+          </n-tag>
+        </div>
+      </template>
+
       <n-spin :show="uploading">
-        <n-form label-placement="left" label-width="100px" size="small">
-          <n-form-item label="Ozon 店铺" required>
-            <n-select v-model:value="uploadForm.store_id" :options="storeOptions" placeholder="选择店铺" />
-          </n-form-item>
-          <n-form-item label="商品分类" required>
-            <n-tree-select
-              v-model:value="uploadForm.description_category_id"
-              :options="categoryTree"
-              placeholder="选择 Ozon 分类"
-              default-expand-all
-              filterable
-            />
-          </n-form-item>
-          <n-form-item label="商品名称">
-            <n-input v-model:value="uploadForm.name" placeholder="标题" />
-          </n-form-item>
-          <n-form-item label="商品描述">
-            <n-input v-model:value="uploadForm.description" type="textarea" :rows="4" placeholder="HTML / Markdown 描述" />
-          </n-form-item>
+        <div class="upload-body">
 
-          <!-- ── 定价 ── -->
-          <n-form-item label="💰 定价">
-            <n-grid :cols="3" :x-gap="8">
-              <n-gi>
-                <div style="font-size: 12px; color: #999; margin-bottom: 2px">汇率</div>
-                <n-input-number v-model:value="uploadForm.exchange_rate" :min="1" :step="0.5" size="small" style="width: 100%" @update:value="calcUploadPrice" />
+          <!-- ── 🏪 店铺与分类 ── -->
+          <div class="upload-section">
+            <div class="upload-section__title">🏪 店铺与分类</div>
+            <n-grid :cols="2" :x-gap="16" :y-gap="12">
+              <n-gi :span="2">
+                <div class="upload-field">
+                  <label class="upload-field__label">Ozon 店铺 <span class="required">*</span></label>
+                  <n-select v-model:value="uploadForm.store_id" :options="storeOptions" placeholder="选择店铺" />
+                </div>
               </n-gi>
-              <n-gi>
-                <div style="font-size: 12px; color: #999; margin-bottom: 2px">加价倍率</div>
-                <n-input-number v-model:value="uploadForm.markup_factor" :min="1" :step="0.1" size="small" style="width: 100%" @update:value="calcUploadPrice" />
-              </n-gi>
-              <n-gi>
-                <div style="font-size: 12px; color: #999; margin-bottom: 2px">佣金 %</div>
-                <n-input-number v-model:value="uploadForm.commission_pct" :min="0" :max="100" :step="1" size="small" style="width: 100%" @update:value="calcUploadPrice" />
+              <n-gi :span="2">
+                <div class="upload-field">
+                  <label class="upload-field__label">商品分类 <span class="required">*</span></label>
+                  <n-tree-select
+                    v-model:value="uploadForm.description_category_id"
+                    :options="Array.isArray(categoryTree) ? categoryTree : (categoryTree?.categories || [])"
+                    placeholder="选择 Ozon 分类"
+                    default-expand-all
+                    filterable
+                  />
+                </div>
               </n-gi>
             </n-grid>
-            <n-grid :cols="2" :x-gap="8">
+          </div>
+
+          <!-- ── 📝 商品信息 ── -->
+          <div class="upload-section">
+            <div class="upload-section__title">📝 商品信息</div>
+            <div class="upload-field">
+              <label class="upload-field__label">商品名称</label>
+              <n-input v-model:value="uploadForm.name" placeholder="Ozon 上显示的商品名" />
+            </div>
+            <div class="upload-field">
+              <label class="upload-field__label">商品描述</label>
+              <n-input v-model:value="uploadForm.description" type="textarea" :rows="3" placeholder="HTML / Markdown 描述" />
+            </div>
+          </div>
+
+          <!-- ── 💰 定价 ── -->
+          <div class="upload-section">
+            <div class="upload-section__title">
+              <span>💰 定价</span>
+              <n-button text size="tiny" @click="calcUploadPrice">🔄 重新计算</n-button>
+            </div>
+            <n-grid :cols="3" :x-gap="16" :y-gap="12">
               <n-gi>
-                <div style="font-size: 12px; color: #999; margin-bottom: 2px">物流 (₽)</div>
-                <n-input-number v-model:value="uploadForm.logistics_rub" :min="0" size="small" style="width: 100%" @update:value="calcUploadPrice" />
+                <div class="upload-field">
+                  <label class="upload-field__label">汇率 (CNY→RUB)</label>
+                  <n-input-number v-model:value="uploadForm.exchange_rate" :min="1" :step="0.5" style="width: 100%" @update:value="calcUploadPrice" />
+                </div>
               </n-gi>
               <n-gi>
-                <div style="font-size: 12px; color: #999; margin-bottom: 2px">包装 (₽)</div>
-                <n-input-number v-model:value="uploadForm.packaging_rub" :min="0" size="small" style="width: 100%" @update:value="calcUploadPrice" />
+                <div class="upload-field">
+                  <label class="upload-field__label">加价倍率</label>
+                  <n-input-number v-model:value="uploadForm.markup_factor" :min="1" :step="0.1" style="width: 100%" @update:value="calcUploadPrice" />
+                </div>
+              </n-gi>
+              <n-gi>
+                <div class="upload-field">
+                  <label class="upload-field__label">佣金 (%)</label>
+                  <n-input-number v-model:value="uploadForm.commission_pct" :min="0" :max="100" :step="1" style="width: 100%" @update:value="calcUploadPrice" />
+                </div>
+              </n-gi>
+              <n-gi>
+                <div class="upload-field">
+                  <label class="upload-field__label">物流 (₽)</label>
+                  <n-input-number v-model:value="uploadForm.logistics_rub" :min="0" style="width: 100%" @update:value="calcUploadPrice" />
+                </div>
+              </n-gi>
+              <n-gi>
+                <div class="upload-field">
+                  <label class="upload-field__label">包装 (₽)</label>
+                  <n-input-number v-model:value="uploadForm.packaging_rub" :min="0" style="width: 100%" @update:value="calcUploadPrice" />
+                </div>
               </n-gi>
             </n-grid>
-            <n-alert v-if="priceCalcResult" type="success" size="small" style="margin: 0">
-              <n-space :size="16">
-                <span>进价 <strong>₽{{ priceCalcResult.cost_rub }}</strong></span>
-                <span>加价后 <strong>₽{{ priceCalcResult.markup_price_rub }}</strong></span>
-                <span>佣金 <strong>₽{{ priceCalcResult.commission_rub }}</strong></span>
-                <span>售价 <strong>₽{{ priceCalcResult.final_price_rub }}</strong></span>
-              </n-space>
-            </n-alert>
-          </n-form-item>
 
-          <!-- ── 物理规格 ── -->
-          <n-form-item label="📐 物理规格">
-            <n-grid :cols="4" :x-gap="8">
+            <!-- 自动定价结果 -->
+            <div v-if="priceCalcResult" class="upload-price-result">
+              <div class="upload-price-result__header">🧮 自动定价结果</div>
+              <n-grid :cols="4" :x-gap="12">
+                <n-gi>
+                  <div class="price-card">
+                    <span class="price-card__label">成本</span>
+                    <span class="price-card__value">{{ priceCalcResult.cost_rub }} ₽</span>
+                  </div>
+                </n-gi>
+                <n-gi>
+                  <div class="price-card">
+                    <span class="price-card__label">加价后</span>
+                    <span class="price-card__value">{{ priceCalcResult.markup_price_rub }} ₽</span>
+                  </div>
+                </n-gi>
+                <n-gi>
+                  <div class="price-card">
+                    <span class="price-card__label">佣金</span>
+                    <span class="price-card__value">{{ priceCalcResult.commission_rub }} ₽</span>
+                  </div>
+                </n-gi>
+                <n-gi>
+                  <div class="price-card price-card--final">
+                    <span class="price-card__label">最终售价</span>
+                    <span class="price-card__value">{{ priceCalcResult.final_price_rub }} ₽</span>
+                  </div>
+                </n-gi>
+              </n-grid>
+            </div>
+          </div>
+
+          <!-- ── 📦 物流 ── -->
+          <div class="upload-section">
+            <div class="upload-section__title">📦 物流</div>
+            <n-grid :cols="4" :x-gap="16" :y-gap="12">
               <n-gi>
-                <div style="font-size: 12px; color: #999; margin-bottom: 2px">重量 (g)</div>
-                <n-input-number v-model:value="uploadForm.weight_g" :min="0" size="small" style="width: 100%" />
+                <div class="upload-field">
+                  <label class="upload-field__label">重量 (g)</label>
+                  <n-input-number v-model:value="uploadForm.weight_g" :min="0" style="width: 100%" />
+                </div>
               </n-gi>
               <n-gi>
-                <div style="font-size: 12px; color: #999; margin-bottom: 2px">高 (mm)</div>
-                <n-input-number v-model:value="uploadForm.height_mm" :min="0" size="small" style="width: 100%" />
+                <div class="upload-field">
+                  <label class="upload-field__label">高 (mm)</label>
+                  <n-input-number v-model:value="uploadForm.height_mm" :min="0" style="width: 100%" />
+                </div>
               </n-gi>
               <n-gi>
-                <div style="font-size: 12px; color: #999; margin-bottom: 2px">深 (mm)</div>
-                <n-input-number v-model:value="uploadForm.depth_mm" :min="0" size="small" style="width: 100%" />
+                <div class="upload-field">
+                  <label class="upload-field__label">深 (mm)</label>
+                  <n-input-number v-model:value="uploadForm.depth_mm" :min="0" style="width: 100%" />
+                </div>
               </n-gi>
               <n-gi>
-                <div style="font-size: 12px; color: #999; margin-bottom: 2px">宽 (mm)</div>
-                <n-input-number v-model:value="uploadForm.width_mm" :min="0" size="small" style="width: 100%" />
+                <div class="upload-field">
+                  <label class="upload-field__label">宽 (mm)</label>
+                  <n-input-number v-model:value="uploadForm.width_mm" :min="0" style="width: 100%" />
+                </div>
               </n-gi>
             </n-grid>
-          </n-form-item>
+          </div>
 
-          <!-- ── Offer ID ── -->
-          <n-form-item label="Offer ID">
-            <n-input v-model:value="uploadForm.offer_id" placeholder="留空自动生成" />
-          </n-form-item>
-        </n-form>
+          <!-- ── ⚙️ 其他 ── -->
+          <div class="upload-section">
+            <div class="upload-section__title">⚙️ 其他</div>
+            <div class="upload-field">
+              <label class="upload-field__label">Offer ID</label>
+              <n-input v-model:value="uploadForm.offer_id" placeholder="留空自动生成" />
+            </div>
+          </div>
+
+        </div>
       </n-spin>
 
       <template #footer>
-        <n-space justify="end">
-          <n-button @click="uploadVisible = false">取消</n-button>
-          <n-button type="primary" :loading="uploading" :disabled="!uploadForm.store_id || !uploadForm.description_category_id" @click="doUpload">上传到 Ozon</n-button>
-        </n-space>
+        <div class="upload-footer">
+          <n-button @click="uploadVisible = false" size="large">取消</n-button>
+          <n-button
+            type="primary"
+            size="large"
+            :loading="uploading"
+            :disabled="!uploadForm.store_id || !uploadForm.description_category_id"
+            @click="doUpload"
+          >🚀 上传到 Ozon</n-button>
+        </div>
       </template>
     </n-modal>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, computed, h, onMounted } from "vue";
+import { ref, reactive, computed, h, onMounted, nextTick } from "vue";
 import {
   NButton, NTag, NSpace, NInput, NInputNumber, NSelect, NDataTable,
   NPopconfirm, NPagination, NDrawer, NDrawerContent, NImage, NDivider,
   NModal, NForm, NFormItem, NGrid, NGi, NH2, NAlert,
   NTreeSelect, NA, NSpin, NDatePicker,
 } from "naive-ui";
-import { apiGet, apiPost, apiPut, apiDelete } from "@/api";
+import { apiGet, apiPost, apiPut, apiDelete } from "../api";
 import { useMessage } from "naive-ui";
 
 const message = useMessage();
+
+// ── 左右面板滚动锚点联动 ──
+const panelLeftRef = ref<HTMLElement | null>(null);
+const panelRightRef = ref<HTMLElement | null>(null);
+const isSyncingScroll = ref(false);
+
+function handlePanelScroll(side: 'left' | 'right') {
+  if (isSyncingScroll.value) return;
+  const source = side === 'left' ? panelLeftRef.value : panelRightRef.value;
+  const target = side === 'left' ? panelRightRef.value : panelLeftRef.value;
+  if (!source || !target) return;
+  const sourceMax = source.scrollHeight - source.clientHeight;
+  if (sourceMax <= 0) return;
+  const ratio = source.scrollTop / sourceMax;
+  const targetMax = target.scrollHeight - target.clientHeight;
+  isSyncingScroll.value = true;
+  target.scrollTop = ratio * targetMax;
+  nextTick(() => { isSyncingScroll.value = false; });
+}
 
 // ── 币种符号 ──
 const _CURRENCY_MAP: Record<string, string> = { CNY: "¥", RUB: "₽", USD: "$", EUR: "€" };
@@ -1290,5 +1393,116 @@ onMounted(() => {
     margin-left: 0;
     justify-content: flex-end;
   }
+}
+
+/* ── 上传弹窗 ── */
+.upload-modal {
+  width: 720px !important;
+}
+
+.upload-modal .n-card-header {
+  padding-bottom: 0;
+}
+
+.upload-modal__header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.upload-modal__title {
+  font-size: 18px;
+  font-weight: 700;
+}
+
+.upload-body {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  padding: 4px 0;
+}
+
+.upload-section {
+  background: var(--bg-elevated, #f8f9fa);
+  border-radius: 10px;
+  padding: 16px 20px;
+}
+
+.upload-section__title {
+  font-size: 14px;
+  font-weight: 600;
+  margin-bottom: 12px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--border-color, #e0e0e0);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.upload-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.upload-field__label {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-secondary, #666);
+}
+
+.upload-field .required {
+  color: #d03050;
+  margin-left: 2px;
+}
+
+.upload-price-result {
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px dashed var(--border-color, #e0e0e0);
+}
+
+.upload-price-result__header {
+  font-size: 13px;
+  font-weight: 600;
+  color: #18a058;
+  margin-bottom: 10px;
+}
+
+.price-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  padding: 10px 8px;
+  background: var(--card-bg, #fff);
+  border-radius: 8px;
+  border: 1px solid var(--border-color, #e0e0e0);
+}
+
+.price-card__label {
+  font-size: 11px;
+  color: var(--text-muted, #999);
+}
+
+.price-card__value {
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--text-color, #333);
+}
+
+.price-card--final {
+  background: linear-gradient(135deg, #e8f8ef, #d4f1e4);
+  border-color: #18a058;
+}
+
+.price-card--final .price-card__value {
+  color: #18a058;
+}
+
+.upload-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 12px;
 }
 </style>

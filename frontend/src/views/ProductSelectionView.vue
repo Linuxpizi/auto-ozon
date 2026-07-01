@@ -6,6 +6,14 @@
       <div class="page-header">
         <n-h2 class="page-title" style="margin: 0">采集商品</n-h2>
         <n-space>
+          <n-popconfirm @positive-click="batchDeleteProducts">
+            <template #trigger>
+              <n-button size="small" type="error" :disabled="selectedKeys.length === 0">
+                删除选中 ({{ selectedKeys.length }})
+              </n-button>
+            </template>
+            确定删除选中的 {{ selectedKeys.length }} 个商品？
+          </n-popconfirm>
           <n-button size="small" @click="loadProducts" :loading="loading">刷新</n-button>
         </n-space>
       </div>
@@ -45,6 +53,8 @@
         :data="products"
         :loading="loading"
         :row-key="(row: any) => row.id"
+        :checked-row-keys="selectedKeys"
+        @update:checked-row-keys="(keys: any) => selectedKeys = keys as number[]"
         size="small"
         striped
         :scroll-x="1600"
@@ -265,23 +275,181 @@
   </n-drawer>
 
   <!-- ========== 上传弹窗 ========== -->
-  <n-modal v-model:show="uploadVisible" preset="card" title="上传到店铺" style="width: 480px" :bordered="false">
+  <n-modal v-model:show="uploadVisible" preset="card" title="上传到 Ozon" style="width: 640px" :bordered="false">
     <n-alert v-if="uploadProduct" type="info" style="margin-bottom: 12px">
       <strong>{{ truncateText(uploadProduct.title, 50) }}</strong>
       <span style="margin-left: 8px; color: #999">ID: {{ uploadProduct.source_id }}</span>
     </n-alert>
-    <n-form label-placement="left" label-width="80" :model="uploadForm">
-      <n-form-item label="选择店铺">
-        <n-select v-model:value="uploadForm.store_id" :options="storeOptions" placeholder="选择目标店铺" filterable style="width: 100%" />
-      </n-form-item>
-      <n-form-item label="Offer ID">
-        <n-input v-model:value="uploadForm.offer_id" placeholder="留空自动生成" />
-      </n-form-item>
-    </n-form>
+
+    <n-spin :show="uploadCatLoading">
+      <n-form label-placement="left" label-width="100" :model="uploadForm">
+
+        <!-- ── 店铺 ── -->
+        <n-form-item label="目标店铺" required>
+          <n-select v-model:value="uploadForm.store_id" :options="storeOptions" placeholder="选择目标店铺" filterable style="width: 100%" @update:value="onUploadStoreChange" />
+        </n-form-item>
+
+        <!-- ── 分类 ── -->
+        <n-form-item label="Ozon 分类" required>
+          <n-space vertical :size="8" style="width: 100%">
+            <n-input v-model:value="categorySearchText" placeholder="搜索分类名称…" size="small" clearable :disabled="!uploadForm.store_id" @update:value="filterCategoryTree" />
+            <div style="border: 1px solid var(--border-light); border-radius: 6px; max-height: 220px; overflow-y: auto; padding: 4px">
+              <n-empty v-if="filteredCategoryTree.length === 0 && !uploadCatLoading" description="无匹配分类" />
+              <n-tree
+                v-else
+                :data="filteredCategoryTree"
+                :default-expand-all="false"
+                :selected-keys="categorySelectedKeys"
+                selectable
+                cascade
+                :select-leaf="true"
+                block-line
+                node-key="category_id"
+                label-field="title"
+                children-field="children"
+                style="font-size: 13px"
+                @update:selected-keys="onCategorySelect"
+              />
+            </div>
+            <n-text v-if="uploadForm.description_category_id" depth="3" tag="div" style="font-size: 12px">
+              已选分类 ID: {{ uploadForm.description_category_id }}
+              <template v-if="uploadForm.type_id"> · Type: {{ uploadForm.type_id }}</template>
+            </n-text>
+          </n-space>
+        </n-form-item>
+
+        <!-- ── 分类属性 ── -->
+        <n-form-item v-if="uploadAttrs.length > 0" label="分类属性">
+          <n-space vertical :size="8" style="width: 100%">
+            <div v-for="attr in uploadAttrs" :key="attr.attribute_id" style="display: flex; align-items: center; gap: 8px">
+              <span style="min-width: 120px; font-size: 13px; flex-shrink: 0">
+                {{ attr.name }}
+                <n-tag v-if="attr.is_required" type="error" size="tiny" :bordered="false" style="margin-left: 2px">必填</n-tag>
+              </span>
+              <!-- 字典类型属性: 下拉选择 -->
+              <n-select
+                v-if="attr.type === 'String' && attr.dictionary_id && attr.attribute_values.length > 0"
+                :value="getUploadAttrValue(attr.attribute_id)"
+                :options="attr.attribute_values.map((v: any) => ({ label: v.value, value: v.dictionary_value_id }))"
+                placeholder="请选择"
+                filterable
+                size="small"
+                style="flex: 1"
+                @update:value="(val: any) => setUploadAttrValue(attr.attribute_id, val)"
+              />
+              <!-- 布尔类型 -->
+              <n-switch
+                v-else-if="attr.type === 'Boolean'"
+                :value="!!getUploadAttrValue(attr.attribute_id)"
+                size="small"
+                @update:value="(val: boolean) => setUploadAttrValue(attr.attribute_id, val)"
+              />
+              <!-- 数值类型 -->
+              <n-input-number
+                v-else-if="attr.type === 'Integer' || attr.type === 'Decimal'"
+                :value="getUploadAttrValue(attr.attribute_id)"
+                size="small"
+                style="flex: 1"
+                @update:value="(val: any) => setUploadAttrValue(attr.attribute_id, val)"
+              />
+              <!-- 字符串/日期等: 文本输入 -->
+              <n-input
+                v-else
+                :value="getUploadAttrValue(attr.attribute_id)"
+                size="small"
+                :placeholder="attr.description || '请输入'"
+                style="flex: 1"
+                @update:value="(val: string) => setUploadAttrValue(attr.attribute_id, val)"
+              />
+            </div>
+            <n-button v-if="uploadAttrs.length > 5" quaternary size="tiny" @click="uploadAttrsExpanded = !uploadAttrsExpanded">
+              {{ uploadAttrsExpanded ? '收起' : `展开全部 (${uploadAttrs.length})` }}
+            </n-button>
+          </n-space>
+        </n-form-item>
+
+        <!-- ── 价格 ── -->
+        <n-form-item label="定价 (₽)">
+          <n-space vertical :size="8" style="width: 100%">
+            <n-grid :cols="2" :x-gap="8">
+              <n-gi>
+                <div style="font-size: 12px; color: #999; margin-bottom: 2px">人民币进价 (¥)</div>
+                <n-input-number v-model:value="uploadForm.price_cny" :min="0" size="small" style="width: 100%" @update:value="calcUploadPrice" />
+              </n-gi>
+              <n-gi>
+                <div style="font-size: 12px; color: #999; margin-bottom: 2px">目标售价 (₽)</div>
+                <n-input-number v-model:value="uploadForm.price_rub" :min="0" size="small" style="width: 100%" />
+              </n-gi>
+            </n-grid>
+            <n-grid :cols="3" :x-gap="8">
+              <n-gi>
+                <div style="font-size: 12px; color: #999; margin-bottom: 2px">汇率</div>
+                <n-input-number v-model:value="uploadForm.exchange_rate" :min="1" :step="0.5" size="small" style="width: 100%" @update:value="calcUploadPrice" />
+              </n-gi>
+              <n-gi>
+                <div style="font-size: 12px; color: #999; margin-bottom: 2px">加价倍率</div>
+                <n-input-number v-model:value="uploadForm.markup_factor" :min="1" :step="0.1" size="small" style="width: 100%" @update:value="calcUploadPrice" />
+              </n-gi>
+              <n-gi>
+                <div style="font-size: 12px; color: #999; margin-bottom: 2px">佣金 %</div>
+                <n-input-number v-model:value="uploadForm.commission_pct" :min="0" :max="100" :step="1" size="small" style="width: 100%" @update:value="calcUploadPrice" />
+              </n-gi>
+            </n-grid>
+            <n-grid :cols="2" :x-gap="8">
+              <n-gi>
+                <div style="font-size: 12px; color: #999; margin-bottom: 2px">物流 (₽)</div>
+                <n-input-number v-model:value="uploadForm.logistics_rub" :min="0" size="small" style="width: 100%" @update:value="calcUploadPrice" />
+              </n-gi>
+              <n-gi>
+                <div style="font-size: 12px; color: #999; margin-bottom: 2px">包装 (₽)</div>
+                <n-input-number v-model:value="uploadForm.packaging_rub" :min="0" size="small" style="width: 100%" @update:value="calcUploadPrice" />
+              </n-gi>
+            </n-grid>
+            <n-alert v-if="priceCalcResult" type="success" size="small" style="margin: 0">
+              <n-space :size="16">
+                <span>进价 <strong>₽{{ priceCalcResult.cost_rub }}</strong></span>
+                <span>加价后 <strong>₽{{ priceCalcResult.markup_price_rub }}</strong></span>
+                <span>佣金 <strong>₽{{ priceCalcResult.commission_rub }}</strong></span>
+                <span>最终 <strong style="color: #d03050; font-size: 15px">₽{{ priceCalcResult.final_price_rub }}</strong></span>
+              </n-space>
+            </n-alert>
+          </n-space>
+        </n-form-item>
+
+        <!-- ── 物流规格 ── -->
+        <n-form-item label="物流规格">
+          <n-grid :cols="4" :x-gap="8">
+            <n-gi>
+              <div style="font-size: 12px; color: #999; margin-bottom: 2px">重量 (g)</div>
+              <n-input-number v-model:value="uploadForm.weight_g" :min="0" size="small" style="width: 100%" />
+            </n-gi>
+            <n-gi>
+              <div style="font-size: 12px; color: #999; margin-bottom: 2px">高 (mm)</div>
+              <n-input-number v-model:value="uploadForm.height_mm" :min="0" size="small" style="width: 100%" />
+            </n-gi>
+            <n-gi>
+              <div style="font-size: 12px; color: #999; margin-bottom: 2px">深 (mm)</div>
+              <n-input-number v-model:value="uploadForm.depth_mm" :min="0" size="small" style="width: 100%" />
+            </n-gi>
+            <n-gi>
+              <div style="font-size: 12px; color: #999; margin-bottom: 2px">宽 (mm)</div>
+              <n-input-number v-model:value="uploadForm.width_mm" :min="0" size="small" style="width: 100%" />
+            </n-gi>
+          </n-grid>
+        </n-form-item>
+
+        <!-- ── Offer ID ── -->
+        <n-form-item label="Offer ID">
+          <n-input v-model:value="uploadForm.offer_id" placeholder="留空自动生成" />
+        </n-form-item>
+
+      </n-form>
+    </n-spin>
+
     <template #footer>
       <n-space justify="end">
         <n-button @click="uploadVisible = false">取消</n-button>
-        <n-button type="primary" :loading="uploading" @click="doUpload">上传</n-button>
+        <n-button type="primary" :loading="uploading" :disabled="!uploadForm.store_id || !uploadForm.description_category_id" @click="doUpload">上传到 Ozon</n-button>
       </n-space>
     </template>
   </n-modal>
@@ -577,6 +745,7 @@ const activeTab = ref("scrape");
 // ── state ─────────────────────────────────────────────────────────
 const loading = ref(false);
 const products = ref<any[]>([]);
+const selectedKeys = ref<number[]>([]);
 const totalCount = ref(0);
 const currentPage = ref(1);
 const pageSize = ref(20);
@@ -614,12 +783,37 @@ const drawerSaving = ref(false);
 const detailProduct = ref<any>(null);
 const originalProduct = ref<any>(null);  // 快照：用于区分原始值 vs 已修改值
 
-// ── upload modal state ────────────────────────────────────────────
+// ── upload state ──────────────────────────────────────────────────
 const uploadVisible = ref(false);
 const uploading = ref(false);
 const uploadProduct = ref<any>(null);
-const uploadForm = reactive({ store_id: null as number | null, offer_id: "" });
+const uploadForm = reactive({
+  store_id: null as number | null,
+  offer_id: "",
+  description_category_id: null as number | null,
+  type_id: null as number | null,
+  attributes: [] as { attribute_id: number; values: any[] }[],
+  price_rub: null as number | null,
+  price_cny: null as number | null,
+  exchange_rate: 12.5,
+  markup_factor: 1.5,
+  commission_pct: 10,
+  logistics_rub: 0,
+  packaging_rub: 0,
+  weight_g: null as number | null,
+  height_mm: null as number | null,
+  depth_mm: null as number | null,
+  width_mm: null as number | null,
+});
 const storeOptions = ref<SelectOption[]>([]);
+const uploadCatLoading = ref(false);
+const categoryTreeRaw = ref<any[]>([]);
+const filteredCategoryTree = ref<any[]>([]);
+const categorySearchText = ref("");
+const categorySelectedKeys = ref<number[]>([]);
+const uploadAttrs = ref<any[]>([]);
+const uploadAttrsExpanded = ref(false);
+const priceCalcResult = ref<any>(null);
 
 // ── precision editor state ────────────────────────────────────────
 const precisionMode = ref("copy_ozon");
@@ -737,11 +931,24 @@ function actionsSlot(row: any) {
     h(NButton, { size: "tiny", secondary: true, type: "primary", onClick: () => goToPrecision(row), style: "padding: 0 6px" }, () => "详情"),
     h(NButton, { size: "tiny", secondary: true, onClick: () => openDrawer(row), style: "padding: 0 6px" }, () => "编辑"),
     h(NButton, { size: "tiny", secondary: true, type: "info", onClick: () => openUpload(row), style: "padding: 0 6px" }, () => "上传"),
+    h(
+      NPopconfirm,
+      { onPositiveClick: () => deleteSingleProduct(row.id) },
+      {
+        trigger: () => h(NButton, { size: "tiny", secondary: true, type: "error", style: "padding: 0 6px" }, () => "删除"),
+        default: () => "确定删除该商品？",
+      }
+    ),
   ]);
 }
 
 // ── columns ───────────────────────────────────────────────────────
 const columns: DataTableColumns<any> = [
+  {
+    type: "selection",
+    width: 40,
+    fixed: "left" as const,
+  },
   { title: "图片", key: "images", width: 64, render: imageSlot, fixed: "left" as const },
   { title: "商品名称", key: "title", minWidth: 260, render: nameSlot, ellipsis: { tooltip: true } },
   { title: "品牌", key: "brand", width: 110, render: (row) => h(NTag, { type: brandTagType(row.brand), size: "small", bordered: false }, () => row.brand || "\u2014") },
@@ -749,7 +956,7 @@ const columns: DataTableColumns<any> = [
   { title: "评分", key: "rating", width: 110, render: ratingSlot },
   { title: "属性", key: "attributes", minWidth: 260, render: attrsSlot },
   { title: "分类", key: "category", width: 140, render: (row) => h("span", { style: "font-size: 12px; color: #999" }, truncateText(row.category || "", 30)) },
-  { title: "操作", key: "actions", width: 160, render: actionsSlot, fixed: "right" as const },
+  { title: "操作", key: "actions", width: 210, render: actionsSlot, fixed: "right" as const },
 ];
 
 // ── drawer ────────────────────────────────────────────────────────
@@ -836,10 +1043,39 @@ async function handleDelete() {
 }
 
 // ── upload ────────────────────────────────────────────────────────
-function openUpload(row: any) {
-  uploadProduct.value = row;
+function resetUploadForm() {
   uploadForm.store_id = null;
   uploadForm.offer_id = "";
+  uploadForm.description_category_id = null;
+  uploadForm.type_id = null;
+  uploadForm.attributes = [];
+  uploadForm.price_rub = null;
+  uploadForm.price_cny = null;
+  uploadForm.exchange_rate = 12.5;
+  uploadForm.markup_factor = 1.5;
+  uploadForm.commission_pct = 10;
+  uploadForm.logistics_rub = 0;
+  uploadForm.packaging_rub = 0;
+  uploadForm.weight_g = null;
+  uploadForm.height_mm = null;
+  uploadForm.depth_mm = null;
+  uploadForm.width_mm = null;
+  categoryTreeRaw.value = [];
+  filteredCategoryTree.value = [];
+  categorySearchText.value = "";
+  categorySelectedKeys.value = [];
+  uploadAttrs.value = [];
+  priceCalcResult.value = null;
+}
+
+function openUpload(row: any) {
+  uploadProduct.value = row;
+  resetUploadForm();
+  // Pre-fill physical specs from product if available
+  if (row.weight) uploadForm.weight_g = row.weight;
+  if (row.width) uploadForm.width_mm = row.width;
+  if (row.height) uploadForm.height_mm = row.height;
+  if (row.depth) uploadForm.depth_mm = row.depth;
   uploadVisible.value = true;
   loadStores();
 }
@@ -851,15 +1087,146 @@ async function loadStores() {
   } catch { /* ignore */ }
 }
 
+/** When store is selected, load category tree */
+async function onUploadStoreChange(storeId: number | null) {
+  if (!storeId) return;
+  categoryTreeRaw.value = [];
+  filteredCategoryTree.value = [];
+  uploadForm.description_category_id = null;
+  uploadForm.type_id = null;
+  uploadAttrs.value = [];
+  categorySelectedKeys.value = [];
+  uploadCatLoading.value = true;
+  try {
+    const tree = await apiGet("/selection/ozon-categories", { store_id: storeId });
+    categoryTreeRaw.value = tree;
+    filteredCategoryTree.value = tree;
+  } catch (e: any) {
+    message.warning("加载分类失败: " + e.message);
+  } finally {
+    uploadCatLoading.value = false;
+  }
+}
+
+/** Filter category tree by search text */
+function filterCategoryTree(val: string) {
+  if (!val || !val.trim()) {
+    filteredCategoryTree.value = categoryTreeRaw.value;
+    return;
+  }
+  const q = val.toLowerCase();
+  function filterNodes(nodes: any[]): any[] {
+    return nodes
+      .filter((n) => {
+        const titleMatch = (n.title || "").toLowerCase().includes(q);
+        const childMatch = n.children && filterNodes(n.children).length > 0;
+        return titleMatch || childMatch;
+      })
+      .map((n) => {
+        if (n.children) {
+          return { ...n, children: filterNodes(n.children) };
+        }
+        return n;
+      });
+  }
+  filteredCategoryTree.value = filterNodes(categoryTreeRaw.value);
+}
+
+/** When a leaf category is selected, load its attributes */
+async function onCategorySelect(keys: number[]) {
+  if (!keys.length || !uploadForm.store_id) return;
+  const catId = keys[0];
+  categorySelectedKeys.value = keys;
+  uploadForm.description_category_id = catId;
+  uploadForm.type_id = null;
+  uploadAttrs.value = [];
+
+  try {
+    const attrs = await apiGet("/selection/ozon-attributes", {
+      store_id: uploadForm.store_id,
+      description_category_id: catId,
+    });
+    uploadAttrs.value = attrs;
+    // Collect type_ids from attributes if present
+    const typeIds = new Set<number>();
+    for (const a of attrs) {
+      if (a.type_id) typeIds.add(a.type_id);
+    }
+    if (typeIds.size === 1) {
+      uploadForm.type_id = [...typeIds][0];
+    }
+    // Initialize attribute values
+    uploadForm.attributes = attrs
+      .filter((a: any) => a.is_required || a.default_value)
+      .map((a: any) => ({
+        attribute_id: a.attribute_id,
+        values: a.default_value ? [a.default_value] : [],
+      }));
+  } catch (e: any) {
+    message.warning("加载属性失败: " + e.message);
+  }
+}
+
+/** Get attribute value for upload form */
+function getUploadAttrValue(attrId: number): any {
+  const found = uploadForm.attributes.find((a) => a.attribute_id === attrId);
+  return found ? found.values[0] ?? null : null;
+}
+
+/** Set attribute value in upload form */
+function setUploadAttrValue(attrId: number, val: any) {
+  const existing = uploadForm.attributes.find((a) => a.attribute_id === attrId);
+  if (existing) {
+    existing.values = val !== null && val !== undefined ? [val] : [];
+  } else {
+    uploadForm.attributes.push({ attribute_id: attrId, values: val !== null && val !== undefined ? [val] : [] });
+  }
+}
+
+/** Calculate price from CNY input */
+function calcUploadPrice() {
+  const cny = uploadForm.price_cny;
+  if (!cny) { priceCalcResult.value = null; return; }
+  const rate = uploadForm.exchange_rate || 12.5;
+  const markup = uploadForm.markup_factor || 1.5;
+  const comm = (uploadForm.commission_pct || 10) / 100;
+  const logi = uploadForm.logistics_rub || 0;
+  const pack = uploadForm.packaging_rub || 0;
+
+  const costRub = Math.round(cny * rate);
+  const markupPrice = Math.round(costRub * markup);
+  const commission = Math.round(markupPrice * comm);
+  const finalPrice = Math.round(markupPrice + commission + logi + pack);
+
+  priceCalcResult.value = {
+    cost_rub: costRub,
+    markup_price_rub: markupPrice,
+    commission_rub: commission,
+    final_price_rub: finalPrice,
+  };
+  uploadForm.price_rub = finalPrice;
+}
+
 async function doUpload() {
   if (!uploadForm.store_id) { message.warning("请选择店铺"); return; }
+  if (!uploadForm.description_category_id) { message.warning("请选择Ozon分类"); return; }
+  if (!uploadForm.price_rub) { message.warning("请设置价格"); return; }
   uploading.value = true;
   try {
     await apiPost(`/selection/products/${uploadProduct.value.id}/upload`, {
       store_id: uploadForm.store_id,
-      offer_id: uploadForm.offer_id,
+      offer_id: uploadForm.offer_id || undefined,
+      description_category_id: uploadForm.description_category_id,
+      type_id: uploadForm.type_id || undefined,
+      attributes: uploadForm.attributes.filter((a) => a.values.length > 0),
+      price_rub: uploadForm.price_rub,
+      old_price_rub: undefined,
+      weight_g: uploadForm.weight_g || undefined,
+      height_mm: uploadForm.height_mm || undefined,
+      depth_mm: uploadForm.depth_mm || undefined,
+      width_mm: uploadForm.width_mm || undefined,
     });
-    message.success("上传成功");
+    message.success("上传任务已提交，请在 Ozon 后台查看状态");
     uploadVisible.value = false;
   } catch (e: any) {
     message.error("上传失败: " + e.message);
@@ -922,6 +1289,30 @@ function resetFilters() {
 
 function onPageChange(page: number) { currentPage.value = page; loadProducts(); }
 function onPageSizeChange(size: number) { pageSize.value = size; currentPage.value = 1; loadProducts(); }
+
+// ── 删除 ───────────────────────────────────────────────────────
+async function deleteSingleProduct(id: number) {
+  try {
+    await apiDelete(`/selection/products/${id}`);
+    message.success("删除成功");
+    selectedKeys.value = selectedKeys.value.filter((k) => k !== id);
+    loadProducts();
+  } catch (e: any) {
+    message.error("删除失败: " + e.message);
+  }
+}
+
+async function batchDeleteProducts() {
+  if (selectedKeys.value.length === 0) return;
+  try {
+    const res = await apiPost(`/selection/products/batch-delete`, { ids: [...selectedKeys.value] });
+    message.success(`成功删除 ${res.deleted} 个商品`);
+    selectedKeys.value = [];
+    loadProducts();
+  } catch (e: any) {
+    message.error("批量删除失败: " + e.message);
+  }
+}
 
 // ── precision editor methods ──────────────────────────────────────
 

@@ -297,6 +297,28 @@
                 <n-input-number v-model:value="form.depth" :min="0" placeholder="深" style="width: 100px;" />
               </n-space>
             </n-form-item>
+            <!-- Ozon 分类选择 -->
+            <n-form-item label="Ozon 分类">
+              <n-space vertical :size="4" style="width: 100%">
+                <n-input
+                  v-model:value="categorySearchText"
+                  placeholder="搜索分类..."
+                  size="small"
+                  clearable
+                  @update:value="filterCategoryTree"
+                />
+                <n-tree
+                  :data="filteredCategoryTree"
+                  :default-expand-all="false"
+                  :selectable="true"
+                  v-model:selected-keys="categorySelectedKeys"
+                  :on-update:selected-keys="onCategorySelect"
+                  cascade
+                  :leaf-only="true"
+                  style="max-height: 200px; overflow-y: auto; border: 1px solid #e0e0e0; border-radius: 4px; padding: 4px;"
+                />
+              </n-space>
+            </n-form-item>
           </n-form>
         </n-card>
       </div>
@@ -345,6 +367,15 @@
           >
             {{ editingTask ? '保存修改' : '创建任务' }}
           </n-button>
+          <n-button
+            v-if="currentStep === 4 && editingTask"
+            type="success"
+            size="small"
+            :loading="submittingToOzon"
+            @click="submitToOzon"
+          >
+            🚀 提交到 Ozon
+          </n-button>
         </n-space>
       </template>
     </n-modal>
@@ -352,11 +383,11 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, computed, onMounted, h } from "vue";
+import { ref, reactive, computed, onMounted, watch, h } from "vue";
 import {
   NButton, NTag, NSpace, NInput, NSelect, NDataTable, NH2, NCard, NModal,
   NSteps, NStep, NForm, NFormItem, NInputNumber, NDescriptions, NDescriptionsItem,
-  NAlert, NStatistic, NRadioGroup, NRadio, useMessage,
+  NAlert, NStatistic, NRadioGroup, NRadio, NTree, useMessage,
 } from "naive-ui";
 import type { DataTableColumns } from "naive-ui";
 import { useAppStore } from "../store";
@@ -384,6 +415,15 @@ const scrapeUrl = ref("");
 const scraping = ref(false);
 const scrapeError = ref("");
 const sourceProductData = ref<any>(null);
+
+// ── category tree state ──────────────────────────────────────────
+const categoryTreeRaw = ref<any[]>([]);
+const filteredCategoryTree = ref<any[]>([]);
+const categorySearchText = ref("");
+const categorySelectedKeys = ref<number[]>([]);
+
+// ── submit to Ozon state ─────────────────────────────────────────
+const submittingToOzon = ref(false);
 
 const form = reactive({
   mode: "copy_ozon",
@@ -582,6 +622,10 @@ function showEditDialog(task: any) {
     sourceId: task.source_sku || "",
   };
   dialogVisible.value = true;
+  // Load category tree if store is set
+  if (form.store_id) {
+    loadCategoryTree();
+  }
 }
 
 async function scrapeProduct() {
@@ -726,6 +770,137 @@ async function saveTask() {
     message.error(e.message || "保存失败");
   } finally {
     saving.value = false;
+  }
+}
+
+// ── category tree helpers ─────────────────────────────────────────
+async function loadCategoryTree(parentId = 0) {
+  if (!form.store_id) return;
+  try {
+    const store = appStore.stores.find((s: any) => s.id === form.store_id);
+    if (!store) return;
+    const data = await apiGet(`/selection/stores/${store.id}/category-tree?category_id=${parentId}`);
+    const items = (data.items || []).map((c: any) => ({
+      key: c.category_id,
+      label: `${c.title} (${c.category_id})`,
+      category_id: c.category_id,
+      category_name: c.title,
+      children: [],
+      isLeaf: c.is_variant === true || c.type_count === 0,
+    }));
+    if (parentId === 0) {
+      categoryTreeRaw.value = items;
+      filteredCategoryTree.value = items;
+    }
+    return items;
+  } catch {
+    return [];
+  }
+}
+
+async function expandCategoryNode(node: any) {
+  if (node.children && node.children.length > 0) return;
+  const kids = await loadCategoryTree(node.key);
+  if (kids && kids.length) {
+    node.children = kids;
+    // Force reactivity
+    categoryTreeRaw.value = [...categoryTreeRaw.value];
+  }
+}
+
+function filterCategoryTree() {
+  const q = (categorySearchText.value || "").toLowerCase().trim();
+  if (!q) {
+    filteredCategoryTree.value = categoryTreeRaw.value;
+    return;
+  }
+  function matchNodes(nodes: any[]): any[] {
+    return nodes
+      .filter((n) => n.label.toLowerCase().includes(q) || (n.children && matchNodes(n.children).length))
+      .map((n) => ({
+        ...n,
+        children: n.children ? matchNodes(n.children) : [],
+      }));
+  }
+  filteredCategoryTree.value = matchNodes(categoryTreeRaw.value);
+}
+
+function onCategorySelect(keys: number[]) {
+  if (!keys || keys.length === 0) return;
+  const catId = keys[0];
+  function findNode(nodes: any[]): any {
+    for (const n of nodes) {
+      if (n.category_id === catId) return n;
+      if (n.children) {
+        const found = findNode(n.children);
+        if (found) return found;
+      }
+    }
+    return null;
+  }
+  const node = findNode(categoryTreeRaw.value);
+  if (node) {
+    form.category_id = node.category_id;
+    form.category_name = node.category_name;
+    if (node.isLeaf) {
+      // Auto-expand leaf children (get type list)
+      expandCategoryNode(node);
+    }
+  }
+}
+
+// Watch store_id to reload category tree
+watch(() => form.store_id, async (newVal) => {
+  if (newVal && dialogVisible.value && currentStep.value >= 3) {
+    categoryTreeRaw.value = [];
+    filteredCategoryTree.value = [];
+    categorySearchText.value = "";
+    categorySelectedKeys.value = [];
+    await loadCategoryTree();
+  }
+});
+
+// ── submit to Ozon ────────────────────────────────────────────────
+async function submitToOzon() {
+  if (!editingTask.value) {
+    message.error("请先保存任务");
+    return;
+  }
+  if (!form.category_id) {
+    message.error("请先选择 Ozon 分类");
+    return;
+  }
+  submittingToOzon.value = true;
+  try {
+    let attributes: any[] = [];
+    try {
+      attributes = JSON.parse(form.translated_attributes || "[]");
+    } catch { attributes = []; }
+
+    const payload: any = {
+      description_category_id: form.category_id,
+      type_id: form.type_id,
+      attributes,
+      price_rub: form.priceNum,
+      old_price_rub: form.oldPriceNum || undefined,
+      weight_g: form.weight || undefined,
+      height_mm: form.height || undefined,
+      depth_mm: form.depth || undefined,
+      width_mm: form.width || undefined,
+      offer_id: `PL-${editingTask.value.id}-${form.source_sku}`,
+    };
+
+    const result = await apiPost(`/precision-listing/${editingTask.value.id}/submit`, payload);
+
+    submitResult.value = { ok: true, message: result.message || "提交成功" };
+    form.status = "submitted";
+    message.success("已提交到 Ozon");
+    await loadTasks();
+  } catch (e: any) {
+    submitResult.value = { ok: false, message: e.message || "提交失败" };
+    message.error(e.message || "提交失败");
+  } finally {
+    submittingToOzon.value = false;
   }
 }
 

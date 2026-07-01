@@ -167,14 +167,18 @@ async function runListScraping(
   const allItems: ListCard1688[] = []
   let lastHeight = 0
   let staleCount = 0
-  const maxStale = 5 // 连续5次滚动无新内容则尝试翻页
+  const maxStale = 3 // 连续3次滚动无新内容则翻页
   let totalCreated = restored?.totalCreated || 0
   let totalSkipped = restored?.totalSkipped || 0
   let pageCount = restored?.pageCount || 1
+  let scrollCount = 0
+  const maxScrolls = 30 // 单页硬性滚动上限
+  let noNewDataCount = 0
+  const maxNoNewData = 3 // 连续3次扫描无新数据则停止
 
   console.log(`[Auto-Ozon] 1688 列表采集开始 (maxItems=${maxItems}, 恢复自第${pageCount}页, 已有${seen.size}个已知ID)`)
 
-  while (allItems.length < maxItems && !stopListScraping) {
+  while (seen.size < maxItems && !stopListScraping && scrollCount < maxScrolls) {
     // 采集当前可见商品
     const items = scan1688ListCards()
     let newCount = 0
@@ -183,7 +187,15 @@ async function runListScraping(
       seen.add(item.sourceId)
       allItems.push(item)
       newCount++
-      if (allItems.length >= maxItems) break
+      if (seen.size >= maxItems) break
+    }
+
+    // 空扫计数器: 连续无新数据则停止
+    if (newCount === 0) {
+      noNewDataCount++
+      console.log(`[Auto-Ozon] 1688 无新数据 (${noNewDataCount}/${maxNoNewData})`)
+    } else {
+      noNewDataCount = 0
     }
 
     // 通知 popup 进度
@@ -191,19 +203,19 @@ async function runListScraping(
       browser.runtime.sendMessage({
         action: 'scrapingProgress',
         platform: '1688',
-        current: allItems.length,
+        current: seen.size,
         total: maxItems,
         newCount,
       })
     } catch { /* popup 未打开 */ }
 
-    if (allItems.length >= maxItems) break
+    if (seen.size >= maxItems || noNewDataCount >= maxNoNewData) break
 
+
+    scrollCount++
 
     // 滚动加载更多
-    // 增量滚动: 每次滚动窗口高度的 60%,触发懒加载
     const scrollStep = Math.max(window.innerHeight * 0.6, 400)
-    const currentPos = window.scrollY
     window.scrollBy({ top: scrollStep, behavior: 'smooth' })
     await new Promise((r) => setTimeout(r, scrollDelay))
 
@@ -223,9 +235,8 @@ async function runListScraping(
     }
 
     // 当前页滚动到底且无新内容 → 保存状态并翻页
-    // 必须有采集到数据才翻页，0条数据说明采集失败，不应翻页
-    if (staleCount >= maxStale && allItems.length > 0 && allItems.length < maxItems) {
-      // 先把当前页采集的数据同步到后端
+    if (staleCount >= maxStale && seen.size > 0 && seen.size < maxItems) {
+      // 翻页前先把当前页采集的数据同步到后端
       if (allItems.length > 0) {
         const products: ScrapedProduct[] = allItems.map((item) => ({
           platform: '1688' as const,
@@ -319,7 +330,7 @@ async function runListScraping(
       })
       totalCreated += result?.created || 0
       totalSkipped += result?.skipped || 0
-      console.log(`[Auto-Ozon] 1688 批量同步: ${allItems.length} 件, 同步: ${result?.created || 0} 件`)
+      console.log(`[Auto-Ozon] 1688 批量同步: ${seen.size} 件(本次${allItems.length}), 同步: ${result?.created || 0} 件`)
     } catch (e) {
       console.error('[Auto-Ozon] 1688 列表采集同步失败:', e)
     }
@@ -330,8 +341,8 @@ async function runListScraping(
     browser.runtime.sendMessage({
       action: 'scrapingProgress',
       platform: '1688',
-      current: allItems.length,
-      total: allItems.length,
+      current: seen.size,
+      total: maxItems,
       created: totalCreated,
       skipped: totalSkipped,
       newCount: 0,

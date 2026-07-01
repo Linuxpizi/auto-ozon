@@ -100,6 +100,13 @@ class ScrapedProductRead(ScrapedProductBase):
     synced: bool = True
     matched: bool = False
     matched_suppliers: List[Any] = []
+    # ── Ozon 上架相关 ──
+    ozon_category_id: int = 0
+    ozon_type_id: int = 0
+    ozon_product_id: int = 0
+    upload_status: str = "not_uploaded"
+    upload_task_id: str = ""
+    offer_id: str = ""
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
 

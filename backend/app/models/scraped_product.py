@@ -36,6 +36,12 @@ class ScrapedProductRecord(Base):
     # ── Ozon 内部分类 ──
     ozon_category_id = Column(Integer, default=0, comment="Ozon description_category_id")
     ozon_type_id = Column(Integer, default=0, comment="Ozon type_id")
+    ozon_product_id = Column(Integer, default=0, comment="Ozon product_id (上架后获得)")
+
+    # ── 上架状态 ──
+    upload_status = Column(String(32), default="not_uploaded", comment="not_uploaded|pending|uploading|success|failed")
+    upload_task_id = Column(String(64), default="", comment="Ozon import task ID")
+    offer_id = Column(String(128), default="", comment="卖家自定义 SKU (offer_id)")
 
     # ── 1688 专用字段 ──
     price_ranges = Column(JSON, default=list, comment="阶梯价格 [{minQty, maxQty, price}]")

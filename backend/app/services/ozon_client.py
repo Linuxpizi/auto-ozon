@@ -1120,3 +1120,250 @@ class OzonClient:
             json_body={"action_id": action_id, "product_ids": product_ids},
         )
         return data
+
+    # ------------------------------------------------------------------
+    # Product API — Category Tree & Attributes
+    # ------------------------------------------------------------------
+
+    def get_category_tree(
+        self,
+        category_id: int = 0,
+        language: str = "DEFAULT",
+    ) -> list[dict]:
+        """Get Ozon description category tree.
+
+        POST /v1/description-category/tree
+        https://docs.ozon.ru/api/seller/zh/#tag/ProductAPI/operation/DescriptionCategoryTree
+
+        Args:
+            category_id: Parent category ID (0 for root).
+            language: Language code. 'DEFAULT' for Russian.
+
+        Returns:
+            List of category dicts with keys: category_id, category_name, children, etc.
+        """
+        payload: dict[str, Any] = {
+            "language": language,
+            "category_id": category_id,
+        }
+        data = self._request(
+            "POST", "/v1/description-category/tree",
+            json_body=payload,
+        )
+        return data.get("result", [])
+
+    def get_category_attributes(
+        self,
+        description_category_id: int,
+        type_id: int = 0,
+        language: str = "DEFAULT",
+    ) -> list[dict]:
+        """Get required/optional attributes for a description category.
+
+        POST /v1/description-category/attribute
+        https://docs.ozon.ru/api/seller/zh/#tag/ProductAPI/operation/DescriptionCategoryAttribute
+
+        Args:
+            description_category_id: The description_category_id from the tree.
+            type_id: The type_id within the category (0 for all types).
+            language: Language code.
+
+        Returns:
+            List of attribute dicts with keys: id, name, description_attribute_id,
+            type, is_collection, is_required, dictionary_id, etc.
+        """
+        payload: dict[str, Any] = {
+            "description_category_id": description_category_id,
+            "language": language,
+        }
+        if type_id:
+            payload["type_id"] = type_id
+        data = self._request(
+            "POST", "/v1/description-category/attribute",
+            json_body=payload,
+        )
+        return data.get("result", [])
+
+    def get_category_attribute_values(
+        self,
+        description_category_id: int,
+        attribute_id: int,
+        type_id: int = 0,
+        language: str = "DEFAULT",
+        last_value_id: int = 0,
+        limit: int = 100,
+    ) -> list[dict]:
+        """Get dictionary values for a specific category attribute.
+
+        POST /v1/description-category/attribute/values
+
+        Useful when an attribute has type="Dictionary" — you need the
+        dictionary_value_id to submit in the product import payload.
+
+        Args:
+            description_category_id: The description_category_id.
+            attribute_id: The attribute ID to look up values for.
+            type_id: Optional type_id filter.
+            language: Language code.
+            last_value_id: Pagination cursor.
+            limit: Max values to return.
+
+        Returns:
+            List of value dicts with keys: value_id, value, etc.
+        """
+        payload: dict[str, Any] = {
+            "description_category_id": description_category_id,
+            "attribute_id": attribute_id,
+            "language": language,
+            "last_value_id": last_value_id,
+            "limit": limit,
+        }
+        if type_id:
+            payload["type_id"] = type_id
+        data = self._request(
+            "POST", "/v1/description-category/attribute/values",
+            json_body=payload,
+        )
+        return data.get("result", [])
+
+    # ------------------------------------------------------------------
+    # Product API — Import & Status
+    # ------------------------------------------------------------------
+
+    def import_products(self, items: list[dict]) -> dict:
+        """Create or update products via POST /v3/product/import.
+
+        This is the main product upload endpoint. Each item should contain:
+            - offer_id: Your unique SKU identifier
+            - name: Product title
+            - description_category_id: Ozon category ID
+            - type_id: Ozon type ID within the category
+            - attributes: List of attribute dicts [{complex_id, id, values}]
+            - price: Price in kopecks (amount × 100)
+            - images: List of image URLs
+            - weight, height, depth, width: Dimensions
+            - status: 'processed' to auto-publish
+
+        Returns:
+            Dict with 'result' containing task_ids for async processing.
+        """
+        data = self._request(
+            "POST", "/v3/product/import",
+            json_body={"items": items},
+        )
+        return data
+
+    def get_import_tasks_status(
+        self,
+        task_ids: list[int],
+    ) -> list[dict]:
+        """Check status of product import tasks.
+
+        POST /v1/product/import/info
+
+        Args:
+            task_ids: List of task IDs returned by import_products.
+
+        Returns:
+            List of task status dicts with keys: task_id, status, last_updated, etc.
+        """
+        data = self._request(
+            "POST", "/v1/product/import/info",
+            json_body={"task_id": task_ids},
+        )
+        return data.get("result", [])
+
+    def get_product_list_by_task_id(
+        self,
+        task_id: int,
+        last_id: int = 0,
+        limit: int = 100,
+    ) -> list[dict]:
+        """Get product info from an import task.
+
+        POST /v1/product/import/info/list
+
+        Args:
+            task_id: Task ID from import_products response.
+            last_id: Pagination cursor (last product_id).
+            limit: Max results.
+
+        Returns:
+            List of product info dicts.
+        """
+        data = self._request(
+            "POST", "/v1/product/import/info/list",
+            json_body={
+                "task_id": task_id,
+                "last_id": last_id,
+                "limit": limit,
+            },
+        )
+        return data.get("result", {}).get("items", [])
+
+    def archive_product(self, product_ids: list[int]) -> dict:
+        """Archive products.
+
+        POST /v1/product/archive
+        """
+        data = self._request(
+            "POST", "/v1/product/archive",
+            json_body={"product_id": product_ids},
+        )
+        return data
+
+    def unarchive_product(self, product_ids: list[int]) -> dict:
+        """Unarchive products.
+
+        POST /v1/product/unarchive
+        """
+        data = self._request(
+            "POST", "/v1/product/unarchive",
+            json_body={"product_id": product_ids},
+        )
+        return data
+
+    def get_product_attributes(
+        self,
+        product_id: int = 0,
+        offer_id: str = "",
+        limit: int = 100,
+        last_attribute_id: int = 0,
+    ) -> list[dict]:
+        """Get attributes for a specific product.
+
+        POST /v3/products/info/attributes
+
+        Args:
+            product_id: Ozon product ID (use either this or offer_id).
+            offer_id: Your SKU identifier (use either this or product_id).
+            limit: Max attributes to return.
+            last_attribute_id: Pagination cursor.
+
+        Returns:
+            List of attribute dicts.
+        """
+        payload: dict[str, Any] = {
+            "limit": limit,
+            "last_attribute_id": last_attribute_id,
+        }
+        if product_id:
+            payload["filter"] = {"product_id": [product_id]}
+        elif offer_id:
+            payload["filter"] = {"offer_id": [offer_id]}
+        data = self._request(
+            "POST", "/v3/products/info/attributes",
+            json_body=payload,
+        )
+        return data.get("result", {}).get("items", [])
+
+    def delete_product(self, product_ids: list[int]) -> dict:
+        """Delete products (FBS only).
+
+        POST /v1/product/delete
+        """
+        data = self._request(
+            "POST", "/v1/product/delete",
+            json_body={"product_id": product_ids},
+        )
+        return data

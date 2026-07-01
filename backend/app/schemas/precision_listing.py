@@ -1,6 +1,6 @@
 from datetime import datetime
 from pydantic import BaseModel
-from typing import Optional
+from typing import Optional, List
 
 
 class PrecisionListingBase(BaseModel):
@@ -111,6 +111,21 @@ class SyncImportedRequest(BaseModel):
 class ScrapeRequest(BaseModel):
     """Mode B: Scrape product data from an external platform URL."""
     url: str
+
+
+class SubmitToOzonRequest(BaseModel):
+    """Request to submit a precision listing task to Ozon as a new product."""
+    description_category_id: int = 0
+    type_id: int = 0
+    attributes: List[dict] = []
+    price_rub: Optional[float] = None
+    old_price_rub: Optional[float] = None
+    weight_g: Optional[int] = None
+    height_mm: Optional[int] = None
+    depth_mm: Optional[int] = None
+    width_mm: Optional[int] = None
+    barcode: str = ""
+    offer_id: str = ""
 
 
 class ScrapeResponse(BaseModel):

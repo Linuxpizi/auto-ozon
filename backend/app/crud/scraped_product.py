@@ -57,9 +57,12 @@ def create_scraped_product(db: Session, product: ScrapedProductCreate) -> Scrape
 
 
 def _is_enriched(new_val, old_val, field_type="str"):
-    """判断新值是否比旧值更'丰富' —— 非空/非零/非空列表 优先"""
+    """判断新值是否比旧值更'丰富' —— 非空/非零/非空列表 优先。
+    对列表类型：只在新列表长度 >= 旧列表长度时才认为更丰富，防止列表页的
+    单张图片覆盖详情页采集的多张图片。"""
     if field_type == "list":
-        return bool(new_val)
+        old_len = len(old_val) if old_val else 0
+        return bool(new_val) and len(new_val) >= old_len
     if field_type == "int":
         return new_val not in (None, 0)
     if field_type == "float":
@@ -244,3 +247,12 @@ def delete_scraped_product(db: Session, record_id: int) -> bool:
     db.delete(record)
     db.commit()
     return True
+
+
+def bulk_delete_scraped_products(db: Session, record_ids: List[int]) -> int:
+    """批量删除采集记录，返回实际删除数量"""
+    if not record_ids:
+        return 0
+    deleted = db.query(ScrapedProductRecord).filter(ScrapedProductRecord.id.in_(record_ids)).delete(synchronize_session=False)
+    db.commit()
+    return deleted

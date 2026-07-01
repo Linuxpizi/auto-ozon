@@ -7,6 +7,7 @@ from app.crud import precision_listing as pl_crud
 from app.schemas.precision_listing import (
     PrecisionListingCreate, PrecisionListingUpdate, PrecisionListingRead,
     ImportBySkuRequest, SyncImportedRequest, ScrapeRequest, ScrapeResponse,
+    SubmitToOzonRequest,
 )
 from app.core.db import get_db
 
@@ -339,3 +340,126 @@ async def check_ozon_import_status(task_id: int, db: Session = Depends(get_db)):
             "status": "error",
             "message": str(e),
         }
+
+
+@router.post("/{task_id}/submit")
+async def submit_to_ozon(
+    task_id: int,
+    body: SubmitToOzonRequest,
+    db: Session = Depends(get_db),
+):
+    """
+    Submit a precision listing task to Ozon as a new product.
+    Uses /v3/product/import/push to create the product with translated content.
+    """
+    from app.models.store import Store
+    from app.services.ozon_client import OzonClient
+
+    task = pl_crud.get_task(db, task_id)
+    if not task:
+        raise HTTPException(status_code=404, detail="Task not found")
+
+    store = db.query(Store).filter(Store.id == task.store_id).first()
+    if not store:
+        raise HTTPException(status_code=404, detail="Store not found")
+
+    client = OzonClient(store.api_key, store.client_id)
+
+    # Use translated_name or source_name
+    product_name = task.translated_name or task.source_name or f"SKU-{task.source_sku}"
+    description = task.translated_description or task.source_description or ""
+
+    # Build offer_id
+    offer_id = body.offer_id or task.offer_id or f"PL-{task.id}-{task.source_sku}"
+
+    # Build price
+    price_kopecks = str(int(body.price_rub * 100)) if body.price_rub else (
+        str(int(float(task.price) * 100)) if task.price and float(task.price or 0) > 0 else ""
+    )
+    old_price_kopecks = str(int(body.old_price_rub * 100)) if body.old_price_rub else (
+        str(int(float(task.old_price) * 100)) if task.old_price and float(task.old_price or 0) > 0 else ""
+    )
+
+    # Parse attributes
+    ozon_attributes = body.attributes or []
+    if not ozon_attributes and task.translated_attributes:
+        try:
+            ozon_attributes = json.loads(task.translated_attributes)
+        except Exception:
+            pass
+
+    # Parse images
+    images = []
+    if task.source_images:
+        try:
+            images = [img for img in json.loads(task.source_images) if img and img.startswith("http")]
+        except Exception:
+            pass
+
+    # Dimensions
+    height = body.height_mm or task.height or 0
+    depth = body.depth_mm or task.depth or 0
+    width = body.width_mm or task.width or 0
+    weight = body.weight_g or task.weight or 0
+
+    # Category / type
+    category_id = body.description_category_id or task.category_id or 0
+    type_id = body.type_id or task.type_id or 0
+
+    item = {
+        "offer_id": offer_id,
+        "name": product_name,
+        "description_category_id": category_id,
+        "type_id": type_id,
+        "barcode": body.barcode or "",
+        "dimension_unit": "mm",
+        "weight_unit": "g",
+        "height": height,
+        "depth": depth,
+        "width": width,
+        "weight": weight,
+        "primary_image": images[0] if images else "",
+        "images": images[:15],
+        "attributes": ozon_attributes,
+        "currency_code": "RUB",
+        "price": price_kopecks,
+        "old_price": old_price_kopecks,
+        "vat": task.vat or "0",
+    }
+
+    try:
+        result = await client.import_products([item])
+
+        # Extract task_id from response
+        task_data = result.get("result", {})
+        ozon_task_id = 0
+        if isinstance(task_data, dict):
+            task_ids = task_data.get("task_id", [])
+            if task_ids:
+                ozon_task_id = task_ids[0] if isinstance(task_ids, list) else task_ids
+
+        # Update task
+        update_data = PrecisionListingUpdate(
+            status="submitted",
+            offer_id=offer_id,
+            task_id=ozon_task_id,
+            category_id=category_id,
+            type_id=type_id,
+        )
+        pl_crud.update_task(db, task_id, update_data)
+
+        return {
+            "success": True,
+            "result": result,
+            "task_id": ozon_task_id,
+            "offer_id": offer_id,
+            "message": f"Product submitted to Ozon. task_id={ozon_task_id}",
+        }
+    except Exception as e:
+        logger.error("Submit failed for precision listing %d: %s", task_id, str(e))
+        update_data = PrecisionListingUpdate(
+            status="error",
+            error_message=str(e),
+        )
+        pl_crud.update_task(db, task_id, update_data)
+        raise HTTPException(status_code=500, detail=f"提交失败: {str(e)}")

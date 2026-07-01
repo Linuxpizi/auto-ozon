@@ -625,6 +625,7 @@ def update_upload_status(product_id: int, db: Session = Depends(get_db)):
 def get_ozon_categories(
     category_id: int = Query(0, description="父分类ID, 0=根分类"),
     store_id: Optional[int] = Query(None, description="店铺ID"),
+    language: str = Query("EN", description="语言: EN/DEFAULT"),
     db: Session = Depends(get_db),
 ):
     """获取 Ozon 商品分类树"""
@@ -642,7 +643,7 @@ def get_ozon_categories(
     client = OzonClient(client_id=store.client_id, api_key=store.api_key)
 
     try:
-        tree = client.get_category_tree(category_id=category_id)
+        tree = client.get_category_tree(category_id=category_id, language=language)
         return {"categories": tree}
     except Exception as e:
         logger.error("Failed to get category tree: %s", str(e))

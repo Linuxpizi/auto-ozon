@@ -10,11 +10,11 @@ async function request<T = any>(path: string, options?: RequestInit): Promise<T>
   return res.json();
 }
 
-export async function apiGet<T = any>(path: string, params?: Record<string, string | number | undefined>): Promise<T> {
+export async function apiGet<T = any>(path: string, params?: Record<string, string | number | undefined | null>): Promise<T> {
   const q = new URLSearchParams();
   if (params) {
     for (const [key, val] of Object.entries(params)) {
-      if (val !== undefined && val !== "") q.set(key, String(val));
+      if (val !== undefined && val !== null && val !== "") q.set(key, String(val));
     }
   }
   const url = `${path}${q.toString() ? "?" + q : ""}`;

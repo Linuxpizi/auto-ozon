@@ -8,6 +8,7 @@
               <Sidebar :is-dark="isDark" @toggle-theme="isDark = !isDark" />
             </n-config-provider>
             <n-layout-content style="padding: 0;">
+              <ExchangeRateMarquee />
               <main class="main-content">
                 <router-view />
               </main>
@@ -32,6 +33,7 @@ import {
   type GlobalThemeOverrides,
 } from "naive-ui";
 import Sidebar from "./components/Sidebar.vue";
+import ExchangeRateMarquee from "./components/ExchangeRateMarquee.vue";
 
 const isDark = ref(localStorage.getItem("theme") === "dark");
 

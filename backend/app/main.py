@@ -6,6 +6,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from app.api.routers import dashboard, order, store, monitor, listing, finance, task_config, precision_listing, intelligence, browser_sync, selection
 from app.api.routers import prompt_template, title_optimize, product_optimize, image_prompt, ai_text, ai_image
+from app.api.routers import exchange_rate
 from app.core.db import engine, Base
 from app.services.scheduler_service import lifespan as scheduler_lifespan
 
@@ -107,3 +108,6 @@ app.include_router(image_prompt.router, prefix="/api/v1/image", tags=["prompt-en
 app.include_router(prompt_template.router, prefix="/api/v1/prompts", tags=["prompt-templates"])
 app.include_router(ai_text.router, prefix="/api/v1/ai", tags=["ai-text"])
 app.include_router(ai_image.router, prefix="/api/v1/ai", tags=["ai-image"])
+
+# ── Exchange Rates ────────────────────────────────────────────────────
+app.include_router(exchange_rate.router, prefix="/api/v1", tags=["exchange-rates"])

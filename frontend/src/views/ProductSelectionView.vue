@@ -593,6 +593,7 @@ import {
   type GlobalThemeOverrides,
 } from "naive-ui";
 import { apiGet, apiPost, apiPut, apiDelete } from "../api";
+import { translateText, translateBatch, optimizeDescription, translateImage, replaceImageSubject, generateImage } from "../api/ai";
 import { useMessage } from "naive-ui";
 
 const message = useMessage();
@@ -816,7 +817,6 @@ async function doUpload() {
 
 // ── 图片管理 ──
 const imageUploadRef = ref<HTMLInputElement | null>(null);
-const aiImageLoading = ref<number | null>(null);
 
 function triggerImageUpload() {
   imageUploadRef.value?.click();
@@ -835,29 +835,156 @@ function removeImage(idx: number) {
   editProduct.value.images.splice(idx, 1);
 }
 
-function handleAiOptimizeImage(_idx: number) {
-  message.info("AI 图片优化功能即将上线,敬请期待 ✨");
+// ── AI 图片功能 ──
+const aiImageLoading = ref<number | null>(null);
+
+async function handleAiOptimizeImage(idx: number) {
+  if (!editProduct.value?.images?.[idx]) return;
+  aiImageLoading.value = idx;
+  try {
+    const img = editProduct.value.images[idx];
+    const url = typeof img === "string" ? img : img.url;
+    const res = await replaceImageSubject({
+      image_url: url,
+      prompt: "Professional e-commerce product photo on white background, studio lighting, clean",
+    });
+    if (res.result_url) {
+      if (typeof editProduct.value.images[idx] === "string") {
+        editProduct.value.images[idx] = res.result_url;
+      } else {
+        editProduct.value.images[idx].result_url = res.result_url;
+      }
+      message.success("图片优化完成");
+    }
+  } catch (e: any) {
+    message.error("图片优化失败: " + e.message);
+  } finally {
+    aiImageLoading.value = null;
+  }
 }
 
-function handleAiOptimizeImages() {
-  message.info("AI 批量图片优化功能即将上线,敬请期待 ✨");
+async function handleAiOptimizeImages() {
+  if (!editProduct.value?.images?.length) {
+    message.warning("暂无图片");
+    return;
+  }
+  try {
+    for (let i = 0; i < editProduct.value.images.length; i++) {
+      await handleAiOptimizeImage(i);
+    }
+    message.success("所有图片优化完成");
+  } catch (e: any) {
+    message.error("批量图片优化失败: " + e.message);
+  }
 }
 
-function handleAiGenerateImages() {
-  message.info("AI 图片生成功能即将上线,敬请期待 ✨");
+async function handleAiGenerateImages() {
+  if (!editProduct.value) return;
+  try {
+    const res = await generateImage({
+      title: editProduct.value.title,
+      category: editProduct.value.category,
+      count: 4,
+    });
+    if (res.images?.length) {
+      if (!editProduct.value.images) editProduct.value.images = [];
+      editProduct.value.images.push(...res.images.map((url) => ({ url })));
+      message.success(`生成 ${res.images.length} 张图片`);
+    }
+  } catch (e: any) {
+    message.error("图片生成失败: " + e.message);
+  }
 }
 
-// ── AI 功能 (TODO — 后续接入 OpenAI the AI 模型) ──
-function handleAiTranslate(_target: "title" | "description") {
-  message.info("AI 翻译功能即将上线,敬请期待 🌐");
+// ── AI 文字功能 ──
+const aiTextLoading = ref(false);
+
+async function handleAiTranslate(target: "title" | "description") {
+  if (!editProduct.value) return;
+  const text = editProduct.value[target];
+  if (!text) {
+    message.warning("没有可翻译的文本");
+    return;
+  }
+  aiTextLoading.value = true;
+  try {
+    const res = await translateText({
+      text,
+      field_type: target,
+      context: editProduct.value.category || "",
+    });
+    if (res.translated) {
+      editProduct.value[target] = res.translated;
+      message.success(`${target === "title" ? "标题" : "描述"}翻译完成`);
+    }
+  } catch (e: any) {
+    message.error("翻译失败: " + e.message);
+  } finally {
+    aiTextLoading.value = false;
+  }
 }
 
-function handleAiOptimize(_target: "title" | "description") {
-  message.info("AI 优化功能即将上线,敬请期待 ✨");
+async function handleAiOptimize(target: "title" | "description") {
+  if (!editProduct.value) return;
+  const text = editProduct.value[target];
+  if (!text) {
+    message.warning("没有可优化的文本");
+    return;
+  }
+  aiTextLoading.value = true;
+  try {
+    const res = await optimizeDescription({
+      title: target === "title" ? undefined : editProduct.value.title,
+      description: target === "description" ? text : undefined,
+      attributes: (editProduct.value.attributes || []).reduce((acc: any, a: any) => {
+        if (a.name) acc[a.name] = a.value;
+        return acc;
+      }, {}),
+      context: editProduct.value.category || "",
+    });
+    if (res.description) {
+      editProduct.value[target] = res.description;
+      message.success(`${target === "title" ? "标题" : "描述"}优化完成`);
+    }
+  } catch (e: any) {
+    message.error("优化失败: " + e.message);
+  } finally {
+    aiTextLoading.value = false;
+  }
 }
 
-function handleTranslateAllAttrs() {
-  message.info("AI 属性翻译功能即将上线,敬请期待 🌐");
+async function handleTranslateAllAttrs() {
+  if (!editProduct.value?.attributes?.length) {
+    message.warning("暂无属性可翻译");
+    return;
+  }
+  aiTextLoading.value = true;
+  try {
+    const items = editProduct.value.attributes
+      .filter((a: any) => a.name || a.value)
+      .map((a: any) => ({ key: a.name || "", value: a.value || "" }));
+    if (items.length === 0) {
+      message.warning("属性为空");
+      return;
+    }
+    const res = await translateBatch({
+      items,
+      field_type: "attribute",
+    });
+    if (res.items?.length) {
+      for (const item of res.items) {
+        const attr = editProduct.value.attributes.find((a: any) => a.name === item.key);
+        if (attr) {
+          if (item.translated) attr.value = item.translated;
+        }
+      }
+      message.success(`翻译 ${res.items.length} 个属性`);
+    }
+  } catch (e: any) {
+    message.error("属性翻译失败: " + e.message);
+  } finally {
+    aiTextLoading.value = false;
+  }
 }
 
 // ── 属性管理 ──

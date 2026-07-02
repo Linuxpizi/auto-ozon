@@ -1,5 +1,6 @@
 """选品中心 — 从浏览器采集的 Ozon 商品数据导入与展示"""
 import json
+import logging
 import os
 from typing import List, Optional
 from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, File
@@ -7,6 +8,8 @@ from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from app.core.db import get_db
+
+logger = logging.getLogger(__name__)
 from app.crud import scraped_product as sp_crud
 from app.crud import store as store_crud
 from app.schemas.scraped_product import ScrapedProductCreate, ScrapedProductRead

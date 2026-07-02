@@ -13,8 +13,7 @@
     "isolatedModules": true,
     "paths": {
       "@/*": ["./src/*"]
-    },
-    "types": ["wxt/client"]
+    }
   },
   "include": ["src/**/*.ts", "src/**/*.vue", "wxt.config.ts"],
   "exclude": ["node_modules", "dist", ".output"]

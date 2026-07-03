@@ -7,7 +7,6 @@ import NotFoundView from "../views/NotFoundView.vue";
 
 import TaskConfigView from "../views/TaskConfigView.vue";
 import ProductManagementView from "../views/ProductManagementView.vue";
-import PrecisionListingView from "../views/PrecisionListingView.vue";
 import IntelligenceView from "../views/IntelligenceView.vue";
 import ProductSelectionView from "../views/ProductSelectionView.vue";
 import ReturnOrdersView from "../views/ReturnOrdersView.vue";

@@ -681,6 +681,146 @@ def sync_products_for_store(db: Session, store: Store) -> int:
 
 
 # ---------------------------------------------------------------------------
+# Return Orders sync
+# ---------------------------------------------------------------------------
+
+def sync_return_orders_for_store(db: Session, store: Store) -> int:
+    """Fetch return orders from Ozon and notify via Feishu for new returns.
+
+    POST /v2/returns/rfbs/list — response fields per Ozon API spec:
+      result.returns[] → each item has:
+        return_id, posting_number, order_id,
+        product   (single object: name, sku, offer_id, price.amount, quantity, price.currency_code),
+        status    (object: id, name, change_moment),
+        logistic  (object: return_date, technical_return_moment, ...),
+        visual    (object: status.display_name, ...)
+
+    Returns count of new (unseen) return orders saved.
+    """
+    from datetime import datetime
+    from app.schemas.return_order import ReturnOrderCreate
+    from app.crud.return_order import get_return_order, upsert_return_order, mark_notified
+    from app.crud.feishu_config import get_feishu_config
+    from app.services.feishu_service import notify_return_order
+    from app.services.ozon_client import OzonClient
+
+    from datetime import timedelta
+    client = OzonClient(client_id=store.client_id, api_key=store.api_key)
+    new_count = 0
+
+    # Filter: only fetch returns created in the last 15 days (server-side via Ozon API)
+    since = (datetime.utcnow() - timedelta(days=15)).strftime("%Y-%m-%dT%H:%M:%SZ")
+    now_str = datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ")
+    ozon_filter = {"created_at": {"from": since, "to": now_str}}
+
+    # Pagination: last_id is at root level per Ozon docs.
+    last_id = 0
+    while True:
+        returns_list, next_last_id, has_next = client.get_return_orders(
+            last_id=last_id, limit=500, filter=ozon_filter,
+        )
+        if not returns_list:
+            break
+
+        for ret in returns_list:
+            ret_id = str(ret.get("return_id", ""))
+            if not ret_id:
+                continue
+
+            # Check if this return already exists before upsert
+            is_new = get_return_order(db, ret_id) is None
+
+            # Parse return_date — API returns "created_at" at top level per Ozon docs
+            return_date = None
+            raw_date = ret.get("created_at", "")
+            if raw_date:
+                try:
+                    return_date = datetime.fromisoformat(
+                        raw_date.replace("Z", "+00:00")
+                    ).replace(tzinfo=None)
+                except (ValueError, TypeError):
+                    pass
+
+            # Extract product info — per Ozon docs: product is { sku, offer_id, name, price, currency_code }
+            # price is a direct number (e.g. 2999), NOT a nested object.
+            product = ret.get("product", {})
+            product_name = product.get("name", "") if isinstance(product, dict) else ""
+            sku = str(product.get("sku", "")) if isinstance(product, dict) else ""
+            offer_id = product.get("offer_id", "") if isinstance(product, dict) else ""
+            currency_code = product.get("currency_code", "") if isinstance(product, dict) else ""
+            unit_price = 0.0
+            return_price = 0.0
+            if isinstance(product, dict):
+                raw_price = product.get("price", 0)
+                unit_price = float(raw_price or 0)
+                return_price = unit_price
+            quantity = 1  # API v2 does not return quantity; default to 1
+
+            # state object per Ozon docs: { group_state, state, state_name }
+            state_obj = ret.get("state", {})
+            status = state_obj.get("state", "") if isinstance(state_obj, dict) else str(state_obj or "")
+            action = state_obj.get("group_state", "") if isinstance(state_obj, dict) else ""
+
+            data = ReturnOrderCreate(
+                return_id=ret_id,
+                order_id=int(ret.get("order_id", 0)),
+                posting_number=ret.get("posting_number", ""),
+                store_id=store.id,
+                store_name=store.name,
+                sku=sku,
+                offer_id=offer_id,
+                product_id=0,
+                product_name=product_name,
+                quantity=quantity,
+                unit_price=unit_price,
+                return_price=return_price,
+                return_date=return_date,
+                reason="",
+                reason_message="",
+                status=status,
+                action=action,
+                image_url="",
+                currency_code=currency_code,
+            )
+            upsert_return_order(db, data)
+
+            if is_new:
+                new_count += 1
+                # Send Feishu notification for newly discovered returns
+                try:
+                    feishu_cfg = get_feishu_config(db)
+                    chat_id = ""
+                    if feishu_cfg:
+                        chat_id = getattr(feishu_cfg, "chat_id", "")
+                    notify_return_order(
+                        feishu_cfg,
+                        {
+                            "return_id": ret_id,
+                            "store_name": store.name,
+                            "product_name": product_name,
+                            "offer_id": offer_id,
+                            "quantity": quantity,
+                            "return_price": return_price,
+                            "reason": "",
+                            "reason_message": "",
+                            "status": status,
+                            "image_url": "",
+                        },
+                        chat_id=chat_id,
+                    )
+                    mark_notified(db, ret_id)
+                except Exception as nfe:
+                    logger.warning("Feishu notify failed for return %s: %s", ret_id, nfe)
+
+        if not has_next:
+            break
+        last_id = next_last_id
+
+    logger.info("sync_return_orders[%s]: %d new return orders", store.name, new_count)
+    return new_count
+
+
+# ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
 
@@ -729,6 +869,8 @@ def run_sync_task(db: Session, task_key: str) -> str:
                     total += 1
                 elif task_key == "sync_products":
                     total += sync_products_for_store(db, store)
+                elif task_key == "sync_return_orders":
+                    total += sync_return_orders_for_store(db, store)
             except Exception as e:
                 logger.error(
                     "run_sync_task(%s) FAILED for store %s (id=%s): %s",

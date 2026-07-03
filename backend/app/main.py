@@ -7,6 +7,7 @@ from fastapi.responses import JSONResponse
 from app.api.routers import dashboard, order, store, monitor, listing, finance, task_config, precision_listing, intelligence, browser_sync, selection
 from app.api.routers import prompt_template, title_optimize, product_optimize, image_prompt, ai_text, ai_image
 from app.api.routers import exchange_rate
+from app.api.routers import return_order, feishu_config
 from app.core.db import engine, Base
 from app.services.scheduler_service import lifespan as scheduler_lifespan
 
@@ -111,3 +112,5 @@ app.include_router(ai_image.router, prefix="/api/v1/ai", tags=["ai-image"])
 
 # ── Exchange Rates ────────────────────────────────────────────────────
 app.include_router(exchange_rate.router, prefix="/api/v1", tags=["exchange-rates"])
+app.include_router(return_order.router, prefix="/api/return-orders", tags=["return-orders"])
+app.include_router(feishu_config.router, prefix="/api/feishu", tags=["feishu"])

@@ -426,11 +426,13 @@
                 <div class="upload-field">
                   <label class="upload-field__label">商品分类 <span class="required">*</span></label>
                   <n-tree-select
-                    v-model:value="uploadForm.description_category_id"
-                    :options="Array.isArray(categoryTree) ? categoryTree : (categoryTree?.categories || [])"
+                    :value="uploadForm.description_category_id"
+                    :options="categoryTreeNodes"
                     placeholder="选择 Ozon 分类"
-                    default-expand-all
+                    :lazy="true"
+                    :load="loadTreeChildren"
                     filterable
+                    @update:value="onCategoryValueChange"
                   />
                 </div>
               </n-gi>
@@ -1173,12 +1175,16 @@ async function loadStoreOptions() {
   } catch { /* ignore */ }
 }
 
-function transformCategoryNodes(nodes: any[]): any[] {
+// lazy-load category tree: only load root level first
+const categoryTreeNodes = ref<any[]>([]);
+
+function toTreeNodes(nodes: any[]): any[] {
+  // Always set isLeaf=false so the expand arrow appears and lazy load can fire.
+  // We strip nested children from the API response to force lazy loading at each level.
   return (nodes || []).map((n) => ({
-    key: n.description_category_id ?? n.category_id ?? n.key,
-    label: n.category_name ?? n.label ?? String(n.description_category_id ?? n.category_id ?? n.key),
-    children: n.children?.length ? transformCategoryNodes(n.children) : undefined,
-    disabled: !!n.disabled,
+    key: n.description_category_id ?? n.category_id,
+    label: n.category_name ?? String(n.description_category_id ?? n.category_id),
+    isLeaf: false,
   }));
 }
 
@@ -1189,10 +1195,52 @@ async function loadCategoryTree(storeId?: number) {
     if (storeId) params.set('store_id', String(storeId));
     const resp = await apiGet<any>(`/selection/ozon-categories?${params}`);
     const raw = Array.isArray(resp) ? resp : (resp?.categories || []);
-    categoryTree.value = transformCategoryNodes(raw);
+    categoryTreeNodes.value = toTreeNodes(raw);
   } catch (e) {
     console.error("loadCategoryTree failed:", e);
   }
+}
+
+// called by n-tree-select when user expands a node
+async function loadTreeChildren(node: any, done: (children: any[]) => void) {
+  try {
+    const categoryId = node.key;
+    const params = new URLSearchParams();
+    params.set('category_id', String(categoryId));
+    const storeId = uploadForm.store_id;
+    if (storeId) params.set('store_id', String(storeId));
+    const resp = await apiGet<any>(`/selection/ozon-categories?${params}`);
+    const raw = Array.isArray(resp) ? resp : (resp?.categories || []);
+    // Strip nested children: API may return full tree, but for lazy loading
+    // we only want one level at a time so the expand arrow works at every level.
+    const stripped = raw.map((n: any) => ({ ...n, children: undefined }));
+    done(toTreeNodes(stripped));
+  } catch (e) {
+    console.error("loadTreeChildren failed:", e);
+    done([]);
+  }
+}
+
+// Only allow selecting leaf nodes (last level only)
+function onCategoryValueChange(value: any) {
+  if (value == null) {
+    uploadForm.description_category_id = null;
+    return;
+  }
+  function findNode(nodes: any[]): any {
+    for (const n of nodes) {
+      if (n.key === value) return n;
+      if (n.children) { const f = findNode(n.children); if (f) return f; }
+    }
+    return null;
+  }
+  const node = findNode(categoryTreeNodes.value);
+  // If node has loaded children (non-empty array), it's not a leaf — reject selection
+  if (node && node.children && node.children.length > 0) {
+    message.warning('请展开选择最后一级分类');
+    return;
+  }
+  uploadForm.description_category_id = value;
 }
 
 function onPageSizeChange(size: number) {

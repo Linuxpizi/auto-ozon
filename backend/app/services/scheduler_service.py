@@ -85,6 +85,14 @@ DEFAULT_TASKS = [
         interval_seconds=82800,  # 23 h
         enabled=True,
     ),
+    TaskConfigCreate(
+        task_key="sync_return_orders",
+        name="同步退货订单",
+        description="定时从 Ozon 同步退货订单并推送飞书通知 (每5分钟)",
+        trigger_type="interval",
+        interval_seconds=300,  # 5 min
+        enabled=True,
+    ),
 ]
 
 

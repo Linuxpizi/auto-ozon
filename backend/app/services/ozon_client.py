@@ -169,7 +169,9 @@ class OzonSellerRating:
 
     company_name: str
     currency: str
-    ratings: list  # list of {name, rating, current_value, past_value, value_type, status}
+    ratings: (
+        list  # list of {name, rating, current_value, past_value, value_type, status}
+    )
 
 
 class OzonClient:
@@ -207,17 +209,24 @@ class OzonClient:
         url = f"{self.API_BASE}{path}"
         try:
             with httpx.Client(timeout=self._timeout) as client:
-                resp = client.request(method, url, headers=self._headers(), json=json_body)
+                resp = client.request(
+                    method, url, headers=self._headers(), json=json_body
+                )
             if not resp.is_success:
                 logger.error(
                     "Ozon API %s %s -> %d: %s",
-                    method, path, resp.status_code, resp.text[:500],
+                    method,
+                    path,
+                    resp.status_code,
+                    resp.text[:500],
                 )
                 raise _classify_error(resp.status_code, resp.text)
             logger.debug("Ozon API %s %s -> 200", method, path)
             return resp.json()
         except httpx.TimeoutException:
-            logger.error("Ozon API %s %s -> TIMEOUT (>%ds)", method, path, self._timeout)
+            logger.error(
+                "Ozon API %s %s -> TIMEOUT (>%ds)", method, path, self._timeout
+            )
             raise
         except httpx.RequestError as exc:
             logger.error("Ozon API %s %s -> NETWORK ERROR: %s", method, path, exc)
@@ -309,9 +318,7 @@ class OzonClient:
             payload["filter"]["to"] = to
         if statuses:
             payload["filter"]["statuses"] = statuses
-        data = self._request(
-            "POST", "/v4/posting/fbs/list", json_body=payload
-        )
+        data = self._request("POST", "/v4/posting/fbs/list", json_body=payload)
         raw_postings = data.get("postings", [])
         next_cursor = data.get("cursor", "")
         has_next = data.get("has_next", False)
@@ -320,7 +327,7 @@ class OzonClient:
             products = item.get("products", [])
 
             # --- aggregate across ALL products in this posting -------------------
-            total_price = 0.0      # sum of (unit_price × quantity) for all products
+            total_price = 0.0  # sum of (unit_price × quantity) for all products
             total_quantity = 0
             total_payout = 0.0
             total_customer_price = 0.0
@@ -376,21 +383,25 @@ class OzonClient:
                     total_commission += float(co_obj or 0)
                 total_discount += float(fin.get("total_discount_value", 0))
 
-                _products_json_items.append({
-                    "product_id": pid,
-                    "sku": str(p.get("sku", "")),
-                    "offer_id": p.get("offer_id", ""),
-                    "name": p.get("name", ""),
-                    "quantity": qty,
-                    "unit_price": unit_price,
-                })
+                _products_json_items.append(
+                    {
+                        "product_id": pid,
+                        "sku": str(p.get("sku", "")),
+                        "offer_id": p.get("offer_id", ""),
+                        "name": p.get("name", ""),
+                        "quantity": qty,
+                        "unit_price": unit_price,
+                    }
+                )
 
             # If no products array, fall back to first product (legacy compat)
             if not products:
                 total_price = 0.0
                 total_quantity = 0
 
-            available_actions = json.dumps(item.get("available_actions", []), ensure_ascii=False)
+            available_actions = json.dumps(
+                item.get("available_actions", []), ensure_ascii=False
+            )
             _products_json = json.dumps(_products_json_items, ensure_ascii=False)
 
             # Extract cancellation data if present
@@ -439,7 +450,11 @@ class OzonClient:
         return postings, next_cursor, has_next
 
     def get_finance_statement(
-        self, date_from: str, date_to: str, page: int = 1, page_size: int = 100,
+        self,
+        date_from: str,
+        date_to: str,
+        page: int = 1,
+        page_size: int = 100,
         with_details: bool = False,
     ) -> tuple[list[OzonFinanceStatement], int]:
         """Get cash-flow statement list (财务报告).
@@ -510,11 +525,12 @@ class OzonClient:
 
         sales_amount = sales.get("amount", {}).get("value", 0)
         returns_amount = returns.get("amount", {}).get("value", 0)
-        services_cost = sum(
-            s.get("amount", {}).get("value", 0) for s in services
-        )
+        services_cost = sum(s.get("amount", {}).get("value", 0) for s in services)
         services_detail = [
-            {"name": s.get("name", ""), "amount": float(s.get("amount", {}).get("value", 0))}
+            {
+                "name": s.get("name", ""),
+                "amount": float(s.get("amount", {}).get("value", 0)),
+            }
             for s in services
             if s.get("amount", {}).get("value", 0)
         ]
@@ -524,7 +540,9 @@ class OzonClient:
         sales_revenue = float(sales_details.get("revenue", {}).get("value", 0))
         sales_partner = float(sales_details.get("partner_programs", {}).get("value", 0))
         returns_revenue = float(returns_details.get("revenue", {}).get("value", 0))
-        returns_partner = float(returns_details.get("partner_programs", {}).get("value", 0))
+        returns_partner = float(
+            returns_details.get("partner_programs", {}).get("value", 0)
+        )
 
         opening = total.get("opening_balance", {}).get("value", 0)
         closing = total.get("closing_balance", {}).get("value", 0)
@@ -614,7 +632,9 @@ class OzonClient:
     # Product
     # ------------------------------------------------------------------
 
-    def get_product_list(self, visibility: str = "ALL", start_last_id: str = "") -> tuple[list, str]:
+    def get_product_list(
+        self, visibility: str = "ALL", start_last_id: str = ""
+    ) -> tuple[list, str]:
         """Get all products via POST /v3/product/list with cursor pagination.
 
         Args:
@@ -636,14 +656,16 @@ class OzonClient:
             data = self._request("POST", "/v3/product/list", json_body=body)
             items = data.get("result", {}).get("items", [])
             for item in items:
-                result.append({
-                    "product_id": str(item.get("product_id", "")),
-                    "offer_id": item.get("offer_id", ""),
-                    "has_fbo_stocks": item.get("has_fbo_stocks", False),
-                    "has_fbs_stocks": item.get("has_fbs_stocks", False),
-                    "archived": item.get("archived", False),
-                    "is_discounted": item.get("is_discounted", False),
-                })
+                result.append(
+                    {
+                        "product_id": str(item.get("product_id", "")),
+                        "offer_id": item.get("offer_id", ""),
+                        "has_fbo_stocks": item.get("has_fbo_stocks", False),
+                        "has_fbs_stocks": item.get("has_fbs_stocks", False),
+                        "archived": item.get("archived", False),
+                        "is_discounted": item.get("is_discounted", False),
+                    }
+                )
             if not items:
                 break
             new_last_id = str(data.get("result", {}).get("last_id", ""))
@@ -658,7 +680,9 @@ class OzonClient:
         Args:
             product_ids: list of product_id integers.
         """
-        data = self._request("POST", "/v1/product/archive", json_body={"product_id": product_ids})
+        data = self._request(
+            "POST", "/v1/product/archive", json_body={"product_id": product_ids}
+        )
         return bool(data.get("result", False))
 
     def get_product_info_list(self, product_ids: list[str]) -> list[dict]:
@@ -672,9 +696,10 @@ class OzonClient:
         """
         result = []
         for i in range(0, len(product_ids), 1000):
-            batch = product_ids[i:i + 1000]
+            batch = product_ids[i : i + 1000]
             data = self._request(
-                "POST", "/v3/product/info/list",
+                "POST",
+                "/v3/product/info/list",
                 json_body={"product_id": batch},
             )
             result.extend(data.get("items", []))
@@ -687,9 +712,10 @@ class OzonClient:
         """
         result: dict[str, str] = {}
         for i in range(0, len(offer_ids), 1000):
-            batch = offer_ids[i:i + 1000]
+            batch = offer_ids[i : i + 1000]
             data = self._request(
-                "POST", "/v3/product/info/list",
+                "POST",
+                "/v3/product/info/list",
                 json_body={"offer_id": batch},
             )
             for item in data.get("result", {}).get("items", []):
@@ -699,6 +725,45 @@ class OzonClient:
                     result[oid] = img
         return result
 
+    # ------------------------------------------------------------------
+    # Returns (退货)
+    # ------------------------------------------------------------------
+
+    def get_return_orders(
+        self,
+        last_id: int = 0,
+        limit: int = 500,
+        filter: dict | None = None,
+    ) -> tuple[list[dict], int, bool]:
+        """Get return orders (rFBS).
+
+        POST /v2/returns/rfbs/list
+        https://docs.ozon.ru/api/seller/zh/?__rr=1#operation/RFBSReturnsAPI_ReturnsRfbsListV2
+
+        Args:
+            last_id: Identifier of the last return_id from previous page.
+                     Leave 0 for the first request.
+            limit: Number of values per page (max 500).
+            filter: Optional filter dict. Supported keys per Ozon docs:
+                    - offer_id (str)
+                    - posting_number (str)
+                    - group_state (list[str])
+                    - created_at (dict): {"from": "ISO-datetime", "to": "ISO-datetime"}
+
+        Returns (returns_list, next_last_id, has_next).
+        """
+        payload: dict[str, Any] = {
+            "filter": filter or {},
+            "last_id": last_id,
+            "limit": limit,
+        }
+
+        data = self._request("POST", "/v2/returns/rfbs/list", json_body=payload)
+        returns_list = data.get("returns", [])
+        next_last_id = returns_list[-1]["return_id"] if returns_list else last_id
+        has_next = data.get("has_next", False)
+        return returns_list, next_last_id, has_next
+
     def get_images_by_product_ids(self, product_ids: list[int]) -> dict[int, str]:
         """Look up primary_image for a batch of product_ids via /v3/product/info/list.
 
@@ -706,9 +771,10 @@ class OzonClient:
         """
         result: dict[int, str] = {}
         for i in range(0, len(product_ids), 1000):
-            batch = product_ids[i:i + 1000]
+            batch = product_ids[i : i + 1000]
             data = self._request(
-                "POST", "/v3/product/info/list",
+                "POST",
+                "/v3/product/info/list",
                 json_body={"product_id": batch},
             )
             for item in data.get("result", {}).get("items", []):
@@ -736,7 +802,9 @@ class OzonClient:
         Args:
             stock_items: list of dicts with keys: product_id, stock, warehouse_id.
         """
-        data = self._request("POST", "/v2/products/stocks", json_body={"stocks": stock_items})
+        data = self._request(
+            "POST", "/v2/products/stocks", json_body={"stocks": stock_items}
+        )
         return data
 
     # ------------------------------------------------------------------
@@ -766,7 +834,9 @@ class OzonClient:
             data = self._request("POST", "/v3/posting/fbs/get", json_body=payload)
             return data.get("result", {})
         except Exception as exc:
-            logger.warning("get_fbs_posting_detail failed for %s: %s", posting_number, exc)
+            logger.warning(
+                "get_fbs_posting_detail failed for %s: %s", posting_number, exc
+            )
             return None
 
     def ship_fbs_posting(
@@ -835,7 +905,8 @@ class OzonClient:
         Ozon returns {"strategies": [...], "total": N} directly.
         """
         data = self._request(
-            "POST", "/v1/pricing-strategy/list",
+            "POST",
+            "/v1/pricing-strategy/list",
             json_body={"page": page, "limit": limit},
         )
         return data
@@ -852,7 +923,9 @@ class OzonClient:
         )
         return data.get("result", data)
 
-    def create_pricing_strategy(self, strategy_name: str, competitors: list[dict] | None = None) -> dict:
+    def create_pricing_strategy(
+        self, strategy_name: str, competitors: list[dict] | None = None
+    ) -> dict:
         """Create a new pricing strategy.
 
         POST /v1/pricing-strategy/create
@@ -887,7 +960,8 @@ class OzonClient:
         POST /v1/pricing-strategy/delete
         """
         data = self._request(
-            "POST", "/v1/pricing-strategy/delete",
+            "POST",
+            "/v1/pricing-strategy/delete",
             json_body={"strategy_id": strategy_id},
         )
         return data
@@ -898,7 +972,8 @@ class OzonClient:
         POST /v1/pricing-strategy/status
         """
         data = self._request(
-            "POST", "/v1/pricing-strategy/status",
+            "POST",
+            "/v1/pricing-strategy/status",
             json_body={"strategy_id": strategy_id, "is_active": is_active},
         )
         return data
@@ -910,7 +985,8 @@ class OzonClient:
         Ozon returns {"competitor": [...], "total": N} directly.
         """
         data = self._request(
-            "POST", "/v1/pricing-strategy/competitors/list",
+            "POST",
+            "/v1/pricing-strategy/competitors/list",
             json_body={"page": page, "limit": limit},
         )
         return data
@@ -922,34 +998,43 @@ class OzonClient:
         Ozon returns {"product_id": [...]} directly.
         """
         data = self._request(
-            "POST", "/v1/pricing-strategy/products/list",
+            "POST",
+            "/v1/pricing-strategy/products/list",
             json_body={"strategy_id": strategy_id},
         )
         # Ozon returns product IDs as a flat list, not product objects
-        product_ids = data.get("product_id", data.get("result", {}).get("product_id", []))
+        product_ids = data.get(
+            "product_id", data.get("result", {}).get("product_id", [])
+        )
         if isinstance(product_ids, list):
             # Convert to list of dicts with product_id for frontend consistency
             return [{"product_id": pid} for pid in product_ids]
         return []
 
-    def add_products_to_pricing_strategy(self, strategy_id: str, product_ids: list[str]) -> dict:
+    def add_products_to_pricing_strategy(
+        self, strategy_id: str, product_ids: list[str]
+    ) -> dict:
         """Bind products to a pricing strategy.
 
         POST /v1/pricing-strategy/products/add
         """
         data = self._request(
-            "POST", "/v1/pricing-strategy/products/add",
+            "POST",
+            "/v1/pricing-strategy/products/add",
             json_body={"strategy_id": strategy_id, "product_id": product_ids},
         )
         return data
 
-    def delete_products_from_pricing_strategy(self, strategy_id: str, product_ids: list[str]) -> dict:
+    def delete_products_from_pricing_strategy(
+        self, strategy_id: str, product_ids: list[str]
+    ) -> dict:
         """Remove products from a pricing strategy.
 
         POST /v1/pricing-strategy/products/delete
         """
         data = self._request(
-            "POST", "/v1/pricing-strategy/products/delete",
+            "POST",
+            "/v1/pricing-strategy/products/delete",
             json_body={"strategy_id": strategy_id, "product_id": product_ids},
         )
         return data
@@ -960,7 +1045,8 @@ class OzonClient:
         POST /v1/pricing-strategy/product/info
         """
         data = self._request(
-            "POST", "/v1/pricing-strategy/product/info",
+            "POST",
+            "/v1/pricing-strategy/product/info",
             json_body={"product_id": product_id},
         )
         return data.get("result", data)
@@ -971,7 +1057,8 @@ class OzonClient:
         POST /v1/pricing-strategy/strategy-ids-by-product-ids
         """
         data = self._request(
-            "POST", "/v1/pricing-strategy/strategy-ids-by-product-ids",
+            "POST",
+            "/v1/pricing-strategy/strategy-ids-by-product-ids",
             json_body={"product_id": product_ids},
         )
         return data.get("result", data)
@@ -989,7 +1076,10 @@ class OzonClient:
         return data.get("result", [])
 
     def get_platform_action_products(
-        self, action_id: int, limit: int = 100, last_id: str = "",
+        self,
+        action_id: int,
+        limit: int = 100,
+        last_id: str = "",
     ) -> dict:
         """Get products in a platform promotion.
 
@@ -1007,7 +1097,9 @@ class OzonClient:
         return data.get("result", data)
 
     def activate_products_in_action(
-        self, action_id: int, products: list[dict],
+        self,
+        action_id: int,
+        products: list[dict],
     ) -> dict:
         """Add products to a platform promotion.
 
@@ -1017,20 +1109,24 @@ class OzonClient:
             products: list of dicts with keys: product_id, action_price, stock.
         """
         data = self._request(
-            "POST", "/v1/actions/products/activate",
+            "POST",
+            "/v1/actions/products/activate",
             json_body={"action_id": action_id, "products": products},
         )
         return data
 
     def deactivate_products_in_action(
-        self, action_id: int, product_ids: list[int],
+        self,
+        action_id: int,
+        product_ids: list[int],
     ) -> dict:
         """Remove products from a platform promotion.
 
         POST /v1/actions/products/deactivate
         """
         data = self._request(
-            "POST", "/v1/actions/products/deactivate",
+            "POST",
+            "/v1/actions/products/deactivate",
             json_body={"action_id": action_id, "product_ids": product_ids},
         )
         return data
@@ -1046,7 +1142,8 @@ class OzonClient:
         Ozon returns {"actions": [...], "total": N} directly.
         """
         data = self._request(
-            "POST", "/v1/seller-actions/list",
+            "POST",
+            "/v1/seller-actions/list",
             json_body={"limit": 100, "offset": 0},
         )
         return data
@@ -1061,7 +1158,8 @@ class OzonClient:
                 discount_type, discount_value, budget, etc.
         """
         data = self._request(
-            "POST", "/v1/seller-actions/create",
+            "POST",
+            "/v1/seller-actions/create",
             json_body={"action_parameters": action_params},
         )
         return data
@@ -1072,7 +1170,8 @@ class OzonClient:
         PUT /v1/seller-actions/{action_id}
         """
         data = self._request(
-            "PUT", f"/v1/seller-actions/{action_id}",
+            "PUT",
+            f"/v1/seller-actions/{action_id}",
             json_body={"action_parameters": action_params},
         )
         return data
@@ -1091,12 +1190,15 @@ class OzonClient:
         POST /v1/seller-actions/products/list
         """
         data = self._request(
-            "POST", "/v1/seller-actions/products/list",
+            "POST",
+            "/v1/seller-actions/products/list",
             json_body={"action_id": action_id},
         )
         return data.get("result", data)
 
-    def add_products_to_seller_action(self, action_id: int, products: list[dict]) -> dict:
+    def add_products_to_seller_action(
+        self, action_id: int, products: list[dict]
+    ) -> dict:
         """Add products to a seller promotion.
 
         POST /v1/seller-actions/products/add
@@ -1105,18 +1207,22 @@ class OzonClient:
             products: list of dicts with keys: product_id, action_price, stock.
         """
         data = self._request(
-            "POST", "/v1/seller-actions/products/add",
+            "POST",
+            "/v1/seller-actions/products/add",
             json_body={"action_id": action_id, "products": products},
         )
         return data
 
-    def delete_products_from_seller_action(self, action_id: int, product_ids: list[int]) -> dict:
+    def delete_products_from_seller_action(
+        self, action_id: int, product_ids: list[int]
+    ) -> dict:
         """Remove products from a seller promotion.
 
         POST /v1/seller-actions/products/delete
         """
         data = self._request(
-            "POST", "/v1/seller-actions/products/delete",
+            "POST",
+            "/v1/seller-actions/products/delete",
             json_body={"action_id": action_id, "product_ids": product_ids},
         )
         return data
@@ -1128,7 +1234,7 @@ class OzonClient:
     def get_category_tree(
         self,
         category_id: int = 0,
-        language: str = "DEFAULT",
+        language: str = "ZH_HANS",
     ) -> list[dict]:
         """Get Ozon description category tree.
 
@@ -1137,7 +1243,7 @@ class OzonClient:
 
         Args:
             category_id: Parent category ID (0 for root).
-            language: Language code. 'DEFAULT' for Russian.
+            language: Language code. 'ZH' for Chinese.
 
         Returns:
             List of category dicts with keys: category_id, category_name, children, etc.
@@ -1147,7 +1253,8 @@ class OzonClient:
             "category_id": category_id,
         }
         data = self._request(
-            "POST", "/v1/description-category/tree",
+            "POST",
+            "/v1/description-category/tree",
             json_body=payload,
         )
         return data.get("result", [])
@@ -1156,7 +1263,7 @@ class OzonClient:
         self,
         description_category_id: int,
         type_id: int = 0,
-        language: str = "DEFAULT",
+        language: str = "ZH_HANS",
     ) -> list[dict]:
         """Get required/optional attributes for a description category.
 
@@ -1179,7 +1286,8 @@ class OzonClient:
         if type_id:
             payload["type_id"] = type_id
         data = self._request(
-            "POST", "/v1/description-category/attribute",
+            "POST",
+            "/v1/description-category/attribute",
             json_body=payload,
         )
         return data.get("result", [])
@@ -1189,7 +1297,7 @@ class OzonClient:
         description_category_id: int,
         attribute_id: int,
         type_id: int = 0,
-        language: str = "DEFAULT",
+        language: str = "ZH",
         last_value_id: int = 0,
         limit: int = 100,
     ) -> list[dict]:
@@ -1221,7 +1329,8 @@ class OzonClient:
         if type_id:
             payload["type_id"] = type_id
         data = self._request(
-            "POST", "/v1/description-category/attribute/values",
+            "POST",
+            "/v1/description-category/attribute/values",
             json_body=payload,
         )
         return data.get("result", [])
@@ -1248,7 +1357,8 @@ class OzonClient:
             Dict with 'result' containing task_ids for async processing.
         """
         data = self._request(
-            "POST", "/v3/product/import",
+            "POST",
+            "/v3/product/import",
             json_body={"items": items},
         )
         return data
@@ -1268,7 +1378,8 @@ class OzonClient:
             List of task status dicts with keys: task_id, status, last_updated, etc.
         """
         data = self._request(
-            "POST", "/v1/product/import/info",
+            "POST",
+            "/v1/product/import/info",
             json_body={"task_id": task_ids},
         )
         return data.get("result", [])
@@ -1292,7 +1403,8 @@ class OzonClient:
             List of product info dicts.
         """
         data = self._request(
-            "POST", "/v1/product/import/info/list",
+            "POST",
+            "/v1/product/import/info/list",
             json_body={
                 "task_id": task_id,
                 "last_id": last_id,
@@ -1307,7 +1419,8 @@ class OzonClient:
         POST /v1/product/archive
         """
         data = self._request(
-            "POST", "/v1/product/archive",
+            "POST",
+            "/v1/product/archive",
             json_body={"product_id": product_ids},
         )
         return data
@@ -1318,7 +1431,8 @@ class OzonClient:
         POST /v1/product/unarchive
         """
         data = self._request(
-            "POST", "/v1/product/unarchive",
+            "POST",
+            "/v1/product/unarchive",
             json_body={"product_id": product_ids},
         )
         return data
@@ -1352,7 +1466,8 @@ class OzonClient:
         elif offer_id:
             payload["filter"] = {"offer_id": [offer_id]}
         data = self._request(
-            "POST", "/v3/products/info/attributes",
+            "POST",
+            "/v3/products/info/attributes",
             json_body=payload,
         )
         return data.get("result", {}).get("items", [])
@@ -1363,7 +1478,8 @@ class OzonClient:
         POST /v1/product/delete
         """
         data = self._request(
-            "POST", "/v1/product/delete",
+            "POST",
+            "/v1/product/delete",
             json_body={"product_id": product_ids},
         )
         return data

@@ -309,10 +309,11 @@
                 />
                 <n-tree
                   :data="filteredCategoryTree"
-                  :default-expand-all="false"
                   :selectable="true"
                   v-model:selected-keys="categorySelectedKeys"
                   :on-update:selected-keys="onCategorySelect"
+                  :lazy="true"
+                  :load="loadTreeChildren"
                   cascade
                   :leaf-only="true"
                   style="max-height: 200px; overflow-y: auto; border: 1px solid #e0e0e0; border-radius: 4px; padding: 4px;"
@@ -773,38 +774,49 @@ async function saveTask() {
   }
 }
 
-// ── category tree helpers ─────────────────────────────────────────
-async function loadCategoryTree(parentId = 0) {
-  if (!form.store_id) return;
+// ── category tree helpers (lazy-load: one level at a time) ──────
+function toTreeNodes(nodes: any[]): any[] {
+  // Always isLeaf=false so expand arrow appears at every level for lazy loading.
+  return (nodes || []).map((c: any) => ({
+    key: c.description_category_id ?? c.category_id,
+    label: c.category_name || c.title || String(c.description_category_id ?? c.category_id),
+    category_id: c.description_category_id ?? c.category_id,
+    category_name: c.category_name || c.title,
+    isLeaf: false,
+  }));
+}
+
+async function loadCategoryTree(storeId?: number) {
+  if (!storeId && !form.store_id) return;
   try {
-    const store = appStore.stores.find((s: any) => s.id === form.store_id);
-    if (!store) return;
-    const data = await apiGet(`/selection/stores/${store.id}/category-tree?category_id=${parentId}`);
-    const items = (data.items || []).map((c: any) => ({
-      key: c.category_id,
-      label: `${c.title} (${c.category_id})`,
-      category_id: c.category_id,
-      category_name: c.title,
-      children: [],
-      isLeaf: c.is_variant === true || c.type_count === 0,
-    }));
-    if (parentId === 0) {
-      categoryTreeRaw.value = items;
-      filteredCategoryTree.value = items;
-    }
-    return items;
+    const params = new URLSearchParams();
+    params.set("category_id", "0");
+    params.set("store_id", String(storeId || form.store_id));
+    const data = await apiGet(`/selection/ozon-categories?${params}`);
+    const raw = Array.isArray(data) ? data : (data?.categories || []);
+    const items = toTreeNodes(raw);
+    categoryTreeRaw.value = items;
+    filteredCategoryTree.value = items;
   } catch {
-    return [];
+    categoryTreeRaw.value = [];
+    filteredCategoryTree.value = [];
   }
 }
 
-async function expandCategoryNode(node: any) {
-  if (node.children && node.children.length > 0) return;
-  const kids = await loadCategoryTree(node.key);
-  if (kids && kids.length) {
-    node.children = kids;
-    // Force reactivity
-    categoryTreeRaw.value = [...categoryTreeRaw.value];
+// called by n-tree when user expands a node
+async function loadTreeChildren(treeNode: any, done: (children: any[]) => void) {
+  try {
+    const categoryId = treeNode.key;
+    const params = new URLSearchParams();
+    params.set("category_id", String(categoryId));
+    if (form.store_id) params.set("store_id", String(form.store_id));
+    const data = await apiGet(`/selection/ozon-categories?${params}`);
+    const raw = Array.isArray(data) ? data : (data?.categories || []);
+    // Strip nested children so lazy load works at every depth level
+    const stripped = raw.map((n: any) => ({ ...n, children: undefined }));
+    done(toTreeNodes(stripped));
+  } catch {
+    done([]);
   }
 }
 
@@ -842,10 +854,6 @@ function onCategorySelect(keys: number[]) {
   if (node) {
     form.category_id = node.category_id;
     form.category_name = node.category_name;
-    if (node.isLeaf) {
-      // Auto-expand leaf children (get type list)
-      expandCategoryNode(node);
-    }
   }
 }
 
@@ -856,7 +864,7 @@ watch(() => form.store_id, async (newVal) => {
     filteredCategoryTree.value = [];
     categorySearchText.value = "";
     categorySelectedKeys.value = [];
-    await loadCategoryTree();
+    await loadCategoryTree(newVal);
   }
 });
 

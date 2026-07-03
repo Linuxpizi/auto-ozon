@@ -51,6 +51,7 @@ const menuOptions: MenuOption[] = [
   { label: "仪表盘", key: "Dashboard", icon: renderIcon("📊") },
   { label: "店铺管理", key: "StoreManagement", icon: renderIcon("🏪") },
   { label: "订单管理", key: "Orders", icon: renderIcon("📦") },
+  { label: "退货订单", key: "ReturnOrders", icon: renderIcon("🔄") },
   { label: "店铺流水", key: "StoreFinance", icon: renderIcon("💰") },
   { label: "商品管理", key: "ProductManagement", icon: renderIcon("📋") },
   { label: "智囊", key: "Intelligence", icon: renderIcon("🧠") },
@@ -59,6 +60,7 @@ const menuOptions: MenuOption[] = [
   { label: "优图 Prompt 引擎", key: "PromptEngine", icon: renderIcon("🤖") },
   { type: "divider", key: "d2" },
   { label: "定时任务", key: "TaskConfig", icon: renderIcon("⚙️") },
+  { label: "飞书配置", key: "FeishuConfig", icon: renderIcon("🔔") },
 ];
 
 const activeKey = computed(() => route.name as string);

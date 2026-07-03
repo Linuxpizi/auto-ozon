@@ -78,14 +78,14 @@ class BatchUploadRequest(BaseModel):
 class CategoryTreeRequest(BaseModel):
     """查询 Ozon 分类树"""
     category_id: int = 0
-    language: str = "DEFAULT"
+    language: str = "ZH"
 
 
 class CategoryAttributeRequest(BaseModel):
     """查询分类属性"""
     description_category_id: int
     type_id: int = 0
-    language: str = "DEFAULT"
+    language: str = "ZH"
 
 
 class PriceCalcRequest(BaseModel):
@@ -628,7 +628,7 @@ def update_upload_status(product_id: int, db: Session = Depends(get_db)):
 def get_ozon_categories(
     category_id: int = Query(0, description="父分类ID, 0=根分类"),
     store_id: Optional[int] = Query(None, description="店铺ID"),
-    language: str = Query("EN", description="语言: EN/DEFAULT"),
+    language: str = Query("ZH_HANS", description="语言: ZH_HANS/RU/EN"),
     db: Session = Depends(get_db),
 ):
     """获取 Ozon 商品分类树"""

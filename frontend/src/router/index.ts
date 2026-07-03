@@ -10,7 +10,6 @@ import ProductManagementView from "../views/ProductManagementView.vue";
 import PrecisionListingView from "../views/PrecisionListingView.vue";
 import IntelligenceView from "../views/IntelligenceView.vue";
 import ProductSelectionView from "../views/ProductSelectionView.vue";
-import PromptEngineView from "../views/PromptEngineView.vue";
 import ReturnOrdersView from "../views/ReturnOrdersView.vue";
 import FeishuConfigView from "../views/FeishuConfigView.vue";
 
@@ -24,7 +23,6 @@ const routes = [
   { path: "/precision-listing", name: "PrecisionListing", redirect: "/selection" },
   { path: "/intelligence", name: "Intelligence", component: IntelligenceView },
   { path: "/selection", name: "ProductSelection", component: ProductSelectionView },
-  { path: "/prompt-engine", name: "PromptEngine", component: PromptEngineView },
   { path: "/task-configs", name: "TaskConfig", component: TaskConfigView },
   { path: "/feishu-config", name: "FeishuConfig", component: FeishuConfigView },
   { path: "/:pathMatch(.*)*", name: "NotFound", component: NotFoundView },

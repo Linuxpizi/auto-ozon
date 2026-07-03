@@ -157,7 +157,41 @@ def ship_order(req: ShipRequest, db: Session = Depends(get_db)):
     if not store:
         raise HTTPException(500, detail="关联店铺不存在")
     client = OzonClient(client_id=store.client_id, api_key=store.api_key)
-    packages = [{"products": req.product_ids}]
+    # Ozon Ship API requires product_id > 0.
+    # product_id, sku, offer_id are three distinct identifiers — never mix them.
+    # If product_id is 0, try resolving from the listings table by offer_id.
+    import json as _json
+    from app.models.listing import Listing
+    try:
+        db_products = _json.loads(order.products_json or "[]")
+    except Exception:
+        db_products = []
+    # Build an offer_id → product_id lookup from listings table
+    offer_ids_in_order = [
+        dp.get("offer_id", "") for dp in db_products if dp.get("offer_id")
+    ]
+    offer_to_pid: dict[str, int] = {}
+    if offer_ids_in_order:
+        rows = (
+            db.query(Listing.offer_id, Listing.product_id)
+            .filter(Listing.store_id == order.store_id, Listing.offer_id.in_(offer_ids_in_order))
+            .all()
+        )
+        for r in rows:
+            if r.product_id:
+                offer_to_pid[r.offer_id] = int(r.product_id)
+    fixed_products = []
+    for i, item in enumerate(req.product_ids):
+        pid = item.get("product_id", 0)
+        qty = item.get("quantity", 1)
+        # If product_id is missing, try products_json, then listings by offer_id
+        if not pid and i < len(db_products):
+            pid = db_products[i].get("product_id", 0)
+        if not pid and i < len(db_products):
+            oid = db_products[i].get("offer_id", "")
+            pid = offer_to_pid.get(oid, 0)
+        fixed_products.append({"product_id": pid, "quantity": qty})
+    packages = [{"products": fixed_products}]
     try:
         result = client.ship_fbs_posting(req.posting_number, packages)
     except Exception as e:

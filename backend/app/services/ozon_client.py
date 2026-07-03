@@ -338,7 +338,12 @@ class OzonClient:
             currency_code = ""
 
             # Use the first product for single-product display fields
+            # NOTE: product_id, sku, offer_id are three DISTINCT Ozon identifiers.
+            # product_id (int) = Ozon internal product ID (used by Ship API)
+            # sku (int) = Ozon SKU number (NOT the same as product_id)
+            # offer_id (str) = seller's own SKU code
             first_product = products[0] if products else {}
+            first_product_id = int(first_product.get("product_id", 0))
 
             fin_products = (item.get("financial_data") or {}).get("products", [])
             # Build a lookup by product_id for financial data
@@ -362,7 +367,8 @@ class OzonClient:
                 total_price += unit_price * qty
                 total_quantity += qty
 
-                # Accumulate financial data for this product
+                # Accumulate financial data for this product.
+                # fin_by_pid is keyed by financial_data.product_id — must match on product_id only.
                 pid = int(p.get("product_id", 0))
                 fin = fin_by_pid.get(pid, {})
                 total_payout += float(fin.get("payout", 0))
@@ -433,7 +439,7 @@ class OzonClient:
                     tracking_number=item.get("tracking_number", ""),
                     is_express=item.get("is_express", False),
                     offer_id=first_product.get("offer_id", ""),
-                    product_id=int(first_product.get("product_id", 0)),
+                    product_id=first_product_id,
                     payout=total_payout,
                     customer_price=total_customer_price,
                     commission_amount=total_commission,

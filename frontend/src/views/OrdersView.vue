@@ -95,20 +95,14 @@ async function refreshOrders() {
   await loadOrders();
 }
 
-async function onShipOrder(order: { id: number; order_number: string; shipment_number: string; products_json: string }) {
+async function onShipOrder(order: { id: number; order_number: string; shipment_number: string; product_id: number; quantity: number }) {
   if (!confirm(`确认对订单 ${order.order_number} 执行备货？\n\n提示：订单需在5天内完成备货，超时可能被Ozon自动取消`)) return;
+  if (!order.product_id) {
+    alert("该订单缺少商品 product_id，备货取消");
+    return;
+  }
   try {
-    let product_ids: { product_id: number; quantity: number }[] = [];
-    try {
-      const all = JSON.parse(order.products_json || "[]");
-      if (Array.isArray(all) && all.length > 0) {
-        product_ids = all.map((p: any) => ({ product_id: p.product_id, quantity: p.quantity }));
-      }
-    } catch { /* ignore parse error */ }
-    if (product_ids.length === 0) {
-      alert("无法获取商品信息，备货取消");
-      return;
-    }
+    const product_ids = [{ product_id: order.product_id, quantity: order.quantity }];
     await apiPost('/orders/ship', { posting_number: order.shipment_number, product_ids });
     alert('备货请求已发送，请检查订单状态');
     await loadOrders();

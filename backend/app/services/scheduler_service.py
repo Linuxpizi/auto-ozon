@@ -90,7 +90,7 @@ DEFAULT_TASKS = [
         name="同步退货订单",
         description="定时从 Ozon 同步退货订单并推送飞书通知 (每5分钟)",
         trigger_type="interval",
-        interval_seconds=300,  # 5 min
+        interval_seconds=60 * 60 * 6,  # 6 h
         enabled=True,
     ),
 ]
@@ -102,13 +102,20 @@ def _build_trigger(cfg):
         parts = cfg.cron_expression.strip().split()
         if len(parts) == 5:
             return CronTrigger(
-                minute=parts[0], hour=parts[1], day=parts[2],
-                month=parts[3], day_of_week=parts[4],
+                minute=parts[0],
+                hour=parts[1],
+                day=parts[2],
+                month=parts[3],
+                day_of_week=parts[4],
             )
         elif len(parts) == 6:
             return CronTrigger(
-                second=parts[0], minute=parts[1], hour=parts[2],
-                day=parts[3], month=parts[4], day_of_week=parts[5],
+                second=parts[0],
+                minute=parts[1],
+                hour=parts[2],
+                day=parts[3],
+                month=parts[4],
+                day_of_week=parts[5],
             )
     # default to interval
     return IntervalTrigger(seconds=cfg.interval_seconds or 1800)
@@ -192,10 +199,16 @@ def ensure_default_configs(db: Session) -> None:
             if obj.trigger_type != cfg.trigger_type:
                 obj.trigger_type = cfg.trigger_type
                 changed = True
-            if cfg.trigger_type == "cron" and obj.cron_expression != cfg.cron_expression:
+            if (
+                cfg.trigger_type == "cron"
+                and obj.cron_expression != cfg.cron_expression
+            ):
                 obj.cron_expression = cfg.cron_expression
                 changed = True
-            if cfg.trigger_type == "interval" and obj.interval_seconds != cfg.interval_seconds:
+            if (
+                cfg.trigger_type == "interval"
+                and obj.interval_seconds != cfg.interval_seconds
+            ):
                 obj.interval_seconds = cfg.interval_seconds
                 changed = True
             if changed:
@@ -207,7 +220,9 @@ def ensure_default_configs(db: Session) -> None:
         if added:
             logger.info("Scheduler: added %d missing default task configs", added)
         if updated:
-            logger.info("Scheduler: updated %d default task configs to new schedule", updated)
+            logger.info(
+                "Scheduler: updated %d default task configs to new schedule", updated
+            )
 
 
 def manual_trigger(task_key: str) -> str:
@@ -228,6 +243,7 @@ def manual_trigger(task_key: str) -> str:
 # ---------------------------------------------------------------------------
 # FastAPI lifespan hooks
 # ---------------------------------------------------------------------------
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):

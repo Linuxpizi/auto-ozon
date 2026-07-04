@@ -791,12 +791,36 @@ class OzonClient:
         return result
 
     def import_products_by_sku(self, items: list[dict]) -> dict:
-        """Create or update products via POST /v3/product/import.
+        """DEPRECATED: Use import_products() instead.
 
-        Args:
-            items: list of dicts with complete product info.
+        This method was misnamed — it calls /v3/product/import, same as import_products().
+        Kept for backward compatibility.
         """
-        data = self._request("POST", "/v3/product/import", json_body={"items": items})
+        import warnings
+        warnings.warn(
+            "import_products_by_sku() is deprecated, use import_products() instead",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        return self.import_products(items)
+
+    def import_by_sku(self, items: list[dict], scrape_id: str = "0",
+                      task_id: int = 0) -> dict:
+        """Import products by seller SKU via /v1/product/import-by-sku.
+
+        This is the ACTUAL import-by-sku endpoint (different from /v3/product/import).
+        Used when adding products that already exist in Ozon catalog by matching seller SKU.
+
+        POST /v1/product/import-by-sku
+        """
+        payload = {"items": items}
+        if scrape_id:
+            payload["scrape_id"] = scrape_id
+        if task_id:
+            payload["task_id"] = task_id
+        data = self._request(
+            "POST", "/v1/product/import-by-sku", json_body=payload
+        )
         return data
 
     def update_stocks(self, stock_items: list[dict]) -> dict:
@@ -1239,7 +1263,6 @@ class OzonClient:
 
     def get_category_tree(
         self,
-        category_id: int = 0,
         language: str = "ZH_HANS",
     ) -> list[dict]:
         """Get Ozon description category tree.
@@ -1256,7 +1279,6 @@ class OzonClient:
         """
         payload: dict[str, Any] = {
             "language": language,
-            "category_id": category_id,
         }
         data = self._request(
             "POST",

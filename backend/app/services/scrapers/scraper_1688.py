@@ -1,12 +1,14 @@
-"""1688 (阿里巴巴中国站) product page scraper.
+"""1688 (阿里巴巴中国站) product page scraper + search.
 
 Scrapes product detail pages on 1688.com to extract:
   title, images, price, SKU attributes, MOQ, seller info, etc.
 
+Also supports searching 1688 for products by keyword.
+
 1688 uses heavy anti-bot + login walls.  This scraper:
   1. First tries to extract data from the embedded JSON state
      (window.__INIT_DATA__ / window.__data__).
-  2. Falls back to HTML regex for meta tags and spec tables.
+  2. Fallbacks to HTML regex for meta tags and spec tables.
   3. Raises a clear error if the page is blocked so the frontend
      can offer manual input as a fallback.
 """
@@ -14,8 +16,9 @@ Scrapes product detail pages on 1688.com to extract:
 import json
 import re
 import logging
-from typing import List, Optional
-from urllib.parse import urlparse
+from dataclasses import asdict
+from typing import Any, Dict, List, Optional
+from urllib.parse import urlparse, quote_plus
 
 import httpx
 
@@ -34,6 +37,176 @@ _HEADERS = {
     "Accept-Encoding": "gzip, deflate, br",
     "Referer": "https://www.1688.com/",
 }
+
+
+async def search_1688(keyword: str, page: int = 1, page_size: int = 20) -> List[Dict[str, Any]]:
+    """Search 1688.com by keyword and return a list of product summaries.
+
+    Uses 1688's mobile API endpoint which is less restrictive than the
+    desktop search.  Returns up to ``page_size`` items per page.
+    """
+    search_url = "https://m.1688.com/offer_search/-C6B7B2B5.html"
+    params = {
+        "keywords": keyword,
+        "sortType": "booked",
+        "descendOrder": "true",
+        "beginPage": str(page),
+        "asyncContent": "",
+    }
+    headers = {**_HEADERS, "Referer": "https://m.1688.com/"}
+    results: List[Dict[str, Any]] = []
+
+    try:
+        async with httpx.AsyncClient(timeout=20, follow_redirects=True) as client:
+            resp = await client.get(search_url, params=params, headers=headers)
+            resp.raise_for_status()
+            html = resp.text
+
+        # ── Method 1: extract from embedded JSON ──
+        data = None
+        for pattern in [
+            r'window\.__INIT_DATA__\s*=\s*(\{.*?\});',
+            r'window\.__data__\s*=\s*(\{.*?\});',
+            r'"data"\s*:\s*(\{[^{}]*"offerList"[^{}]*\})',
+        ]:
+            m = re.search(pattern, html, re.DOTALL)
+            if m:
+                try:
+                    data = json.loads(m.group(1))
+                    break
+                except (json.JSONDecodeError, ValueError):
+                    continue
+
+        if data:
+            offer_list = None
+            for key in ("offerList", "data", "resultData", "result"):
+                if isinstance(data, dict):
+                    if key in data:
+                        offer_list = data[key]
+                        break
+                    # dig one level deeper
+                    for sub_key, sub_val in data.items():
+                        if isinstance(sub_val, dict) and key in sub_val:
+                            offer_list = sub_val[key]
+                            break
+                        if isinstance(sub_val, list) and sub_val and isinstance(sub_val[0], dict):
+                            offer_list = sub_val
+                            break
+
+            if isinstance(offer_list, list):
+                for item in offer_list[:page_size]:
+                    results.append(_parse_search_item(item))
+                if results:
+                    return results
+
+        # ── Method 2: HTML regex fallback ──
+        results = _parse_search_html(html, page_size)
+
+    except httpx.HTTPStatusError as e:
+        logger.warning("1688 search HTTP error %s: %s", e.response.status_code, e)
+    except Exception as e:
+        logger.warning("1688 search failed: %s", e)
+
+    return results
+
+
+def _parse_search_item(item: dict) -> Dict[str, Any]:
+    """Parse a single search result item from JSON data."""
+    title = ""
+    for key in ("title", "subject", "offerTitle", "name"):
+        if key in item and isinstance(item[key], str):
+            title = re.sub(r'<[^>]+>', '', item[key]).strip()
+            break
+
+    image = ""
+    for key in ("imageUrl", "image", "pic", "picUrl", "imgUrl"):
+        if key in item and isinstance(item[key], str):
+            image = item[key]
+            if not image.startswith("http"):
+                image = "https:" + image
+            break
+
+    price = ""
+    for key in ("price", "priceRange", "priceStr"):
+        if key in item:
+            price = str(item[key])
+            break
+
+    offer_id = ""
+    for key in ("id", "offerId", "itemId"):
+        if key in item:
+            offer_id = str(item[key])
+            break
+
+    url = ""
+    for key in ("url", "detailUrl", "offerUrl", "href"):
+        if key in item and isinstance(item[key], str):
+            url = item[key]
+            if not url.startswith("http"):
+                url = "https:" + url
+            break
+    if not url and offer_id:
+        url = f"https://detail.1688.com/offer/{offer_id}.html"
+
+    seller = ""
+    for key in ("sellerName", "companyName", "seller"):
+        if key in item and isinstance(item[key], str):
+            seller = item[key]
+            break
+
+    sales = 0
+    for key in ("sales", "bookedNum", "monthSold"):
+        if key in item:
+            try:
+                sales = int(item[key])
+            except (ValueError, TypeError):
+                pass
+            break
+
+    return {
+        "title": title,
+        "image": image,
+        "price": price,
+        "offer_id": offer_id,
+        "url": url,
+        "seller": seller,
+        "sales": sales,
+    }
+
+
+def _parse_search_html(html: str, page_size: int = 20) -> List[Dict[str, Any]]:
+    """Fallback: extract search results from HTML using regex."""
+    results: List[Dict[str, Any]] = []
+
+    # Try to find offer cards
+    for m in re.finditer(
+        r'(?:data-offer-id|offerId|offer_id)["\s:=]+["\']?(\d+)',
+        html,
+    ):
+        offer_id = m.group(1)
+        if any(r.get("offer_id") == offer_id for r in results):
+            continue
+        results.append({
+            "title": "",
+            "image": "",
+            "price": "",
+            "offer_id": offer_id,
+            "url": f"https://detail.1688.com/offer/{offer_id}.html",
+            "seller": "",
+            "sales": 0,
+        })
+        if len(results) >= page_size:
+            break
+
+    # Try to enrich titles from nearby context
+    for result in results:
+        if result["offer_id"] and not result["title"]:
+            pattern = rf'offer[_-]?[iI]d["\s:=]+["\']?{result["offer_id"]}[^<]*?(?:title|subject)["\s:=]+["\']([^"\']+)["\']'
+            tm = re.search(pattern, html, re.IGNORECASE)
+            if tm:
+                result["title"] = tm.group(1).strip()
+
+    return results
 
 
 class Ali1688Scraper(PlatformScraper):

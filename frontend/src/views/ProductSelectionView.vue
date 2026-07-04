@@ -214,7 +214,12 @@
 
           <!-- 右栏: 编辑数据 -->
           <div ref="panelRightRef" class="panel-right" @scroll="handlePanelScroll('right')">
-            <div class="panel-title">✨ 优化数据</div>
+            <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:12px;">
+              <div class="panel-title" style="margin-bottom:0">✨ 优化数据</div>
+              <n-button size="small" type="primary" :loading="aiOneClickLoading" @click="handleOneClickAiOptimize">
+                🤖 一键AI优化
+              </n-button>
+            </div>
 
             <!-- 标题 -->
             <div class="section-block">
@@ -273,7 +278,12 @@
 
             <!-- 价格 -->
             <div class="section-block">
-              <div class="section-label">价格与促销</div>
+              <div class="section-label">
+                价格与促销
+                <div class="section-actions">
+                  <n-button size="tiny" type="warning" @click="showSmartPricingModal" :loading="smartPricingLoading">💰 智能定价</n-button>
+                </div>
+              </div>
               <n-grid :cols="3" :x-gap="8">
                 <n-gi>
                   <div class="field-label">现价</div>
@@ -300,6 +310,26 @@
                 </div>
               </div>
               <n-input v-model:value="editProduct.description" type="textarea" :rows="4" placeholder="商品描述" />
+            </div>
+
+            <!-- ━━━ 1688找同款 ━━━ -->
+            <div class="section-block">
+              <div class="section-label">
+                🔗 1688 同款
+                <div class="section-actions">
+                  <n-button size="tiny" quaternary type="warning" :loading="extract1688Loading" @click="handleExtract1688Specs" :disabled="!linked1688Info && !editProduct?.source_url?.includes('1688')">📥 提取参数</n-button>
+                  <n-button size="tiny" type="primary" @click="showSearch1688Modal" :loading="search1688Loading">🔍 搜索同款</n-button>
+                </div>
+              </div>
+              <div v-if="linked1688Info" class="linked-1688-info">
+                <n-tag size="small" type="info" :bordered="false">✅ 已绑定</n-tag>
+                <div class="linked-1688-title" @click="openUrl(linked1688Info.url)">{{ linked1688Info.title || linked1688Info.url }}</div>
+                <n-button size="tiny" quaternary type="error" @click="unlink1688">解绑</n-button>
+              </div>
+              <div v-else class="empty-hint">
+                <span v-if="editProduct.source_url?.includes('1688')">当前商品来自1688，可直接提取参数</span>
+                <span v-else>未绑定1688同款，点击搜索按钮查找</span>
+              </div>
             </div>
 
             <!-- 属性 -->
@@ -396,9 +426,132 @@
       </n-drawer-content>
     </n-drawer>
 
-        <!-- ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+        <!-- ━━━ 1688 搜索同款弹窗 ━━━ -->
+    <n-modal v-model:show="search1688Visible" preset="card" style="width: 800px;" :bordered="false">
+      <template #header>
+        <span>🔍 1688 搜索同款</span>
+      </template>
+      <n-space vertical :size="12">
+        <n-input-group>
+          <n-input v-model:value="search1688Keyword" placeholder="输入关键词搜索1688同款..." @keyup.enter="handleSearch1688" />
+          <n-button type="primary" :loading="search1688Loading" @click="handleSearch1688">搜索</n-button>
+        </n-input-group>
+        <n-spin :show="search1688Loading">
+          <div v-if="search1688Results.length" class="search1688-results">
+            <div v-for="item in search1688Results" :key="item.offer_id" class="search1688-card" @click="handleLink1688(item)">
+              <n-image :src="item.image" width="80" height="80" object-fit="cover" style="border-radius: 6px; flex-shrink: 0;" v-if="item.image" />
+              <div v-else style="width:80px;height:80px;background:#f0f0f0;border-radius:6px;display:flex;align-items:center;justify-content:center;flex-shrink:0;">📦</div>
+              <div class="search1688-card__info">
+                <div class="search1688-card__title">{{ item.title || '(无标题)' }}</div>
+                <div class="search1688-card__meta">
+                  <n-tag size="tiny" type="warning" :bordered="false" v-if="item.price">¥{{ item.price }}</n-tag>
+                  <n-tag size="tiny" type="info" :bordered="false" v-if="item.seller">{{ item.seller }}</n-tag>
+                  <span v-if="item.sales" style="font-size:11px; color:#999;">月销 {{ item.sales }}</span>
+                </div>
+              </div>
+              <n-button size="tiny" type="primary" quaternary>选择</n-button>
+            </div>
+          </div>
+          <div v-else-if="!search1688Loading && search1688Keyword && search1688Searched" style="text-align:center; padding:20px; color:#999;">
+            未找到结果，换个关键词试试
+          </div>
+        </n-spin>
+      </n-space>
+    </n-modal>
+
+    <!-- ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
          上传到 Ozon 弹窗
          ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ -->
+
+    <!-- ━━━ 智能定价弹窗 ━━━ -->
+    <n-modal v-model:show="smartPricingVisible" preset="card" style="width: 600px;" :bordered="false">
+      <template #header>
+        <span>💰 智能定价</span>
+      </template>
+      <n-space vertical :size="16">
+        <n-grid :cols="2" :x-gap="12" :y-gap="8">
+          <n-gi>
+            <div class="field-label">采购价 (CNY)</div>
+            <n-input-number v-model:value="pricingForm.cost_cny" :min="0" :precision="2" size="small" style="width:100%" placeholder="1688 采购价" />
+          </n-gi>
+          <n-gi>
+            <div class="field-label">运费 (CNY)</div>
+            <n-input-number v-model:value="pricingForm.shipping_cny" :min="0" :precision="2" size="small" style="width:100%" placeholder="国际运费" />
+          </n-gi>
+          <n-gi>
+            <div class="field-label">包装费 (CNY)</div>
+            <n-input-number v-model:value="pricingForm.packaging_cny" :min="0" :precision="2" size="small" style="width:100%" placeholder="包装费" />
+          </n-gi>
+          <n-gi>
+            <div class="field-label">汇率 (CNY→RUB)</div>
+            <n-input-number v-model:value="pricingForm.exchange_rate" :min="0" :precision="2" size="small" style="width:100%" />
+          </n-gi>
+          <n-gi>
+            <div class="field-label">Ozon 佣金 (%)</div>
+            <n-input-number v-model:value="pricingForm.ozon_commission_pct" :min="0" :max="100" :precision="1" size="small" style="width:100%" />
+          </n-gi>
+          <n-gi>
+            <div class="field-label">目标利润率 (%)</div>
+            <n-input-number v-model:value="pricingForm.target_margin_pct" :min="0" :max="500" :precision="1" size="small" style="width:100%" />
+          </n-gi>
+          <n-gi>
+            <div class="field-label">竞品价格 (RUB)</div>
+            <n-input-number v-model:value="pricingForm.competitor_price_rub" :min="0" :precision="2" size="small" style="width:100%" placeholder="可选" />
+          </n-gi>
+        </n-grid>
+        <n-button type="warning" block :loading="smartPricingLoading" @click="handleSmartPricing">
+          🧮 计算建议价格
+        </n-button>
+        <!-- 计算结果 -->
+        <n-card v-if="pricingResult" size="small" title="📊 定价结果" :bordered="true">
+          <n-grid :cols="2" :x-gap="8" :y-gap="4">
+            <n-gi>
+              <div class="pricing-result-item">
+                <span class="pricing-result-label">💰 建议售价</span>
+                <span class="pricing-result-value" style="color: #d03050; font-size: 18px;">₽ {{ pricingResult.suggested_price_rub }}</span>
+              </div>
+            </n-gi>
+            <n-gi>
+              <div class="pricing-result-item">
+                <span class="pricing-result-label">🏷️ 划线价</span>
+                <span class="pricing-result-value">₽ {{ pricingResult.old_price_rub }}</span>
+              </div>
+            </n-gi>
+            <n-gi>
+              <div class="pricing-result-item">
+                <span class="pricing-result-label">📦 总成本</span>
+                <span class="pricing-result-value">₽ {{ pricingResult.cost_total_rub }} (¥{{ pricingResult.cost_total_cny }})</span>
+              </div>
+            </n-gi>
+            <n-gi>
+              <div class="pricing-result-item">
+                <span class="pricing-result-label">📈 利润率</span>
+                <span class="pricing-result-value">{{ pricingResult.margin_pct }}%</span>
+              </div>
+            </n-gi>
+            <n-gi>
+              <div class="pricing-result-item">
+                <span class="pricing-result-label">💎 预计利润</span>
+                <span class="pricing-result-value" style="color: #18a058;">₽ {{ pricingResult.profit_rub }}</span>
+              </div>
+            </n-gi>
+            <n-gi>
+              <div class="pricing-result-item">
+                <span class="pricing-result-label">🏦 佣金</span>
+                <span class="pricing-result-value">₽ {{ pricingResult.commission_rub }}</span>
+              </div>
+            </n-gi>
+          </n-grid>
+        </n-card>
+      </n-space>
+      <template #footer>
+        <div class="upload-footer">
+          <n-button @click="smartPricingVisible = false">取消</n-button>
+          <n-button type="primary" @click="applySmartPricing" :disabled="!pricingResult">✅ 应用价格</n-button>
+        </div>
+      </template>
+    </n-modal>
+
     <n-modal v-model:show="uploadVisible" preset="card" class="upload-modal" :bordered="false">
       <template #header>
         <div class="upload-modal__header">
@@ -425,15 +578,54 @@
               <n-gi>
                 <div class="upload-field">
                   <label class="upload-field__label">商品分类 <span class="required">*</span></label>
-                  <n-tree-select
-                    :value="uploadForm.description_category_id"
-                    :options="categoryTreeNodes"
-                    placeholder="选择 Ozon 分类"
-                    :lazy="true"
-                    :load="loadTreeChildren"
-                    filterable
-                    @update:value="onCategoryValueChange"
-                  />
+                  <n-popover
+                    trigger="click"
+                    placement="bottom-start"
+                    :disabled="!uploadForm.store_id"
+                    :show="categoryPopoverShow"
+                    @update:show="(v: boolean) => categoryPopoverShow = v"
+                    raw
+                    :style="{ width: '420px' }"
+                  >
+                    <template #trigger>
+                      <n-input
+                        :value="selectedCategoryLabel"
+                        placeholder="请先选择店铺,然后点击选择分类"
+                        readonly
+                        :disabled="!uploadForm.store_id"
+                        size="small"
+                        style="cursor: pointer"
+                      >
+                        <template #suffix>
+                          <n-icon v-if="selectedCategoryLabel" @click.stop="clearCategorySelection" style="cursor: pointer">
+                            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" width="14" height="14"><path d="M12 2C6.47 2 2 6.47 2 12s4.47 10 10 10 10-4.47 10-10S17.53 2 12 2zm5 13.59L15.59 17 12 13.41 8.41 17 7 15.59 10.59 12 7 8.41 8.41 7 12 10.59 15.59 7 17 8.41 13.41 12 17 15.59z"/></svg>
+                          </n-icon>
+                        </template>
+                      </n-input>
+                    </template>
+                    <div style="background: var(--n-color); border-radius: 8px; box-shadow: 0 6px 16px rgba(0,0,0,.12); overflow: hidden;">
+                      <div style="padding: 8px 12px; border-bottom: 1px solid rgba(0,0,0,.06);">
+                        <n-input
+                          v-model:value="categorySearchPattern"
+                          placeholder="🔍 搜索分类..."
+                          clearable
+                          size="small"
+                        />
+                      </div>
+                      <div style="height: 360px; overflow-y: auto; padding: 4px 0;">
+                        <n-tree
+                          :data="categoryTreeNodes"
+                          :selected-keys="selectedCategoryKeys"
+                          :expanded-keys="expandedCategoryKeys"
+                          :cascade="false"
+                          :pattern="categorySearchPattern || undefined"
+                          :filter="filterCategoryTree"
+                          @update:selected-keys="onCategoryTreeSelect"
+                          @update:expanded-keys="onCategoryTreeExpand"
+                        />
+                      </div>
+                    </div>
+                  </n-popover>
                 </div>
               </n-gi>
               <n-gi>
@@ -591,7 +783,7 @@ import {
   NButton, NTag, NSpace, NInput, NInputNumber, NSelect, NDataTable,
   NPopconfirm, NPagination, NDrawer, NDrawerContent, NImage, NDivider,
   NModal, NForm, NFormItem, NGrid, NGi, NH2, NAlert,
-  NTreeSelect, NA, NSpin, NDatePicker,
+  NTree, NA, NSpin, NDatePicker, NInputGroup, NCard,
   type GlobalThemeOverrides,
 } from "naive-ui";
 import { apiGet, apiPost, apiPut, apiDelete } from "../api";
@@ -796,19 +988,30 @@ async function doUpload() {
   if (!editProduct.value) return;
   uploading.value = true;
   try {
-    await apiPost("/ozon/upload", {
-      scraped_product_id: editProduct.value.id,
+    // Step 1: 创建草稿
+    const draft = await apiPost<any>("/upload/drafts", {
       store_id: uploadForm.store_id,
+      source_type: "scraped",
+      source_product_id: editProduct.value.id,
+      source_name: editProduct.value.title || "",
+      source_url: editProduct.value.url || "",
       description_category_id: uploadForm.description_category_id,
       name: uploadForm.name,
       description: uploadForm.description,
-      price: priceCalcResult.value?.final_price_rub,
-      weight_g: uploadForm.weight_g || undefined,
-      height_mm: uploadForm.height_mm || undefined,
-      depth_mm: uploadForm.depth_mm || undefined,
-      width_mm: uploadForm.width_mm || undefined,
+      price_cny: editProduct.value.price || 0,
+      price_rub: priceCalcResult.value?.final_price_rub || 0,
+      weight: uploadForm.weight_g || 500,
+      height: uploadForm.height_mm || 100,
+      depth: uploadForm.depth_mm || 100,
+      width: uploadForm.width_mm || 100,
     });
-    message.success("上传任务已提交,请在 Ozon 后台查看状态");
+    // Step 2: 自动提交到 Ozon
+    const result = await apiPost<any>(`/upload/drafts/${draft.id}/submit`);
+    if (result.success) {
+      message.success(`✅ 已提交到 Ozon (task_id=${result.task_id})，可到「上架管理」查看状态`);
+    } else {
+      message.warning(`草稿已创建但提交失败: ${result.error || "未知错误"}，可到「上架管理」重试`);
+    }
     uploadVisible.value = false;
   } catch (e: any) {
     message.error("上传失败: " + e.message);
@@ -835,6 +1038,162 @@ function handleImageUpload(e: Event) {
 function removeImage(idx: number) {
   if (!editProduct.value?.images) return;
   editProduct.value.images.splice(idx, 1);
+}
+
+// ── 智能定价 ──
+const smartPricingVisible = ref(false);
+const smartPricingLoading = ref(false);
+const pricingResult = ref<any>(null);
+const pricingForm = ref({
+  cost_cny: 0,
+  shipping_cny: 0,
+  packaging_cny: 0,
+  exchange_rate: 12.5,
+  ozon_commission_pct: 15.0,
+  target_margin_pct: 30.0,
+  competitor_price_rub: 0,
+});
+
+function showSmartPricingModal() {
+  if (editProduct.value) {
+    pricingForm.value.cost_cny = editProduct.value.price || 0;
+  }
+  pricingResult.value = null;
+  smartPricingVisible.value = true;
+}
+
+async function handleSmartPricing() {
+  smartPricingLoading.value = true;
+  try {
+    const result = await apiPost("/selection/smart-pricing", {
+      product_id: editProduct.value?.id || 0,
+      ...pricingForm.value,
+    });
+    pricingResult.value = result;
+  } catch (e: any) {
+    message.error("定价计算失败: " + e.message);
+  } finally {
+    smartPricingLoading.value = false;
+  }
+}
+
+function applySmartPricing() {
+  if (!pricingResult.value || !editProduct.value) return;
+  editProduct.value.price = pricingResult.value.suggested_price_rub;
+  editProduct.value.old_price = pricingResult.value.old_price_rub;
+  message.success(`✅ 已应用：售价 ₽${pricingResult.value.suggested_price_rub}，划线价 ₽${pricingResult.value.old_price_rub}`);
+  smartPricingVisible.value = false;
+}
+
+// ── 1688 找同款 ──
+const search1688Visible = ref(false);
+const search1688Keyword = ref("");
+const search1688Results = ref<any[]>([]);
+const search1688Loading = ref(false);
+const search1688Searched = ref(false);
+
+const linked1688Info = computed(() => {
+  if (!editProduct.value?.attributes) return null;
+  const linkAttr = editProduct.value.attributes.find((a: any) => a.name === "1688_同款链接");
+  if (!linkAttr) return null;
+  const titleAttr = editProduct.value.attributes.find((a: any) => a.name === "1688_同款标题");
+  return { url: linkAttr.value, title: titleAttr?.value || "" };
+});
+
+function showSearch1688Modal() {
+  // 用商品标题作为默认搜索关键词
+  search1688Keyword.value = editProduct.value?.title?.substring(0, 30) || "";
+  search1688Results.value = [];
+  search1688Searched.value = false;
+  search1688Visible.value = true;
+}
+
+async function handleSearch1688() {
+  if (!search1688Keyword.value.trim()) return;
+  search1688Loading.value = true;
+  search1688Searched.value = true;
+  try {
+    const res = await apiPost("/selection/search-1688", {
+      keyword: search1688Keyword.value,
+      page: 1,
+      page_size: 20,
+    });
+    search1688Results.value = res.items || [];
+  } catch (e: any) {
+    message.error("搜索失败: " + e.message);
+    search1688Results.value = [];
+  } finally {
+    search1688Loading.value = false;
+  }
+}
+
+async function handleLink1688(item: any) {
+  if (!editProduct.value) return;
+  try {
+    const result = await apiPost(`/selection/products/${editProduct.value.id}/link-1688`, {
+      offer_id: item.offer_id || "",
+      url: item.url || "",
+      title: item.title || "",
+      price: item.price || 0,
+      image: item.image || "",
+      seller: item.seller || "",
+    });
+    // 更新本地属性
+    if (result.total_attributes) {
+      const existingAttrs = editProduct.value.attributes || [];
+      const filtered = existingAttrs.filter((a: any) => !["1688_同款链接", "1688_同款标题", "1688_offer_id", "1688_供应商"].includes(a.name));
+      filtered.push(
+        { name: "1688_同款链接", value: item.url || `https://detail.1688.com/offer/${item.offer_id}.html` },
+        { name: "1688_同款标题", value: item.title || "" },
+      );
+      if (item.offer_id) filtered.push({ name: "1688_offer_id", value: item.offer_id });
+      if (item.seller) filtered.push({ name: "1688_供应商", value: item.seller });
+      editProduct.value.attributes = filtered;
+    }
+    message.success(`✅ 已绑定1688同款${result.specs_extracted?.length ? `，提取了 ${result.specs_extracted.length} 个规格参数` : ""}`);
+    search1688Visible.value = false;
+  } catch (e: any) {
+    message.error("绑定失败: " + e.message);
+  }
+}
+
+function unlink1688() {
+  if (!editProduct.value?.attributes) return;
+  editProduct.value.attributes = editProduct.value.attributes.filter(
+    (a: any) => !["1688_同款链接", "1688_同款标题", "1688_offer_id", "1688_供应商"].includes(a.name)
+  );
+  message.success("已解绑1688同款");
+}
+
+function openUrl(url: string) {
+  if (url) window.open(url, "_blank");
+}
+
+// ── 1688 参数提取 ──
+const extract1688Loading = ref(false);
+
+async function handleExtract1688Specs() {
+  if (!editProduct.value) return;
+  extract1688Loading.value = true;
+  try {
+    const result = await apiPost(`/selection/products/${editProduct.value.id}/extract-1688-specs`);
+    // 更新尺寸和重量
+    if (result.weight_g) editProduct.value.weight_g = result.weight_g;
+    if (result.depth_mm) editProduct.value.depth_mm = result.depth_mm;
+    if (result.height_mm) editProduct.value.height_mm = result.height_mm;
+    if (result.width_mm) editProduct.value.width_mm = result.width_mm;
+    // 更新属性
+    if (result.total_attributes) {
+      const res = await apiGet(`/selection/products/${editProduct.value.id}`);
+      if (res.attributes) editProduct.value.attributes = res.attributes;
+    }
+    message.success(`✅ 已提取 ${result.specs_extracted?.length || 0} 个参数` +
+      (result.weight_g ? `，重量: ${result.weight_g}g` : ""));
+  } catch (e: any) {
+    message.error("参数提取失败: " + e.message);
+  } finally {
+    extract1688Loading.value = false;
+  }
 }
 
 // ── AI 图片功能 ──
@@ -986,6 +1345,102 @@ async function handleTranslateAllAttrs() {
     message.error("属性翻译失败: " + e.message);
   } finally {
     aiTextLoading.value = false;
+  }
+}
+
+// ── 一键AI优化 ──
+const aiOneClickLoading = ref(false);
+
+async function handleOneClickAiOptimize() {
+  if (!editProduct.value) return;
+  aiOneClickLoading.value = true;
+  try {
+    const steps: string[] = [];
+
+    // Step 1: AI 优化标题
+    if (editProduct.value.title) {
+      try {
+        const titleRes = await optimizeDescription({
+          title: editProduct.value.title,
+          attributes: (editProduct.value.attributes || []).reduce((acc: any, a: any) => {
+            if (a.name) acc[a.name] = a.value;
+            return acc;
+          }, {}),
+          context: editProduct.value.category || "",
+        });
+        if (titleRes.description) {
+          editProduct.value.title = titleRes.description;
+          steps.push("标题优化");
+        }
+      } catch { /* skip */ }
+    }
+
+    // Step 2: AI 优化描述
+    if (editProduct.value.description) {
+      try {
+        const descRes = await optimizeDescription({
+          description: editProduct.value.description,
+          context: editProduct.value.category || "",
+        });
+        if (descRes.description) {
+          editProduct.value.description = descRes.description;
+          steps.push("描述优化");
+        }
+      } catch { /* skip */ }
+    }
+
+    // Step 3: 翻译属性
+    if (editProduct.value.attributes?.length) {
+      try {
+        const items = editProduct.value.attributes
+          .filter((a: any) => a.name || a.value)
+          .map((a: any) => ({ key: a.name || "", value: a.value || "" }));
+        if (items.length > 0) {
+          const attrRes = await translateBatch({ items, field_type: "attribute" });
+          if (attrRes.items?.length) {
+            for (const item of attrRes.items) {
+              const attr = editProduct.value.attributes.find((a: any) => a.name === item.key);
+              if (attr && item.translated) attr.value = item.translated;
+            }
+            steps.push(`翻译${attrRes.items.length}个属性`);
+          }
+        }
+      } catch { /* skip */ }
+    }
+
+    // Step 4: AI 优化图片
+    if (editProduct.value.images?.length) {
+      let optimizedCount = 0;
+      for (let i = 0; i < editProduct.value.images.length; i++) {
+        try {
+          const img = editProduct.value.images[i];
+          const url = typeof img === "string" ? img : img.url;
+          const res = await replaceImageSubject({
+            image_url: url,
+            prompt: "Professional e-commerce product photo on white background, studio lighting, clean",
+          });
+          if (res.result_url) {
+            if (typeof editProduct.value.images[i] === "string") {
+              editProduct.value.images[i] = res.result_url;
+            } else {
+              editProduct.value.images[i].result_url = res.result_url;
+            }
+            optimizedCount++;
+          }
+        } catch { /* skip */ }
+      }
+      if (optimizedCount) steps.push(`优化${optimizedCount}张图片`);
+    }
+
+    if (steps.length) {
+      message.success(`✅ 一键优化完成: ${steps.join(" → ")}`);
+    } else {
+      message.info("没有需要优化的内容");
+    }
+  } catch (e: any) {
+    message.error("一键优化失败: " + e.message);
+  } finally {
+    aiOneClickLoading.value = false;
   }
 }
 
@@ -1175,58 +1630,120 @@ async function loadStoreOptions() {
   } catch { /* ignore */ }
 }
 
-// lazy-load category tree: only load root level first
+// ── Category tree: fetch all once per store, local lazy load ──
 const categoryTreeNodes = ref<any[]>([]);
+const selectedCategoryKeys = ref<any[]>([]);
+const expandedCategoryKeys = ref<any[]>([]);
+const categorySearchPattern = ref('');
+const categoryPopoverShow = ref(false);
+const categoryLoading = ref(false);
+const categoryTreeMap = ref<Map<number, any[]>>(new Map()); // parentId -> children[]
+
+const selectedCategoryLabel = computed(() => {
+  if (!selectedCategoryKeys.value.length) return '';
+  const key = selectedCategoryKeys.value[0];
+  for (const [, children] of categoryTreeMap.value) {
+    const found = children.find((c: any) => c.key === key);
+    if (found) return found.label;
+  }
+  function findLabel(nodes: any[]): string {
+    for (const n of nodes) {
+      if (n.key === key) return n.label;
+      if (n.children) { const f = findLabel(n.children); if (f) return f; }
+    }
+    return '';
+  }
+  return findLabel(categoryTreeNodes.value);
+});
+
+function clearCategorySelection() {
+  selectedCategoryKeys.value = [];
+  uploadForm.description_category_id = null;
+}
+
+// n-tree filter: match node label against search pattern
+function filterCategoryTree(pattern: string, node: any): boolean {
+  if (!pattern) return true;
+  const label = (node.label || '').toLowerCase();
+  return label.includes(pattern.toLowerCase());
+}
 
 function toTreeNodes(nodes: any[]): any[] {
-  // Always set isLeaf=false so the expand arrow appears and lazy load can fire.
-  // We strip nested children from the API response to force lazy loading at each level.
   return (nodes || []).map((n) => ({
     key: n.description_category_id ?? n.category_id,
     label: n.category_name ?? String(n.description_category_id ?? n.category_id),
-    isLeaf: false,
+    isLeaf: n.is_leaf === true || !Array.isArray(n.children) || n.children.length === 0,
   }));
 }
 
+// Flatten the entire category tree into categoryTreeMap (parentId -> children[])
+function flattenTree(nodes: any[]) {
+  for (const n of nodes) {
+    const id = n.description_category_id ?? n.category_id;
+    const children = Array.isArray(n.children) ? n.children : [];
+    const childNodes = children.map((c: any) => ({
+      key: c.description_category_id ?? c.category_id,
+      label: c.category_name ?? String(c.description_category_id ?? c.category_id),
+      isLeaf: c.is_leaf === true || !Array.isArray(c.children) || c.children.length === 0,
+    }));
+    categoryTreeMap.value.set(id, childNodes);
+    if (children.length > 0) flattenTree(children);
+  }
+}
+
+// Fetch ALL categories once when store is selected
 async function loadCategoryTree(storeId?: number) {
+  if (!storeId) {
+    categoryTreeNodes.value = [];
+    categoryTreeMap.value.clear();
+    return;
+  }
+  categoryLoading.value = true;
   try {
     const params = new URLSearchParams();
     params.set('category_id', '0');
-    if (storeId) params.set('store_id', String(storeId));
+    params.set('store_id', String(storeId));
     const resp = await apiGet<any>(`/selection/ozon-categories?${params}`);
     const raw = Array.isArray(resp) ? resp : (resp?.categories || []);
+    categoryTreeMap.value.clear();
+    flattenTree(raw);
     categoryTreeNodes.value = toTreeNodes(raw);
   } catch (e) {
     console.error("loadCategoryTree failed:", e);
+    message.error('加载分类失败');
+  } finally {
+    categoryLoading.value = false;
   }
 }
 
-// called by n-tree-select when user expands a node
-async function loadTreeChildren(node: any, done: (children: any[]) => void) {
-  try {
-    const categoryId = node.key;
-    const params = new URLSearchParams();
-    params.set('category_id', String(categoryId));
-    const storeId = uploadForm.store_id;
-    if (storeId) params.set('store_id', String(storeId));
-    const resp = await apiGet<any>(`/selection/ozon-categories?${params}`);
-    const raw = Array.isArray(resp) ? resp : (resp?.categories || []);
-    // Strip nested children: API may return full tree, but for lazy loading
-    // we only want one level at a time so the expand arrow works at every level.
-    const stripped = raw.map((n: any) => ({ ...n, children: undefined }));
-    done(toTreeNodes(stripped));
-  } catch (e) {
-    console.error("loadTreeChildren failed:", e);
-    done([]);
+// When a node is expanded, inject children from local map (no API call)
+function onCategoryTreeExpand(keys: any[]) {
+  expandedCategoryKeys.value = keys;
+  function injectChildren(nodes: any[]): boolean {
+    let changed = false;
+    for (const n of nodes) {
+      if (keys.includes(n.key) && (!n.children || n.children.length === 0)) {
+        const localChildren = categoryTreeMap.value.get(n.key);
+        if (localChildren && localChildren.length > 0) {
+          n.children = localChildren.map((c: any) => ({ ...c }));
+          changed = true;
+        }
+      }
+      if (n.children && injectChildren(n.children)) changed = true;
+    }
+    return changed;
   }
+  injectChildren(categoryTreeNodes.value);
 }
 
 // Only allow selecting leaf nodes (last level only)
-function onCategoryValueChange(value: any) {
-  if (value == null) {
+function onCategoryTreeSelect(keys: any[]) {
+  if (!keys || keys.length === 0) {
+    selectedCategoryKeys.value = [];
     uploadForm.description_category_id = null;
     return;
   }
+  const value = keys[keys.length - 1];
   function findNode(nodes: any[]): any {
     for (const n of nodes) {
       if (n.key === value) return n;
@@ -1235,13 +1752,28 @@ function onCategoryValueChange(value: any) {
     return null;
   }
   const node = findNode(categoryTreeNodes.value);
-  // If node has loaded children (non-empty array), it's not a leaf — reject selection
-  if (node && node.children && node.children.length > 0) {
+  // Check local map for children too
+  const localChildren = categoryTreeMap.value.get(value);
+  if ((node && node.children && node.children.length > 0) || (localChildren && localChildren.length > 0)) {
     message.warning('请展开选择最后一级分类');
+    selectedCategoryKeys.value = [];
     return;
   }
+  selectedCategoryKeys.value = [value];
   uploadForm.description_category_id = value;
 }
+
+// Watch store_id change -> reload full category tree
+watch(() => uploadForm.store_id, (newVal) => {
+  if (newVal) {
+    loadCategoryTree(newVal);
+  } else {
+    categoryTreeNodes.value = [];
+    categoryTreeMap.value.clear();
+    selectedCategoryKeys.value = [];
+    uploadForm.description_category_id = null;
+  }
+});
 
 function onPageSizeChange(size: number) {
   pageSize.value = size;
@@ -1253,14 +1785,7 @@ onMounted(() => {
   loadProducts();
   loadBrands();
   loadStoreOptions();
-  loadCategoryTree();
-});
-
-// Reload category tree when store is selected in upload dialog
-watch(() => uploadForm.store_id, (newStoreId) => {
-  if (newStoreId && newStoreId > 0) {
-    loadCategoryTree(newStoreId);
-  }
+  // Don't load category tree here — it requires a store to be selected first
 });
 </script>
 
@@ -1268,6 +1793,15 @@ watch(() => uploadForm.store_id, (newStoreId) => {
 /* ═══════════════════════════════════════════════════════
    选品中心 — 全局样式
    ═══════════════════════════════════════════════════════ */
+/* Category tree wrapper — constrains height to prevent page blow-out */
+.category-tree-wrapper {
+  max-height: 360px;
+  overflow-y: auto;
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  padding: 4px;
+}
+
 .container {
   max-width: 1400px;
   margin: 0 auto;
@@ -1753,5 +2287,96 @@ watch(() => uploadForm.store_id, (newStoreId) => {
   justify-content: flex-end;
   gap: 12px;
   padding-top: 4px;
+}
+
+/* ── 智能定价结果 ── */
+.pricing-result-item {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 6px 0;
+}
+
+.pricing-result-label {
+  font-size: 12px;
+  color: #999;
+}
+
+.pricing-result-value {
+  font-size: 14px;
+  font-weight: 600;
+  color: #333;
+}
+
+/* ── 1688 搜索结果 ── */
+.search1688-results {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-height: 400px;
+  overflow-y: auto;
+}
+
+.search1688-card {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px;
+  border-radius: 8px;
+  border: 1px solid var(--border-color, #e0e0e0);
+  cursor: pointer;
+  transition: border-color 0.2s, box-shadow 0.2s;
+}
+
+.search1688-card:hover {
+  border-color: #18a058;
+  box-shadow: 0 2px 8px rgba(24, 160, 88, 0.12);
+}
+
+.search1688-card__info {
+  flex: 1;
+  min-width: 0;
+}
+
+.search1688-card__title {
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 1.4;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.search1688-card__meta {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 4px;
+  flex-wrap: wrap;
+}
+
+/* ── 已绑定 1688 信息 ── */
+.linked-1688-info {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px;
+  background: var(--bg-elevated, #f8f9fa);
+  border-radius: 6px;
+}
+
+.linked-1688-title {
+  flex: 1;
+  font-size: 12px;
+  color: #18a058;
+  cursor: pointer;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.linked-1688-title:hover {
+  text-decoration: underline;
 }
 </style>

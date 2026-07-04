@@ -4,7 +4,6 @@ import logging
 import os
 import uuid
 from pathlib import Path
-from typing import Optional
 
 from openai import OpenAI
 

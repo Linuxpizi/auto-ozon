@@ -10,3 +10,4 @@ from app.models.scraped_product import ScrapedProductRecord
 from app.models.prompt_template import PromptTemplate
 from app.models.return_order import ReturnOrder
 from app.models.feishu_config import FeishuConfig
+from app.models.upload_draft import UploadDraft  # NEW: unified upload pipeline

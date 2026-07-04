@@ -1,7 +1,6 @@
 """AI Translate Service — text translation and description optimization via DeepSeek."""
 import json
 import logging
-from typing import Any, Dict, List, Optional
 
 from app.schemas.ai import (
     AITranslateRequest,
@@ -12,7 +11,7 @@ from app.schemas.ai import (
     AIOptimizeDescriptionRequest,
     AIOptimizeDescriptionResponse,
 )
-from app.services.prompt_engine import _get_client, _call_llm, _extract_json
+from app.services.prompt_engine import _call_llm, _extract_json
 
 logger = logging.getLogger(__name__)
 

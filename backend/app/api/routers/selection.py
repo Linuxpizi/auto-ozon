@@ -626,27 +626,22 @@ def update_upload_status(product_id: int, db: Session = Depends(get_db)):
 
 @router.get("/ozon-categories")
 def get_ozon_categories(
-    category_id: int = Query(0, description="父分类ID, 0=根分类"),
-    store_id: Optional[int] = Query(None, description="店铺ID"),
+    store_id: int = Query(..., description="店铺ID (必填)"),
     language: str = Query("ZH_HANS", description="语言: ZH_HANS/RU/EN"),
     db: Session = Depends(get_db),
 ):
-    """获取 Ozon 商品分类树"""
+    """获取 Ozon 商品分类树 - 必须传入 store_id"""
     from app.models.store import Store
     from app.services.ozon_client import OzonClient
 
-    store = None
-    if store_id:
-        store = db.query(Store).filter(Store.id == store_id).first()
+    store = db.query(Store).filter(Store.id == store_id).first()
     if not store:
-        store = db.query(Store).first()
-    if not store:
-        raise HTTPException(status_code=404, detail="未找到已配置的店铺")
+        raise HTTPException(status_code=404, detail="未找到该店铺")
 
     client = OzonClient(client_id=store.client_id, api_key=store.api_key)
 
     try:
-        tree = client.get_category_tree(category_id=category_id, language=language)
+        tree = client.get_category_tree(language=language)
         return {"categories": tree}
     except Exception as e:
         logger.error("Failed to get category tree: %s", str(e))
@@ -746,6 +741,245 @@ def calculate_price(body: PriceCalcRequest):
         "exchange_rate": body.exchange_rate,
         "markup_factor": body.markup_factor,
         "commission_pct": body.commission_pct,
+    }
+
+
+class Search1688Request(BaseModel):
+    keyword: str
+    page: int = 1
+    page_size: int = 20
+
+
+class Link1688Request(BaseModel):
+    """将1688同款链接绑定到选品商品"""
+    offer_id: str = ""
+    url: str = ""
+    title: str = ""
+    price: float = 0.0
+    image: str = ""
+    seller: str = ""
+
+
+@router.post("/search-1688")
+async def search_1688_products(body: Search1688Request):
+    """在1688上搜索同款商品"""
+    from app.services.scrapers.scraper_1688 import search_1688
+
+    results = await search_1688(
+        keyword=body.keyword,
+        page=body.page,
+        page_size=body.page_size,
+    )
+    return {"items": results, "total": len(results)}
+
+
+@router.post("/products/{product_id}/link-1688")
+def link_1688_to_product(
+    product_id: int,
+    body: Link1688Request,
+    db: Session = Depends(get_db),
+):
+    """将1688同款链接绑定到选品商品，并自动提取规格参数"""
+    from app.models.scraped_product import ScrapedProductRecord
+
+    record = db.query(ScrapedProductRecord).filter(ScrapedProductRecord.id == product_id).first()
+    if not record:
+        raise HTTPException(status_code=404, detail="商品不存在")
+
+    # 更新1688关联信息
+    existing_attrs = record.attributes or []
+    supplier_info = {
+        "name": "1688_同款链接",
+        "value": body.url or f"https://detail.1688.com/offer/{body.offer_id}.html",
+    }
+    # 移除旧的1688链接属性
+    existing_attrs = [a for a in existing_attrs if a.get("name") != "1688_同款链接"]
+    existing_attrs.append(supplier_info)
+    if body.offer_id:
+        existing_attrs.append({"name": "1688_offer_id", "value": body.offer_id})
+    if body.seller:
+        existing_attrs.append({"name": "1688_供应商", "value": body.seller})
+
+    record.attributes = existing_attrs
+
+    # 如果有1688链接，尝试抓取规格参数
+    specs_extracted = []
+    if body.url:
+        try:
+            from app.services.scrapers.scraper_1688 import Ali1688Scraper
+            import asyncio
+
+            scraper = Ali1688Scraper()
+            product_data = asyncio.get_event_loop().run_until_complete(scraper.scrape(body.url))
+            if product_data and product_data.extra:
+                # 提取规格参数
+                for key in ("weight", "dimensions"):
+                    if key in product_data.extra and product_data.extra[key]:
+                        if key == "weight":
+                            try:
+                                record.weight_g = int(product_data.extra[key])
+                            except (ValueError, TypeError):
+                                pass
+                        elif key == "dimensions":
+                            record.depth_mm = int(product_data.extra[key].get("depth", 0) or 0)
+                            record.height_mm = int(product_data.extra[key].get("height", 0) or 0)
+                            record.width_mm = int(product_data.extra[key].get("width", 0) or 0)
+            # 提取属性
+            if product_data and product_data.attributes:
+                specs_extracted = [
+                    {"name": attr.name, "value": attr.value}
+                    for attr in product_data.attributes
+                ]
+                # 合并属性（不覆盖已有的）
+                existing_names = {a.get("name") for a in existing_attrs}
+                for spec in specs_extracted:
+                    if spec["name"] not in existing_names:
+                        existing_attrs.append(spec)
+                record.attributes = existing_attrs
+        except Exception as e:
+            logger.warning("Failed to scrape 1688 specs: %s", e)
+
+    db.commit()
+    db.refresh(record)
+
+    return {
+        "success": True,
+        "product_id": product_id,
+        "specs_extracted": specs_extracted,
+        "total_attributes": len(record.attributes or []),
+    }
+
+
+@router.post("/products/{product_id}/extract-1688-specs")
+def extract_1688_specs_for_product(
+    product_id: int,
+    db: Session = Depends(get_db),
+):
+    """重新从1688提取规格参数并回填到选品商品（支持已绑定1688链接的商品）"""
+    from app.models.scraped_product import ScrapedProductRecord
+
+    record = db.query(ScrapedProductRecord).filter(ScrapedProductRecord.id == product_id).first()
+    if not record:
+        raise HTTPException(status_code=404, detail="商品不存在")
+
+    # 查找1688链接
+    existing_attrs = record.attributes or []
+    link_attr = next((a for a in existing_attrs if a.get("name") == "1688_同款链接"), None)
+    url_1688 = link_attr.get("value") if link_attr else None
+
+    if not url_1688:
+        # 也检查 source_url
+        url_1688 = record.source_url or ""
+
+    if not url_1688 or "1688.com" not in url_1688:
+        raise HTTPException(status_code=400, detail="该商品未绑定1688链接，无法提取参数")
+
+    specs_extracted = []
+    try:
+        from app.services.scrapers.scraper_1688 import Ali1688Scraper
+        import asyncio
+
+        scraper = Ali1688Scraper()
+        product_data = asyncio.get_event_loop().run_until_complete(scraper.scrape(url_1688))
+
+        if product_data:
+            # 提取重量
+            if product_data.extra and "weight" in product_data.extra and product_data.extra["weight"]:
+                try:
+                    record.weight_g = int(product_data.extra["weight"])
+                except (ValueError, TypeError):
+                    pass
+
+            # 提取尺寸
+            if product_data.extra and "dimensions" in product_data.extra and product_data.extra["dimensions"]:
+                dims = product_data.extra["dimensions"]
+                record.depth_mm = int(dims.get("depth", 0) or 0)
+                record.height_mm = int(dims.get("height", 0) or 0)
+                record.width_mm = int(dims.get("width", 0) or 0)
+
+            # 提取所有属性
+            if product_data.attributes:
+                specs_extracted = [
+                    {"name": attr.name, "value": attr.value}
+                    for attr in product_data.attributes
+                ]
+                # 合并属性（不覆盖已有的同名属性，但更新1688特有的）
+                existing_names = {a.get("name") for a in existing_attrs}
+                skip_names = {"1688_同款链接", "1688_同款标题", "1688_offer_id", "1688_供应商"}
+                for spec in specs_extracted:
+                    if spec["name"] not in existing_names and spec["name"] not in skip_names:
+                        existing_attrs.append(spec)
+                record.attributes = existing_attrs
+
+            # 更新标题（如果1688有更完整的标题）
+            if product_data.title and not link_attr:
+                # 仅在未绑定时更新
+                pass  # 不自动覆盖用户编辑的标题
+
+    except Exception as e:
+        logger.warning("Failed to re-extract 1688 specs: %s", e)
+        raise HTTPException(status_code=500, detail=f"1688参数提取失败: {e}")
+
+    db.commit()
+    db.refresh(record)
+
+    return {
+        "success": True,
+        "product_id": product_id,
+        "specs_extracted": specs_extracted,
+        "weight_g": record.weight_g,
+        "depth_mm": record.depth_mm,
+        "height_mm": record.height_mm,
+        "width_mm": record.width_mm,
+        "total_attributes": len(record.attributes or []),
+    }
+
+
+class SmartPricingRequest(BaseModel):
+    """智能定价请求"""
+    product_id: int
+    cost_cny: float = 0.0
+    shipping_cny: float = 0.0
+    packaging_cny: float = 0.0
+    exchange_rate: float = 12.5
+    ozon_commission_pct: float = 15.0
+    target_margin_pct: float = 30.0
+    competitor_price_rub: float = 0.0
+
+
+@router.post("/smart-pricing")
+def smart_pricing(body: SmartPricingRequest, db: Session = Depends(get_db)):
+    """智能定价：根据成本、汇率、佣金、利润率自动计算建议价格"""
+    from app.services.smart_pricing_service import calculate_smart_price, PricingInput
+    from app.models.scraped_product import ScrapedProductRecord
+
+    # 如果指定了 product_id，自动获取成本价
+    if body.product_id:
+        record = db.query(ScrapedProductRecord).filter(ScrapedProductRecord.id == body.product_id).first()
+        if record and body.cost_cny <= 0:
+            body.cost_cny = record.price or 0.0
+
+    inp = PricingInput(
+        cost_cny=body.cost_cny,
+        shipping_cny=body.shipping_cny,
+        packaging_cny=body.packaging_cny,
+        exchange_rate=body.exchange_rate,
+        ozon_commission_pct=body.ozon_commission_pct,
+        target_margin_pct=body.target_margin_pct,
+        competitor_price_rub=body.competitor_price_rub,
+    )
+
+    result = calculate_smart_price(inp)
+
+    return {
+        "suggested_price_rub": result.suggested_price_rub,
+        "old_price_rub": result.old_price_rub,
+        "cost_total_cny": result.cost_total_cny,
+        "cost_total_rub": result.cost_total_rub,
+        "margin_pct": result.margin_pct,
+        "profit_rub": result.profit_rub,
+        "commission_rub": result.commission_rub,
+        "breakdown": result.breakdown,
     }
 
 

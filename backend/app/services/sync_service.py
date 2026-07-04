@@ -55,25 +55,39 @@ def sync_orders_for_store(
         all_postings.extend(postings)
         if not has_next:
             break
-    # Batch-lookup images from listings table (by offer_id, fallback to sku)
+    # Batch-lookup images and product_ids from listings table (by offer_id, fallback to sku)
     image_map: dict[str, str] = {}
+    pid_map: dict[str, int] = {}  # offer_id/sku -> local product_id (int)
     offer_ids = {p.offer_id for p in all_postings if p.offer_id}
     sku_set = {p.sku for p in all_postings if p.sku and not p.offer_id}
     if offer_ids:
         rows = (
-            db.query(Listing.offer_id, Listing.primary_image)
+            db.query(Listing.offer_id, Listing.primary_image, Listing.product_id)
             .filter(Listing.store_id == store.id, Listing.offer_id.in_(offer_ids))
             .all()
         )
-        image_map = {r.offer_id: r.primary_image or "" for r in rows if r.primary_image}
+        for r in rows:
+            if r.primary_image:
+                image_map[r.offer_id] = r.primary_image
+            if r.product_id:
+                try:
+                    pid_map[r.offer_id] = int(r.product_id)
+                except (ValueError, TypeError):
+                    pass
     if sku_set:
         rows = (
-            db.query(Listing.sku, Listing.primary_image)
+            db.query(Listing.sku, Listing.primary_image, Listing.product_id)
             .filter(Listing.store_id == store.id, Listing.sku.in_(sku_set), Listing.primary_image != "")
             .all()
         )
         for r in rows:
-            image_map.setdefault(r.sku, r.primary_image or "")
+            if r.primary_image:
+                image_map.setdefault(r.sku, r.primary_image)
+            if r.product_id and r.sku not in pid_map:
+                try:
+                    pid_map[r.sku] = int(r.product_id)
+                except (ValueError, TypeError):
+                    pass
 
     # Fallback: fetch images from Ozon API for offer_ids not found in listings
     missing_offer_ids = [
@@ -149,6 +163,10 @@ def sync_orders_for_store(
                 store.name, p.order_number, p.offer_id, p.product_id,
             )
 
+        # Resolve product_id from local listings: prefer local pid_map, fallback to Ozon API value
+        local_pid = pid_map.get(p.offer_id) or pid_map.get(p.sku) or 0
+        resolved_pid = local_pid or p.product_id
+
         order_data = OrderCreate(
             order_number=p.order_number,
             store_id=store.id,
@@ -160,7 +178,7 @@ def sync_orders_for_store(
             shipment_number=p.posting_number,
             sku=p.sku,
             offer_id=p.offer_id,
-            product_id=p.product_id,
+            product_id=resolved_pid,
             product_name=p.product_name,
             image_url=image_url,
             tracking_number=p.tracking_number,
@@ -188,7 +206,7 @@ def sync_orders_for_store(
                 substatus=p.substatus,
                 sku=p.sku,
                 offer_id=p.offer_id,
-                product_id=p.product_id,
+                product_id=resolved_pid,
                 product_name=p.product_name,
                 shipment_number=p.posting_number,
                 tracking_number=p.tracking_number,

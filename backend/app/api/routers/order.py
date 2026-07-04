@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session
 from app.crud import order as order_crud
 from app.schemas.order import OrderCreate, OrderUpdate, OrderRead
 from app.core.db import get_db
-from app.services.sync_service import run_sync_task
+from app.services.sync_service import run_sync_task, sync_single_posting
 from app.services.ozon_client import OzonClient, clear_cache
 from app.models.store import Store
 from app.models.order import Order
@@ -157,45 +157,45 @@ def ship_order(req: ShipRequest, db: Session = Depends(get_db)):
     if not store:
         raise HTTPException(500, detail="关联店铺不存在")
     client = OzonClient(client_id=store.client_id, api_key=store.api_key)
-    # Ozon Ship API requires product_id > 0.
-    # product_id, sku, offer_id are three distinct identifiers — never mix them.
-    # If product_id is 0, try resolving from the listings table by offer_id.
+    # Ozon /v4/posting/fbs/ship API:
+    # The `product_id` field in the ship request expects the Ozon SKU number
+    # from the posting products, NOT the internal catalog product_id.
+    # In the Ozon posting response (/v3/posting/fbs/get), products have:
+    #   - product_id: often 0 (not populated for FBS postings)
+    #   - sku: the actual SKU number needed by the ship API
     import json as _json
-    from app.models.listing import Listing
     try:
         db_products = _json.loads(order.products_json or "[]")
     except Exception:
         db_products = []
-    # Build an offer_id → product_id lookup from listings table
-    offer_ids_in_order = [
-        dp.get("offer_id", "") for dp in db_products if dp.get("offer_id")
-    ]
-    offer_to_pid: dict[str, int] = {}
-    if offer_ids_in_order:
-        rows = (
-            db.query(Listing.offer_id, Listing.product_id)
-            .filter(Listing.store_id == order.store_id, Listing.offer_id.in_(offer_ids_in_order))
-            .all()
-        )
-        for r in rows:
-            if r.product_id:
-                offer_to_pid[r.offer_id] = int(r.product_id)
     fixed_products = []
     for i, item in enumerate(req.product_ids):
-        pid = item.get("product_id", 0)
         qty = item.get("quantity", 1)
-        # If product_id is missing, try products_json, then listings by offer_id
-        if not pid and i < len(db_products):
+        # Priority: 1) sku from products_json  2) order.sku  3) product_id from products_json
+        sku = ""
+        if i < len(db_products):
+            sku = db_products[i].get("sku", "")
+        if not sku:
+            sku = order.sku or ""
+        if not sku and i < len(db_products):
+            # Fallback: try product_id from products_json (usually 0)
             pid = db_products[i].get("product_id", 0)
-        if not pid and i < len(db_products):
-            oid = db_products[i].get("offer_id", "")
-            pid = offer_to_pid.get(oid, 0)
-        fixed_products.append({"product_id": pid, "quantity": qty})
+            if pid:
+                sku = str(pid)
+        if not sku:
+            raise HTTPException(400, detail=f"第 {i+1} 个商品缺少 SKU，请先同步商品数据")
+        fixed_products.append({"product_id": int(sku), "quantity": qty})
     packages = [{"products": fixed_products}]
     try:
         result = client.ship_fbs_posting(req.posting_number, packages)
     except Exception as e:
         raise HTTPException(502, detail=f"Ozon API 调用失败: {e}")
+    # Immediately sync the single order to update local DB status
+    try:
+        sync_single_posting(db, store, req.posting_number)
+    except Exception as e:
+        import logging
+        logging.warning("sync_single_posting after ship failed for %s: %s", req.posting_number, e)
     return {"result": result.get("result", []), "additional_data": result.get("additional_data", [])}
 
 
@@ -219,6 +219,13 @@ def cancel_order(req: CancelRequest, db: Session = Depends(get_db)):
         result = client.cancel_fbs_posting(req.posting_number)
     except Exception as e:
         raise HTTPException(502, detail=f"Ozon API 调用失败: {e}")
-    order_crud.update_order(db, order.id, OrderUpdate(status="cancelled"))
+    # Immediately sync the single order to update local DB with full cancellation details
+    try:
+        sync_single_posting(db, store, req.posting_number)
+    except Exception as e:
+        import logging
+        logging.warning("sync_single_posting after cancel failed for %s: %s", req.posting_number, e)
+        # Fallback: at least update status locally
+        order_crud.update_order(db, order.id, OrderUpdate(status="cancelled"))
     return {"ok": True, "result": result}
 

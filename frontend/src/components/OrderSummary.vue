@@ -47,7 +47,13 @@
               </div>
             </div>
           </td>
-          <td style="white-space: nowrap;">{{ order.order_number }}</td>
+          <td style="white-space: nowrap;">
+            <div style="display: flex; align-items: center; gap: 6px;">
+              <span>{{ order.order_number }}</span>
+              <n-tag v-if="isInspectionOrder(order.order_number)" type="error" size="small" round
+                style="font-weight: 600;">质检单</n-tag>
+            </div>
+          </td>
           <td style="white-space: nowrap; font-size: 12px; color: var(--text-secondary);">{{ formatDateTime(order.in_process_at) }}</td>
           <td>
             <n-tag :type="statusType(order.status)" size="small" round>
@@ -65,13 +71,12 @@
             <span v-if="order.cancelled_at">{{ formatDateTime(order.cancelled_at) }}</span>
             <span v-else>-</span>
           </td>
-          <td>
+          <td style="max-width: 220px;">
             <div style="min-width: 0;">
               <div v-if="order.must_ship_by" style="font-size: 12px; color: var(--danger); white-space: nowrap;">
                 截止: {{ formatDate(order.must_ship_by) }}
               </div>
-              <div style="overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">{{ order.product_name }}
-              </div>
+              <div style="overflow: hidden; text-overflow: ellipsis; white-space: nowrap;" :title="order.product_name">{{ order.product_name }}</div>
             </div>
           </td>
           <td>
@@ -119,6 +124,10 @@ function showHoverImage(e: MouseEvent, url: string) {
 
 function hideHoverImage() {
   hoverImage.value = "";
+}
+
+function isInspectionOrder(orderNumber: string): boolean {
+  return orderNumber.startsWith("02131") || orderNumber.startsWith("02478");
 }
 
 function getProductUrl(order: OrderItem): string | null {

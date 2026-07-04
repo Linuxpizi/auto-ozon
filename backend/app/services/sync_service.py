@@ -317,6 +317,129 @@ def _backfill_cancellation_details(db: Session, store: Store) -> int:
     return updated
 
 
+def sync_single_posting(db: Session, store: Store, posting_number: str) -> bool:
+    """Fetch a single FBS posting detail from Ozon and upsert into local orders table.
+
+    This is called after ship/cancel operations to immediately update the local
+    DB with the latest status from Ozon, instead of waiting for the next full sync.
+
+    Returns True if the order was found and updated, False otherwise.
+    """
+    from app.models.order import Order
+
+    client = OzonClient(client_id=store.client_id, api_key=store.api_key)
+    detail = client.get_fbs_posting_detail(posting_number)
+    if not detail:
+        logger.warning("sync_single_posting: no detail returned for %s", posting_number)
+        return False
+
+    # Parse status
+    status = detail.get("status", "")
+    substatus = detail.get("substatus", "")
+
+    # Parse cancellation details
+    cancellation = detail.get("cancellation", {}) or {}
+    cancel_initiator = cancellation.get("cancellation_initiator", "")
+    cancel_reason = cancellation.get("cancel_reason", "")
+    cancel_reason_msg = cancellation.get("cancellation_reason_message", "") or cancel_reason
+    cancelled_at = None
+    cancel_at_str = cancellation.get("cancelled_at", "")
+    if cancel_at_str:
+        try:
+            cancelled_at = datetime.fromisoformat(cancel_at_str.replace("Z", "+00:00"))
+        except (ValueError, TypeError):
+            pass
+
+    # Parse dates
+    in_process_at = None
+    if detail.get("in_process_at"):
+        try:
+            in_process_at = datetime.fromisoformat(
+                detail["in_process_at"].replace("Z", "+00:00")
+            )
+        except (ValueError, TypeError):
+            pass
+
+    must_ship_by = None
+    if detail.get("shipment_date"):
+        try:
+            must_ship_by = datetime.fromisoformat(
+                detail["shipment_date"].replace("Z", "+00:00")
+            )
+        except (ValueError, TypeError):
+            pass
+
+    # Parse tracking number
+    tracking_number = ""
+    try:
+        tracking_number = detail.get("tracking_number", "")
+    except (AttributeError, TypeError):
+        pass
+
+    # Parse products for products_json
+    products = detail.get("products", []) or []
+    products_json_str = "[]"
+    if products:
+        import json as _json
+        products_json_str = _json.dumps(products, ensure_ascii=False, default=str)
+
+    # Parse financial data
+    financial_data = detail.get("financial_data", {}) or {}
+    products_financial = financial_data.get("products", []) or []
+    payout = 0.0
+    commission_amount = 0.0
+    discount_value = 0.0
+    if products_financial:
+        for pf in products_financial:
+            payout += float(pf.get("payout", 0) or 0)
+            commission_amount += float(pf.get("commission_amount", 0) or 0)
+            discount_value += float(pf.get("acquiring_fee", 0) or 0)
+
+    # Parse available_actions
+    available_actions = "[]"
+    if detail.get("available_actions"):
+        import json as _json
+        available_actions = _json.dumps(detail["available_actions"], ensure_ascii=False, default=str)
+
+    # Find the existing order by shipment_number or order_number
+    order_number = detail.get("order_number", "")
+    existing = (
+        db.query(Order).filter(Order.shipment_number == posting_number).first()
+        or db.query(Order).filter(Order.order_number == order_number).first()
+    )
+    if not existing:
+        logger.warning("sync_single_posting: order not found locally for %s", posting_number)
+        return False
+
+    # Update the order
+    update_fields = {
+        "status": status,
+        "substatus": substatus,
+        "tracking_number": tracking_number,
+        "products_json": products_json_str,
+        "available_actions": available_actions,
+        "must_ship_by": must_ship_by,
+        "in_process_at": in_process_at,
+        "payout": payout,
+        "commission": commission_amount,
+        "discount": discount_value,
+        "cancellation_initiator": cancel_initiator,
+        "cancellation_reason": cancel_reason,
+        "cancellation_reason_message": cancel_reason_msg,
+        "cancelled_at": cancelled_at,
+    }
+    for key, value in update_fields.items():
+        setattr(existing, key, value)
+
+    db.commit()
+    db.refresh(existing)
+    logger.info(
+        "sync_single_posting[%s]: updated order %s (posting=%s) status=%s",
+        store.name, order_number, posting_number, status,
+    )
+    return True
+
+
 def sync_finance_for_store(db: Session, store: Store) -> dict:
     """Fetch finance data from Ozon and upsert into local finance table.
 

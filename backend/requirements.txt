@@ -7,6 +7,12 @@ openpyxl==3.1.2
 httpx==0.26.0
 apscheduler==3.11.0
 openai>=1.0.0
+torch>=2.0.0
+diffusers>=0.25.0
+huggingface_hub>=0.20.0
+transformers>=4.35.0
+Pillow>=10.0.0
+accelerate>=0.25.0
 python-dotenv>=1.0.0
 lark-oapi>=1.4.0
 

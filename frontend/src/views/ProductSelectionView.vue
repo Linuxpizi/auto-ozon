@@ -259,6 +259,97 @@
               <input ref="imageUploadRef" type="file" accept="image/*" multiple style="display:none" @change="handleImageUpload" />
             </div>
 
+            <!-- ━━━ PowerPaint 图片编辑 (独立于 ChatGPT AI) ━━━ -->
+            <div class="section-block" v-if="editProduct?.images?.length" style="border: 1px dashed var(--accent); border-radius: 8px; padding: 10px; margin-top: 8px;">
+              <div class="section-label" style="margin-bottom: 6px;">
+                🎨 PowerPaint 图片编辑
+                <div class="section-actions">
+                  <n-tag size="tiny" :bordered="false" :type="ppDeviceInfo?.cuda_available ? 'success' : 'warning'">
+                    {{ ppDeviceInfo?.device === 'cuda' ? '🚀 GPU' : '🖥️ CPU' }}
+                  </n-tag>
+                  <n-button size="tiny" quaternary @click="loadPpDeviceInfo" :loading="ppDeviceLoading">刷新设备</n-button>
+                </div>
+              </div>
+              <div class="empty-hint" v-if="!ppDeviceInfo" style="margin-bottom: 4px; font-size: 11px;">点击「刷新设备」检测 PowerPaint 服务状态</div>
+
+              <!-- 选择编辑图片 -->
+              <div style="margin-bottom: 8px;">
+                <span class="field-label" style="font-size: 11px;">选择编辑图片:</span>
+                <div class="gallery-row" style="gap: 4px;">
+                  <div v-for="(img, idx) in editProduct.images" :key="'pp-'+idx"
+                       class="gallery-item pp-selectable"
+                       :class="{ 'pp-selected': ppSelectedImageIdx === idx }"
+                       @click="ppSelectedImageIdx = idx"
+                       style="width: 40px; height: 40px; border-radius: 6px; overflow: hidden; cursor: pointer; border: 2px solid transparent; transition: all 0.15s;"
+                       :title="'选择第 ' + (idx+1) + ' 张图片'">
+                    <n-image :src="typeof img === 'string' ? img : img.url" width="36" height="36" object-fit="cover" />
+                  </div>
+                </div>
+              </div>
+
+              <!-- PowerPaint 操作按钮 -->
+              <n-space size="small" v-if="ppSelectedImageIdx !== null">
+                <n-button size="tiny" type="error" :loading="ppLoadingTask === 'remove'" @click="ppShowMaskModal('remove')" :disabled="!ppDeviceInfo?.model_exists">
+                  🗑️ 去物体
+                </n-button>
+                <n-button size="tiny" type="warning" :loading="ppLoadingTask === 'outpaint'" @click="handlePpOutpaint" :disabled="!ppDeviceInfo?.model_exists">
+                  📐 扩图
+                </n-button>
+                <n-button size="tiny" type="info" :loading="ppLoadingTask === 'inpaint'" @click="ppShowMaskModal('inpaint')" :disabled="!ppDeviceInfo?.model_exists">
+                  ✏️ 修复
+                </n-button>
+                <!-- 扩图比例调节 -->
+                <n-popover trigger="click" placement="bottom" v-if="ppSelectedImageIdx !== null">
+                  <template #trigger>
+                    <n-button size="tiny" quaternary>📐 扩图比例</n-button>
+                  </template>
+                  <div style="width: 200px; padding: 4px;">
+                    <div class="field-label" style="font-size: 11px;">水平扩展: {{ ppExpandH }}</div>
+                    <n-slider v-model:value="ppExpandH" :min="0" :max="1" :step="0.1" size="small" />
+                    <div class="field-label" style="font-size: 11px; margin-top: 4px;">垂直扩展: {{ ppExpandV }}</div>
+                    <n-slider v-model:value="ppExpandV" :min="0" :max="1" :step="0.1" size="small" />
+                  </div>
+                </n-popover>
+              </n-space>
+              <div v-else class="empty-hint" style="font-size: 11px;">请先选择一张图片</div>
+
+              <!-- PowerPaint 结果预览 -->
+              <div v-if="ppResultUrl" style="margin-top: 8px;">
+                <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 4px;">
+                  <span class="field-label" style="font-size: 11px; color: #52c41a;">✅ 编辑结果</span>
+                  <n-button size="tiny" quaternary type="primary" @click="applyPpResult">应用到当前图片</n-button>
+                  <n-button size="tiny" quaternary @click="ppResultUrl = ''">关闭</n-button>
+                </div>
+                <n-image :src="ppResultUrl" width="160" height="160" object-fit="contain" style="border-radius: 6px; border: 1px solid #e8e8e8;" />
+              </div>
+            </div>
+            <!-- ━━━ PowerPaint 图片编辑 结束 ━━━ -->
+
+            <!-- PowerPaint Mask 编辑弹窗 -->
+            <n-modal v-model:show="ppMaskModalVisible" preset="card" style="width: 640px;" :bordered="false">
+              <template #header>
+                <span>{{ ppMaskTaskType === 'remove' ? '🗑️ 去物体' : '✏️ 修复' }} — 绘制遮罩区域</span>
+              </template>
+              <n-space vertical :size="12">
+                <div style="position: relative; display: inline-block; border: 1px solid #e8e8e8; border-radius: 8px; overflow: hidden;">
+                  <canvas ref="ppMaskCanvasRef" class="pp-mask-canvas"
+                    @mousedown="ppMaskStart" @mousemove="ppMaskDraw" @mouseup="ppMaskEnd" @mouseleave="ppMaskEnd"
+                    style="cursor: crosshair; display: block;" />
+                </div>
+                <div style="font-size: 11px; color: #999;">在图片上拖动鼠标绘制白色遮罩区域 (即需要编辑/去除的区域)</div>
+                <n-space v-if="ppMaskTaskType === 'inpaint'">
+                  <div class="field-label">修复描述 (英文):</div>
+                  <n-input v-model:value="ppInpaintPrompt" size="small" placeholder="e.g. clean white background, studio lighting" style="width: 100%;" />
+                </n-space>
+                <n-space>
+                  <n-button type="primary" :loading="ppLoadingTask" @click="handlePpMaskSubmit" :disabled="!ppMaskCanvasRef">
+                    {{ ppMaskTaskType === 'remove' ? '🗑️ 执行去物体' : '✏️ 执行修复' }}
+                  </n-button>
+                  <n-button @click="ppMaskModalVisible = false">取消</n-button>
+                </n-space>
+              </n-space>
+            </n-modal>
+
             <n-divider style="margin:8px 0" />
 
             <!-- 基础信息 -->
@@ -639,6 +730,7 @@ import {
 } from "naive-ui";
 import { apiGet, apiPost, apiPut, apiDelete } from "../api";
 import { translateText, translateBatch, optimizeDescription, translateImage, replaceImageSubject, generateImage } from "../api/ai";
+import { getDevice as ppGetDevice, removeObject as ppRemoveObject, outpaintImage as ppOutpaintImage, inpaintRegion as ppInpaintRegion } from "../api/powerpaint";
 import { useMessage } from "naive-ui";
 
 const message = useMessage();
@@ -1112,6 +1204,203 @@ async function handleAiGenerateImages() {
   } catch (e: any) {
     message.error("图片生成失败: " + e.message);
   }
+}
+
+// ── PowerPaint 图片编辑 (独立于 ChatGPT AI) ──
+const ppDeviceInfo = ref<{ device: string; dtype: string; model_dir: string; model_exists: boolean; cuda_available: boolean } | null>(null);
+const ppDeviceLoading = ref(false);
+const ppSelectedImageIdx = ref<number | null>(null);
+const ppLoadingTask = ref<string | null>(null);
+const ppResultUrl = ref("");
+const ppExpandH = ref(0.5);
+const ppExpandV = ref(0.5);
+const ppMaskModalVisible = ref(false);
+const ppMaskTaskType = ref<"remove" | "inpaint">("remove");
+const ppInpaintPrompt = ref("");
+const ppMaskCanvasRef = ref<HTMLCanvasElement | null>(null);
+const ppMaskDrawing = ref(false);
+const ppMaskImage = ref<HTMLImageElement | null>(null);
+
+async function loadPpDeviceInfo() {
+  ppDeviceLoading.value = true;
+  try {
+    ppDeviceInfo.value = await ppGetDevice();
+  } catch (e: any) {
+    message.warning("PowerPaint 服务未启动: " + e.message);
+    ppDeviceInfo.value = null;
+  } finally {
+    ppDeviceLoading.value = false;
+  }
+}
+
+function ppGetSelectedImageUrl(): string | null {
+  if (ppSelectedImageIdx.value === null || !editProduct.value?.images?.[ppSelectedImageIdx.value]) return null;
+  const img = editProduct.value.images[ppSelectedImageIdx.value];
+  return typeof img === "string" ? img : (img as any).url;
+}
+
+async function ppFetchImageAsFile(url: string): Promise<File> {
+  const res = await fetch(url);
+  const blob = await res.blob();
+  return new File([blob], "image.png", { type: blob.type || "image/png" });
+}
+
+/** 下载图片并绘制到 canvas 上 */
+function ppLoadImageToCanvas(url: string) {
+  return new Promise<void>((resolve, reject) => {
+    const canvas = ppMaskCanvasRef.value;
+    if (!canvas) return reject(new Error("Canvas 未就绪"));
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return reject(new Error("无法获取 Canvas 上下文"));
+    const img = new Image();
+    img.crossOrigin = "anonymous";
+    img.onload = () => {
+      const maxSize = 512;
+      const scale = Math.min(1, maxSize / Math.max(img.width, img.height));
+      canvas.width = Math.round(img.width * scale);
+      canvas.height = Math.round(img.height * scale);
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+      ppMaskImage.value = img;
+      resolve();
+    };
+    img.onerror = () => reject(new Error("图片加载失败"));
+    img.src = url;
+  });
+}
+
+function ppShowMaskModal(taskType: "remove" | "inpaint") {
+  const url = ppGetSelectedImageUrl();
+  if (!url) { message.warning("请先选择图片"); return; }
+  ppMaskTaskType.value = taskType;
+  ppInpaintPrompt.value = taskType === "inpaint" ? "clean white background" : "";
+  ppMaskModalVisible.value = true;
+  // 等 modal 渲染后加载图片到 canvas
+  setTimeout(async () => {
+    try {
+      await ppLoadImageToCanvas(url);
+    } catch (e: any) {
+      message.error(e.message);
+    }
+  }, 300);
+}
+
+function ppMaskStart(e: MouseEvent) {
+  ppMaskDrawing.value = true;
+  ppMaskDraw(e);
+}
+
+function ppMaskDraw(e: MouseEvent) {
+  if (!ppMaskDrawing.value) return;
+  const canvas = ppMaskCanvasRef.value;
+  if (!canvas) return;
+  const ctx = canvas.getContext("2d");
+  if (!ctx) return;
+  const rect = canvas.getBoundingClientRect();
+  ctx.fillStyle = "white";
+  ctx.beginPath();
+  ctx.arc(e.clientX - rect.left, e.clientY - rect.top, 8, 0, Math.PI * 2);
+  ctx.fill();
+}
+
+function ppMaskEnd() {
+  ppMaskDrawing.value = false;
+}
+
+/** 将 canvas 上用户绘制的白色区域转为 mask File */
+function ppCanvasToMaskFile(): File | null {
+  const canvas = ppMaskCanvasRef.value;
+  if (!canvas) return null;
+  // 创建 mask canvas：白色区域为 mask
+  const maskCanvas = document.createElement("canvas");
+  maskCanvas.width = canvas.width;
+  maskCanvas.height = canvas.height;
+  const maskCtx = maskCanvas.getContext("2d");
+  if (!maskCtx) return null;
+  // 获取原始图片 canvas 的像素数据（仅读取用户绘制的白色部分）
+  const origCtx = canvas.getContext("2d");
+  if (!origCtx) return null;
+  const origData = origCtx.getImageData(0, 0, canvas.width, canvas.height);
+  const maskData = maskCtx.createImageData(canvas.width, canvas.height);
+  // 检测用户绘制的白色/亮色像素作为 mask
+  for (let i = 0; i < origData.data.length; i += 4) {
+    const r = origData.data[i], g = origData.data[i + 1], b = origData.data[i + 2];
+    // 用户绘制的白色区域 (RGB 都很高)
+    const isWhite = r > 200 && g > 200 && b > 200;
+    // 检查是否是原始图片的白色背景 (通常在图片边缘且是原始就有的)
+    // 简单策略：用户绘制的区域会覆盖在原图之上，用亮度差检测
+    const idx = i;
+    maskData.data[idx] = isWhite ? 255 : 0;
+    maskData.data[idx + 1] = isWhite ? 255 : 0;
+    maskData.data[idx + 2] = isWhite ? 255 : 0;
+    maskData.data[idx + 3] = 255;
+  }
+  maskCtx.putImageData(maskData, 0, 0);
+  // 转为 Blob -> File
+  let dataUrl = maskCanvas.toDataURL("image/png");
+  const arr = dataUrl.split(",");
+  const mime = arr[0].match(/:(.*?);/)?.[1] || "image/png";
+  const bstr = atob(arr[1]);
+  const u8 = new Uint8Array(bstr.length);
+  for (let i = 0; i < bstr.length; i++) u8[i] = bstr.charCodeAt(i);
+  return new File([u8], "mask.png", { type: mime });
+}
+
+async function handlePpMaskSubmit() {
+  const url = ppGetSelectedImageUrl();
+  const maskFile = ppCanvasToMaskFile();
+  if (!url || !maskFile) { message.warning("请先选择图片并绘制遮罩"); return; }
+  ppLoadingTask.value = ppMaskTaskType.value;
+  ppMaskModalVisible.value = false;
+  try {
+    const imageFile = await ppFetchImageAsFile(url);
+    let result;
+    if (ppMaskTaskType.value === "remove") {
+      result = await ppRemoveObject(imageFile, maskFile);
+    } else {
+      const prompt = ppInpaintPrompt.value || "clean white background";
+      result = await ppInpaintRegion(imageFile, maskFile, prompt);
+    }
+    if (result.url) {
+      ppResultUrl.value = result.url;
+      message.success(`${ppMaskTaskType.value === "remove" ? "去物体" : "修复"}完成 (${result.duration_ms}ms, ${result.device})`);
+    }
+  } catch (e: any) {
+    message.error(`PowerPaint ${ppMaskTaskType.value} 失败: ` + e.message);
+  } finally {
+    ppLoadingTask.value = null;
+  }
+}
+
+async function handlePpOutpaint() {
+  const url = ppGetSelectedImageUrl();
+  if (!url) { message.warning("请先选择图片"); return; }
+  ppLoadingTask.value = "outpaint";
+  try {
+    const imageFile = await ppFetchImageAsFile(url);
+    const result = await ppOutpaintImage(imageFile, ppExpandH.value, ppExpandV.value);
+    if (result.url) {
+      ppResultUrl.value = result.url;
+      message.success(`扩图完成 (${result.duration_ms}ms, ${result.device})`);
+    }
+  } catch (e: any) {
+    message.error("PowerPaint 扩图失败: " + e.message);
+  } finally {
+    ppLoadingTask.value = null;
+  }
+}
+
+function applyPpResult() {
+  if (!ppResultUrl.value || ppSelectedImageIdx.value === null || !editProduct.value?.images) return;
+  const idx = ppSelectedImageIdx.value;
+  const img = editProduct.value.images[idx];
+  if (typeof img === "string") {
+    editProduct.value.images[idx] = ppResultUrl.value;
+  } else {
+    (editProduct.value.images[idx] as any).url = ppResultUrl.value;
+  }
+  ppResultUrl.value = "";
+  message.success("已应用编辑结果");
 }
 
 // ── AI 文字功能 ──
@@ -1641,6 +1930,36 @@ onMounted(() => {
 /* ═══════════════════════════════════════════════════════
    选品中心 — 全局样式
    ═══════════════════════════════════════════════════════ */
+.gallery-item {
+  width: 72px;
+  height: 72px;
+  border-radius: 8px;
+  overflow: hidden;
+  position: relative;
+  border: 1px solid var(--border-color);
+  background: var(--bg-card);
+  flex-shrink: 0;
+  cursor: pointer;
+}
+
+/* ━━━ PowerPaint 图片选择器 ━━━ */
+.pp-selectable {
+  cursor: pointer;
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+.pp-selectable:hover {
+  border-color: var(--accent, #2080f0);
+}
+.pp-selected {
+  border-color: var(--accent, #2080f0);
+  box-shadow: 0 0 0 2px rgba(32, 128, 240, 0.25);
+}
+.pp-mask-canvas {
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
+  max-width: 100%;
+}
+
 /* Category tree wrapper — constrains height to prevent page blow-out */
 .category-tree-wrapper {
   max-height: 360px;

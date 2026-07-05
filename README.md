@@ -166,6 +166,17 @@ npm run dev
 
 浏览器打开 `http://localhost:5173`，在「店铺管理」中添加 Ozon 店铺的 `Client-Id` 和 `Api-Key`，系统即开始工作。
 
+### 4. powerpaint
+
+# 1. 安装依赖
+cd backend && pip install torch diffusers huggingface_hub transformers accelerate Pillow
+
+# 2. 下载模型（~4GB）
+python scripts/download_powerpaint_models.py
+
+# 3. 启动后端（自动检测 CPU/GPU）
+uvicorn app.main:app --reload
+
 ---
 
 ## 项目结构

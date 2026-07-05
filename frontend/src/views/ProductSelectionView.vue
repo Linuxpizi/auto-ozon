@@ -282,7 +282,7 @@
                        @click="ppSelectedImageIdx = idx"
                        style="width: 40px; height: 40px; border-radius: 6px; overflow: hidden; cursor: pointer; border: 2px solid transparent; transition: all 0.15s;"
                        :title="'选择第 ' + (idx+1) + ' 张图片'">
-                    <n-image :src="typeof img === 'string' ? img : img.url" width="36" height="36" object-fit="cover" />
+                    <img :src="typeof img === 'string' ? img : img.url" width="36" height="36" style="object-fit: cover; display: block;" @click.stop />
                   </div>
                 </div>
               </div>
@@ -896,6 +896,10 @@ function openDrawer(product: any) {
     loadStoreOptions();
   }
   drawerVisible.value = true;
+  // Auto-detect PowerPaint service when drawer opens
+  if (!ppDeviceInfo.value && !ppDeviceLoading.value) {
+    loadPpDeviceInfo();
+  }
 }
 
 async function saveEdit() {

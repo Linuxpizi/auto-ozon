@@ -23,6 +23,8 @@ export async function getDevice(): Promise<{
   model_dir: string;
   model_exists: boolean;
   cuda_available: boolean;
+  pipeline_loaded: boolean;
+  pipeline_loading: boolean;
 }> {
   return ppRequest("/device");
 }

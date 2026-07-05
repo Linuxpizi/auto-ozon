@@ -51,14 +51,16 @@ pip install -r requirements.txt
 python scripts/download_powerpaint_models.py
 ```
 
-- 模型大小约 **4GB**，下载到 `backend/models/powerpaint-v1/`
-- 下载源：HuggingFace `JunhaoZhuang/PowerPaint-v1`
-- 国内网络慢时可设置镜像：
-  ```bash
-  export HF_ENDPOINT=https://hf-mirror.com
-  python scripts/download_powerpaint_models.py
-  ```
-- 手动下载：访问 https://huggingface.co/JunhaoZhuang/PowerPaint-v1 ，将文件放入 `backend/models/powerpaint-v1/`
+模型大小约 **4GB**，下载到 `backend/models/powerpaint-v1/`。下载源：HuggingFace `JunhaoZhuang/PowerPaint-v1`。
+
+国内网络慢时可设置镜像：
+
+```bash
+export HF_ENDPOINT=https://hf-mirror.com
+python scripts/download_powerpaint_models.py
+```
+
+手动下载：访问 https://huggingface.co/JunhaoZhuang/PowerPaint-v1 ，将文件放入 `backend/models/powerpaint-v1/`。
 
 ### Step 3：启动后端
 
@@ -69,10 +71,11 @@ uvicorn app.main:app --reload --host 0.0.0.0 --port 9000
 ```
 
 启动后会看到日志：
+
 - 有 GPU: `PowerPaint: GPU detected — NVIDIA xxx (12.0 GB), using float16`
 - 无 GPU: `PowerPaint: No GPU found, running on CPU with float32 (slower)`
 
-> **注意**：首次启动时模型加载约需 30-60 秒（CPU）/ 5-10 秒（GPU），期间接口会阻塞。
+> **注意**：首次启动时模型加载约需 30-60 秒（CPU）/ 5-10 秒（GPU），期间接口会阻塞。PowerPaint 没有独立服务，直接运行在现有 FastAPI 进程中。
 
 ### Step 4：启动前端
 
@@ -88,7 +91,7 @@ npm run dev
 
 ## 三、API 接口参考
 
-所有接口前缀：`/api/powerpaint`
+所有接口前缀：`/api/powerpaint`，直接集成在现有后端中，无需单独启动。
 
 ### 3.1 查询设备状态
 
@@ -97,6 +100,7 @@ GET /api/powerpaint/device
 ```
 
 响应：
+
 ```json
 {
   "device": "cpu",
@@ -121,6 +125,7 @@ guidance_scale: 7.5            (可选，引导强度)
 ```
 
 响应：
+
 ```json
 {
   "url": "/static/edited/remove_abc12345.png",
@@ -131,6 +136,7 @@ guidance_scale: 7.5            (可选，引导强度)
 ```
 
 **Mask 说明**：
+
 - 格式：与原图同等尺寸的黑白图
 - **白色区域** = 需要去除的物体
 - **黑色区域** = 保留不变
@@ -151,6 +157,7 @@ guidance_scale: 7.5             (可选)
 ```
 
 **使用场景**：
+
 - `expand_h=0.3, expand_v=0` → 左右各扩展 30%，适合窄图变宽
 - `expand_h=0, expand_v=0.5` → 上下各扩展 50%，适合横图变竖
 - `expand_h=0.3, expand_v=0.3` → 四周均匀扩展
@@ -169,6 +176,7 @@ guidance_scale: 7.5                (可选)
 ```
 
 **与去物体的区别**：
+
 - **去物体**：擦除后用背景填充，prompt 通常留空
 - **修复**：根据 prompt 描述的内容填充区域，需填写 prompt
 
@@ -185,10 +193,12 @@ guidance_scale: 7.5                (可选)
 ### 4.2 详细步骤
 
 **① 打开编辑抽屉**
+
 - 在选品中心列表中，点击商品行右侧的「编辑」按钮
 - 抽屉打开后自动检测 PowerPaint 服务状态（显示 CPU/GPU 标签）
 
 **② 选择编辑图片**
+
 - 在「🎨 PowerPaint 图片编辑」区域，点击缩略图选中目标图片
 - 选中后图片会有蓝色边框高亮
 - 如未自动检测到服务，点击「刷新设备」手动检测
@@ -204,6 +214,7 @@ guidance_scale: 7.5                (可选)
 **④ Mask 编辑器操作**（去物体 / 修复）
 
 弹出 640px 宽的编辑弹窗：
+
 1. 点击「开始绘制」进入画笔模式
 2. 在图片上拖拽 —— **白色笔触**标记需要编辑的区域
 3. 可调「画笔大小」滑块（5~50px）
@@ -245,24 +256,31 @@ guidance_scale: 7.5                (可选)
 ## 五、常见问题
 
 ### Q: 按钮显示灰色/禁用？
+
 **A**: 模型未加载。检查：
+
 1. `backend/models/powerpaint-v1/` 目录下是否有 `.safetensors` 或 `.bin` 文件
 2. 重启后端服务，等待模型加载完成
 3. 点击「刷新设备」按钮查看状态
 
 ### Q: 推理很慢？
+
 **A**: CPU 模式下正常（30-60 秒/张）。加速方案：
+
 1. 安装 GPU 版 PyTorch（见 Step 1）
 2. 减少 `num_inference_steps`（如 25 步，牺牲质量换速度）
 3. 租用 GPU 服务器部署（如 AutoDL）
 
 ### Q: 模型下载失败？
+
 **A**:
+
 1. 设置 HuggingFace 镜像：`export HF_ENDPOINT=https://hf-mirror.com`
 2. 手动下载：访问 https://huggingface.co/JunhaoZhuang/PowerPaint-v1
 3. 检查磁盘空间（需 8GB+）
 
 ### Q: 启动报错 `No module named 'torch'`？
+
 **A**: 运行 `pip install torch` 安装 PyTorch。无 GPU 时自动安装 CPU 版。
 
 ---
@@ -288,3 +306,16 @@ frontend/
     ├── api/powerpaint.ts              # PowerPaint API 客户端
     └── views/ProductSelectionView.vue # 选品中心 + 编辑抽屉
 ```
+
+---
+
+## 七、注意事项
+
+PowerPaint **没有启动独立的服务**，它直接运行在现有的 FastAPI 后端进程中：
+
+1. **启动方式**：与其他所有 API 一起通过 `uvicorn app.main:app` 启动
+2. **模型加载**：首次请求时懒加载（首次推理约 30-60 秒 CPU / 5-10 秒 GPU）
+3. **资源占用**：与现有服务共享进程资源，CPU 模式约 1-2GB 额外内存
+4. **无额外配置**：不需要单独的端口、环境变量或服务配置
+
+如果需要在无 GPU 的生产环境中部署，建议使用 CPU 模式并适当降低 `num_inference_steps`（如 25 步）以加速推理。

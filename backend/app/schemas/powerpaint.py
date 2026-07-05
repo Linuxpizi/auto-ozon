@@ -16,3 +16,5 @@ class PowerPaintDeviceResponse(BaseModel):
     model_dir: str
     model_exists: bool
     cuda_available: bool
+    pipeline_loaded: bool = False
+    pipeline_loading: bool = False

@@ -271,6 +271,18 @@
                 </div>
               </div>
               <div class="empty-hint" v-if="!ppDeviceInfo" style="margin-bottom: 4px; font-size: 11px;">点击「刷新设备」检测 PowerPaint 服务状态</div>
+              <!-- 模型加载中提示 -->
+              <n-alert v-if="ppDeviceInfo && !ppDeviceInfo.pipeline_loaded" type="warning" :show-icon="true" style="margin-bottom: 8px; font-size: 12px;">
+                <template v-if="ppDeviceInfo.pipeline_loading">
+                  <n-spin size="small" style="margin-right: 6px;" /> 模型加载中，请稍候（首次加载约需 1-3 分钟）
+                </template>
+                <template v-else-if="ppDeviceInfo.model_exists">
+                  模型已就绪但尚未加载到内存，点击任一编辑操作后将自动加载（首次约需 1-3 分钟）
+                </template>
+                <template v-else>
+                  模型文件未找到，请先下载模型
+                </template>
+              </n-alert>
 
               <!-- 选择编辑图片 -->
               <div style="margin-bottom: 8px;">
@@ -289,13 +301,13 @@
 
               <!-- PowerPaint 操作按钮 -->
               <n-space size="small" v-if="ppSelectedImageIdx !== null">
-                <n-button size="tiny" type="error" :loading="ppLoadingTask === 'remove'" @click="ppShowMaskModal('remove')" :disabled="!ppDeviceInfo?.model_exists">
+                <n-button size="tiny" type="error" :loading="ppLoadingTask === 'remove' || (ppDeviceInfo?.pipeline_loading && ppLoadingTask === 'remove')" @click="ppShowMaskModal('remove')" :disabled="!ppDeviceInfo?.model_exists">
                   🗑️ 去物体
                 </n-button>
-                <n-button size="tiny" type="warning" :loading="ppLoadingTask === 'outpaint'" @click="handlePpOutpaint" :disabled="!ppDeviceInfo?.model_exists">
+                <n-button size="tiny" type="warning" :loading="ppLoadingTask === 'outpaint' || (ppDeviceInfo?.pipeline_loading && ppLoadingTask === 'outpaint')" @click="handlePpOutpaint" :disabled="!ppDeviceInfo?.model_exists">
                   📐 扩图
                 </n-button>
-                <n-button size="tiny" type="info" :loading="ppLoadingTask === 'inpaint'" @click="ppShowMaskModal('inpaint')" :disabled="!ppDeviceInfo?.model_exists">
+                <n-button size="tiny" type="info" :loading="ppLoadingTask === 'inpaint' || (ppDeviceInfo?.pipeline_loading && ppLoadingTask === 'inpaint')" @click="ppShowMaskModal('inpaint')" :disabled="!ppDeviceInfo?.model_exists">
                   ✏️ 修复
                 </n-button>
                 <!-- 扩图比例调节 -->
@@ -1211,7 +1223,7 @@ async function handleAiGenerateImages() {
 }
 
 // ── PowerPaint 图片编辑 (独立于 ChatGPT AI) ──
-const ppDeviceInfo = ref<{ device: string; dtype: string; model_dir: string; model_exists: boolean; cuda_available: boolean } | null>(null);
+const ppDeviceInfo = ref<{ device: string; dtype: string; model_dir: string; model_exists: boolean; cuda_available: boolean; pipeline_loaded: boolean; pipeline_loading: boolean } | null>(null);
 const ppDeviceLoading = ref(false);
 const ppSelectedImageIdx = ref<number | null>(null);
 const ppLoadingTask = ref<string | null>(null);

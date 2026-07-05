@@ -153,7 +153,7 @@
                 <div class="info-item"><span class="info-key">品牌</span><span>{{ editProduct.brand || '—' }}</span></div>
                 <div class="info-item"><span class="info-key">分类</span><span>{{ editProduct.category || '—' }}</span></div>
                 <div class="info-item"><span class="info-key">评分</span><span>{{ editProduct.rating ?? '—' }}</span></div>
-                <div class="info-item"><span class="info-key">评论</span><span>{{ editProduct.reviews_count ?? '—' }}</span></div>
+                <div class="info-item"><span class="info-key">评论</span><span>{{ editProduct.review_count ?? '—' }}</span></div>
               </div>
             </div>
 
@@ -272,6 +272,75 @@
                 <n-gi>
                   <div class="field-label">分类</div>
                   <n-input v-model:value="editProduct.category" size="small" placeholder="分类" />
+                </n-gi>
+              </n-grid>
+            </div>
+
+            <!-- 店铺与 Ozon 分类 -->
+            <div class="section-block">
+              <div class="section-label">🏪 店铺与 Ozon 分类</div>
+              <n-grid :cols="1" :x-gap="8">
+                <n-gi>
+                  <div class="field-label">Ozon 店铺</div>
+                  <n-select
+                    v-model:value="editProduct.store_id"
+                    :options="storeOptions"
+                    placeholder="选择店铺"
+                    size="small"
+                    clearable
+                    @update:value="onEditStoreChange"
+                  />
+                </n-gi>
+                <n-gi style="margin-top:8px">
+                  <div class="field-label">商品分类</div>
+                  <n-popover
+                    trigger="click"
+                    placement="bottom-start"
+                    :disabled="!editProduct.store_id"
+                    :show="editCategoryPopoverShow"
+                    @update:show="(v: boolean) => editCategoryPopoverShow = v"
+                    raw
+                    :style="{ width: '420px' }"
+                  >
+                    <template #trigger>
+                      <n-input
+                        :value="editSelectedCategoryLabel"
+                        placeholder="请先选择店铺,然后点击选择分类"
+                        readonly
+                        :disabled="!editProduct.store_id"
+                        size="small"
+                        style="cursor: pointer"
+                      >
+                        <template #suffix>
+                          <n-icon v-if="editSelectedCategoryLabel" @click.stop="clearEditCategorySelection" style="cursor: pointer">
+                            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" width="14" height="14"><path d="M12 2C6.47 2 2 6.47 2 12s4.47 10 10 10 10-4.47 10-10S17.53 2 12 2zm5 13.59L15.59 17 12 13.41 8.41 17 7 15.59 10.59 12 7 8.41 8.41 7 12 10.59 15.59 7 17 8.41 13.41 12 17 15.59z"/></svg>
+                          </n-icon>
+                        </template>
+                      </n-input>
+                    </template>
+                    <div style="background: var(--n-color); border-radius: 8px; box-shadow: 0 6px 16px rgba(0,0,0,.12); overflow: hidden;">
+                      <div style="padding: 8px 12px; border-bottom: 1px solid rgba(0,0,0,.06);">
+                        <n-input
+                          v-model:value="editCategorySearchPattern"
+                          placeholder="🔍 搜索分类..."
+                          clearable
+                          size="small"
+                        />
+                      </div>
+                      <div style="height: 360px; overflow-y: auto; padding: 4px 0;">
+                        <n-tree
+                          :data="categoryTreeNodes"
+                          :selected-keys="editSelectedCategoryKeys"
+                          :expanded-keys="expandedCategoryKeys"
+                          :cascade="false"
+                          :pattern="editCategorySearchPattern || undefined"
+                          :filter="filterCategoryTree"
+                          @update:selected-keys="onEditCategoryTreeSelect"
+                          @update:expanded-keys="onCategoryTreeExpand"
+                        />
+                      </div>
+                    </div>
+                  </n-popover>
                 </n-gi>
               </n-grid>
             </div>
@@ -414,9 +483,14 @@
             </n-popconfirm>
             <n-space>
               <n-button @click="drawerVisible = false">取消</n-button>
-              <n-button type="warning" :loading="drawerSaving" :disabled="!editProduct" @click="handleUploadFromDrawer">
-                🚀 上传到 Ozon
-              </n-button>
+              <n-popconfirm @positive-click="handleCreateDraft">
+                <template #trigger>
+                  <n-button type="warning" :loading="drawerCreatingDraft" :disabled="!editProduct">
+                    📤 创建上架草稿
+                  </n-button>
+                </template>
+                确定将此商品创建为上架草稿？创建后可到「上架管理」编辑并提交。
+              </n-popconfirm>
               <n-button type="primary" :loading="drawerSaving" :disabled="!editProduct" @click="saveEdit">
                 💾 保存修改
               </n-button>
@@ -547,230 +621,6 @@
       <template #footer>
         <div class="upload-footer">
           <n-button @click="smartPricingVisible = false">取消</n-button>
-          <n-button type="primary" @click="applySmartPricing" :disabled="!pricingResult">✅ 应用价格</n-button>
-        </div>
-      </template>
-    </n-modal>
-
-    <n-modal v-model:show="uploadVisible" preset="card" class="upload-modal" :bordered="false">
-      <template #header>
-        <div class="upload-modal__header">
-          <span class="upload-modal__title">🚀 上传到 Ozon</span>
-          <n-tag v-if="editProduct" size="small" :bordered="false" type="info">
-            {{ editProduct.title?.slice(0, 30) }}{{ editProduct.title?.length > 30 ? '...' : '' }}
-          </n-tag>
-        </div>
-      </template>
-
-      <n-spin :show="uploading">
-        <div class="upload-body">
-
-          <!-- ── 🏪 店铺与分类 ── -->
-          <div class="upload-section">
-            <div class="upload-section__title">🏪 店铺与分类</div>
-            <n-grid :cols="2" :x-gap="16" :y-gap="12">
-              <n-gi>
-                <div class="upload-field">
-                  <label class="upload-field__label">Ozon 店铺 <span class="required">*</span></label>
-                  <n-select v-model:value="uploadForm.store_id" :options="storeOptions" placeholder="选择店铺" />
-                </div>
-              </n-gi>
-              <n-gi>
-                <div class="upload-field">
-                  <label class="upload-field__label">商品分类 <span class="required">*</span></label>
-                  <n-popover
-                    trigger="click"
-                    placement="bottom-start"
-                    :disabled="!uploadForm.store_id"
-                    :show="categoryPopoverShow"
-                    @update:show="(v: boolean) => categoryPopoverShow = v"
-                    raw
-                    :style="{ width: '420px' }"
-                  >
-                    <template #trigger>
-                      <n-input
-                        :value="selectedCategoryLabel"
-                        placeholder="请先选择店铺,然后点击选择分类"
-                        readonly
-                        :disabled="!uploadForm.store_id"
-                        size="small"
-                        style="cursor: pointer"
-                      >
-                        <template #suffix>
-                          <n-icon v-if="selectedCategoryLabel" @click.stop="clearCategorySelection" style="cursor: pointer">
-                            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" width="14" height="14"><path d="M12 2C6.47 2 2 6.47 2 12s4.47 10 10 10 10-4.47 10-10S17.53 2 12 2zm5 13.59L15.59 17 12 13.41 8.41 17 7 15.59 10.59 12 7 8.41 8.41 7 12 10.59 15.59 7 17 8.41 13.41 12 17 15.59z"/></svg>
-                          </n-icon>
-                        </template>
-                      </n-input>
-                    </template>
-                    <div style="background: var(--n-color); border-radius: 8px; box-shadow: 0 6px 16px rgba(0,0,0,.12); overflow: hidden;">
-                      <div style="padding: 8px 12px; border-bottom: 1px solid rgba(0,0,0,.06);">
-                        <n-input
-                          v-model:value="categorySearchPattern"
-                          placeholder="🔍 搜索分类..."
-                          clearable
-                          size="small"
-                        />
-                      </div>
-                      <div style="height: 360px; overflow-y: auto; padding: 4px 0;">
-                        <n-tree
-                          :data="categoryTreeNodes"
-                          :selected-keys="selectedCategoryKeys"
-                          :expanded-keys="expandedCategoryKeys"
-                          :cascade="false"
-                          :pattern="categorySearchPattern || undefined"
-                          :filter="filterCategoryTree"
-                          @update:selected-keys="onCategoryTreeSelect"
-                          @update:expanded-keys="onCategoryTreeExpand"
-                        />
-                      </div>
-                    </div>
-                  </n-popover>
-                </div>
-              </n-gi>
-              <n-gi>
-                <div class="upload-field">
-                  <label class="upload-field__label">Offer ID</label>
-                  <n-input v-model:value="uploadForm.offer_id" placeholder="留空自动生成" />
-                </div>
-              </n-gi>
-            </n-grid>
-          </div>
-
-          <!-- ── 📝 商品信息 ── -->
-          <div class="upload-section">
-            <div class="upload-section__title">📝 商品信息</div>
-            <div class="upload-field">
-              <label class="upload-field__label">商品名称</label>
-              <n-input v-model:value="uploadForm.name" placeholder="Ozon 上显示的商品名" />
-            </div>
-            <div class="upload-field" style="margin-top: 8px;">
-              <label class="upload-field__label">商品描述</label>
-              <n-input v-model:value="uploadForm.description" type="textarea" :rows="3" placeholder="HTML / Markdown 描述" />
-            </div>
-          </div>
-
-          <!-- ── 💰 定价 ── -->
-          <div class="upload-section">
-            <div class="upload-section__title">
-              <span>💰 定价</span>
-              <n-button text size="tiny" @click="calcUploadPrice">🔄 重新计算</n-button>
-            </div>
-            <n-grid :cols="3" :x-gap="16" :y-gap="12">
-              <n-gi>
-                <div class="upload-field">
-                  <label class="upload-field__label">汇率 (CNY→RUB)</label>
-                  <n-input-number v-model:value="uploadForm.exchange_rate" :min="1" :step="0.5" style="width: 100%" @update:value="calcUploadPrice" />
-                </div>
-              </n-gi>
-              <n-gi>
-                <div class="upload-field">
-                  <label class="upload-field__label">加价倍率</label>
-                  <n-input-number v-model:value="uploadForm.markup_factor" :min="1" :step="0.1" style="width: 100%" @update:value="calcUploadPrice" />
-                </div>
-              </n-gi>
-              <n-gi>
-                <div class="upload-field">
-                  <label class="upload-field__label">佣金 (%)</label>
-                  <n-input-number v-model:value="uploadForm.commission_pct" :min="0" :max="100" :step="1" style="width: 100%" @update:value="calcUploadPrice" />
-                </div>
-              </n-gi>
-              <n-gi>
-                <div class="upload-field">
-                  <label class="upload-field__label">物流 (₽)</label>
-                  <n-input-number v-model:value="uploadForm.logistics_rub" :min="0" style="width: 100%" @update:value="calcUploadPrice" />
-                </div>
-              </n-gi>
-              <n-gi>
-                <div class="upload-field">
-                  <label class="upload-field__label">物流费 (₽)</label>
-                  <n-input-number v-model:value="uploadForm.logistics_rub" :min="0" style="width: 100%" @update:value="calcUploadPrice" />
-                </div>
-              </n-gi>
-              <n-gi>
-                <div class="upload-field">
-                  <label class="upload-field__label">包装 (₽)</label>
-                  <n-input-number v-model:value="uploadForm.packaging_rub" :min="0" style="width: 100%" @update:value="calcUploadPrice" />
-                </div>
-              </n-gi>
-            </n-grid>
-
-            <!-- 自动定价结果 -->
-            <div v-if="priceCalcResult" class="upload-price-result">
-              <div class="upload-price-result__header">🧮 自动定价结果</div>
-              <n-grid :cols="4" :x-gap="12">
-                <n-gi>
-                  <div class="price-card">
-                    <span class="price-card__label">成本</span>
-                    <span class="price-card__value">{{ priceCalcResult.cost_rub }} ₽</span>
-                  </div>
-                </n-gi>
-                <n-gi>
-                  <div class="price-card">
-                    <span class="price-card__label">加价后</span>
-                    <span class="price-card__value">{{ priceCalcResult.markup_price_rub }} ₽</span>
-                  </div>
-                </n-gi>
-                <n-gi>
-                  <div class="price-card">
-                    <span class="price-card__label">佣金</span>
-                    <span class="price-card__value">{{ priceCalcResult.commission_rub }} ₽</span>
-                  </div>
-                </n-gi>
-                <n-gi>
-                  <div class="price-card price-card--final">
-                    <span class="price-card__label">最终售价</span>
-                    <span class="price-card__value">{{ priceCalcResult.final_price_rub }} ₽</span>
-                  </div>
-                </n-gi>
-              </n-grid>
-            </div>
-          </div>
-
-          <!-- ── 📦 物流 ── -->
-          <div class="upload-section">
-            <div class="upload-section__title">📦 物流</div>
-            <n-grid :cols="4" :x-gap="16" :y-gap="12">
-              <n-gi>
-                <div class="upload-field">
-                  <label class="upload-field__label">重量 (g)</label>
-                  <n-input-number v-model:value="uploadForm.weight_g" :min="0" style="width: 100%" />
-                </div>
-              </n-gi>
-              <n-gi>
-                <div class="upload-field">
-                  <label class="upload-field__label">高 (mm)</label>
-                  <n-input-number v-model:value="uploadForm.height_mm" :min="0" style="width: 100%" />
-                </div>
-              </n-gi>
-              <n-gi>
-                <div class="upload-field">
-                  <label class="upload-field__label">深 (mm)</label>
-                  <n-input-number v-model:value="uploadForm.depth_mm" :min="0" style="width: 100%" />
-                </div>
-              </n-gi>
-              <n-gi>
-                <div class="upload-field">
-                  <label class="upload-field__label">宽 (mm)</label>
-                  <n-input-number v-model:value="uploadForm.width_mm" :min="0" style="width: 100%" />
-                </div>
-              </n-gi>
-            </n-grid>
-          </div>
-
-        </div>
-      </n-spin>
-
-      <template #footer>
-        <div class="upload-footer">
-          <n-button @click="uploadVisible = false" size="large">取消</n-button>
-          <n-button
-            type="primary"
-            size="large"
-            :loading="uploading"
-            :disabled="!uploadForm.store_id || !uploadForm.description_category_id"
-            @click="doUpload"
-          >🚀 上传到 Ozon</n-button>
         </div>
       </template>
     </n-modal>
@@ -779,6 +629,7 @@
 
 <script setup lang="ts">
 import { ref, reactive, computed, h, onMounted, nextTick, watch } from "vue";
+import { useRouter } from "vue-router";
 import {
   NButton, NTag, NSpace, NInput, NInputNumber, NSelect, NDataTable,
   NPopconfirm, NPagination, NDrawer, NDrawerContent, NImage, NDivider,
@@ -791,6 +642,7 @@ import { translateText, translateBatch, optimizeDescription, translateImage, rep
 import { useMessage } from "naive-ui";
 
 const message = useMessage();
+const router = useRouter();
 
 // ── 抽屉主题:确保深色模式下背景正确 ──
 const drawerThemeOverrides = computed<GlobalThemeOverrides>(() => {
@@ -874,6 +726,53 @@ const editProduct = ref<any>(null);
 const editProductSnapshot = ref<any>(null);
 const drawerSaving = ref(false);
 
+// ── 编辑抽屉: 店铺与分类选择 ──
+const editCategoryPopoverShow = ref(false);
+const editSelectedCategoryKeys = ref<any[]>([]);
+const editCategorySearchPattern = ref('');
+
+const editSelectedCategoryLabel = computed(() => {
+  if (!editSelectedCategoryKeys.value.length) return '';
+  const key = editSelectedCategoryKeys.value[0];
+  for (const [, children] of categoryTreeMap.value) {
+    const found = children.find((c: any) => c.key === key);
+    if (found) return found.label;
+  }
+  function findLabel(nodes: any[]): string {
+    for (const n of nodes) {
+      if (n.key === key) return n.label;
+      if (n.children) { const f = findLabel(n.children); if (f) return f; }
+    }
+    return '';
+  }
+  return findLabel(categoryTreeNodes.value);
+});
+
+function onEditStoreChange(val: number | null) {
+  editProduct.value.description_category_id = null;
+  editSelectedCategoryKeys.value = [];
+  if (val) {
+    loadCategoryTree(val);
+  } else {
+    categoryTreeNodes.value = [];
+    categoryTreeMap.value.clear();
+  }
+}
+
+function onEditCategoryTreeSelect(keys: any[]) {
+  editSelectedCategoryKeys.value = keys;
+  if (keys.length) {
+    editProduct.value.description_category_id = keys[0];
+  } else {
+    editProduct.value.description_category_id = null;
+  }
+}
+
+function clearEditCategorySelection() {
+  editSelectedCategoryKeys.value = [];
+  editProduct.value.description_category_id = null;
+}
+
 const hasChanges = computed(() => {
   if (!editProduct.value || !editProductSnapshot.value) return false;
   return JSON.stringify(editProduct.value) !== JSON.stringify(editProductSnapshot.value);
@@ -882,6 +781,28 @@ const hasChanges = computed(() => {
 function openDrawer(product: any) {
   editProduct.value = JSON.parse(JSON.stringify(product));
   editProductSnapshot.value = JSON.parse(JSON.stringify(product));
+  // initialize edit category state from product
+  editSelectedCategoryKeys.value = product.description_category_id ? [product.description_category_id] : [];
+  editCategorySearchPattern.value = '';
+  editCategoryPopoverShow.value = false;
+  // load category tree if store_id is set
+  if (product.store_id) {
+    loadCategoryTree(product.store_id);
+  }
+  if (!storeOptions.value.length) {
+    loadStoreOptions();
+  }
+  // initialize edit category state from product
+  editSelectedCategoryKeys.value = product.description_category_id ? [product.description_category_id] : [];
+  editCategorySearchPattern.value = '';
+  editCategoryPopoverShow.value = false;
+  // load category tree if store_id is set
+  if (product.store_id) {
+    loadCategoryTree(product.store_id);
+  }
+  if (!storeOptions.value.length) {
+    loadStoreOptions();
+  }
   drawerVisible.value = true;
 }
 
@@ -909,6 +830,8 @@ async function saveEdit() {
       width_mm: d.width_mm,
       height_mm: d.height_mm,
       depth_mm: d.depth_mm,
+      store_id: d.store_id || null,
+      description_category_id: d.description_category_id || null,
     });
     message.success("保存成功");
     editProductSnapshot.value = JSON.parse(JSON.stringify(editProduct.value));
@@ -920,103 +843,37 @@ async function saveEdit() {
   }
 }
 
-// ── 上传到 Ozon 弹窗 ──
-const uploadVisible = ref(false);
-const uploading = ref(false);
+// ── 店铺选项（编辑抽屉使用） ──
 const storeOptions = ref<any[]>([]);
-const categoryTree = ref<any[]>([]);
-const priceCalcResult = ref<any>(null);
 
-const uploadForm = reactive({
-  store_id: null as number | null,
-  description_category_id: null as number | null,
-  name: "",
-  description: "",
-  exchange_rate: 12.5,
-  markup_factor: 1.5,
-  commission_pct: 15,
-  logistics_rub: 500,
-  packaging_rub: 50,
-  weight_g: 0,
-  height_mm: 0,
-  depth_mm: 0,
-  width_mm: 0,
-  offer_id: "",
-});
+// ── 创建上架草稿 ──
+const drawerCreatingDraft = ref(false);
 
-function openUpload(product: any) {
-  editProduct.value = JSON.parse(JSON.stringify(product));
-  uploadForm.name = product.title || "";
-  uploadForm.description = product.description || "";
-  uploadForm.weight_g = product.weight_g || product.spec_list?.[0]?.weight_g || 0;
-  uploadForm.height_mm = product.height_mm || product.spec_list?.[0]?.height_mm || 0;
-  uploadForm.depth_mm = product.depth_mm || product.spec_list?.[0]?.depth_mm || 0;
-  uploadForm.width_mm = product.width_mm || product.spec_list?.[0]?.width_mm || 0;
-  calcUploadPrice();
-  uploadVisible.value = true;
-}
-
-function handleUploadFromDrawer() {
+async function handleCreateDraft() {
   if (!editProduct.value) return;
-  openUpload(editProduct.value);
-}
-
-function calcUploadPrice() {
-  if (!editProduct.value) return;
-  const p = editProduct.value;
-  const srcPrice = p.price || 0;
-  const rate = uploadForm.exchange_rate || 12.5;
-  const markup = uploadForm.markup_factor || 1.5;
-  const commPct = (uploadForm.commission_pct || 15) / 100;
-  const logistics = uploadForm.logistics_rub || 0;
-  const packaging = uploadForm.packaging_rub || 0;
-
-  const costRub = Math.round(srcPrice * rate + logistics + packaging);
-  const markupPrice = Math.round(costRub * markup);
-  const commission = Math.round(markupPrice * commPct);
-  const finalPrice = Math.round(markupPrice + commission);
-
-  priceCalcResult.value = {
-    cost_rub: costRub,
-    markup_price_rub: markupPrice,
-    commission_rub: commission,
-    final_price_rub: finalPrice,
-  };
-}
-
-async function doUpload() {
-  if (!editProduct.value) return;
-  uploading.value = true;
+  drawerCreatingDraft.value = true;
   try {
-    // Step 1: 创建草稿
-    const draft = await apiPost<any>("/upload/drafts", {
-      store_id: uploadForm.store_id,
-      source_type: "scraped",
-      source_product_id: editProduct.value.id,
-      source_name: editProduct.value.title || "",
-      source_url: editProduct.value.url || "",
-      description_category_id: uploadForm.description_category_id,
-      name: uploadForm.name,
-      description: uploadForm.description,
-      price_cny: editProduct.value.price || 0,
-      price_rub: priceCalcResult.value?.final_price_rub || 0,
-      weight: uploadForm.weight_g || 500,
-      height: uploadForm.height_mm || 100,
-      depth: uploadForm.depth_mm || 100,
-      width: uploadForm.width_mm || 100,
+    const d = editProduct.value;
+    await apiPost("/upload/drafts", {
+      store_id: d.store_id,
+      source_type: "selection",
+      source_product_id: d.id,
+      name: d.title || "",
+      description: d.description || "",
+      category_name: d.category || "",
+      price_cny: d.price || 0,
+      weight: d.weight_g || 500,
+      height: d.height_mm || 100,
+      depth: d.depth_mm || 100,
+      width: d.width_mm || 100,
     });
-    // Step 2: 自动提交到 Ozon
-    const result = await apiPost<any>(`/upload/drafts/${draft.id}/submit`);
-    if (result.success) {
-      message.success(`✅ 已提交到 Ozon (task_id=${result.task_id})，可到「上架管理」查看状态`);
-    } else {
-      message.warning(`草稿已创建但提交失败: ${result.error || "未知错误"}，可到「上架管理」重试`);
-    }
-    uploadVisible.value = false;
+    message.success("✅ 上架草稿已创建，请到「上架管理」编辑并提交");
+    drawerVisible.value = false;
+    router.push("/listing");
   } catch (e: any) {
-    message.error("上传失败: " + e.message);
+    message.error("创建草稿失败: " + e.message);
   } finally {
-    uploading.value = false;
+    drawerCreatingDraft.value = false;
   }
 }
 
@@ -1543,27 +1400,18 @@ const columns = [
   },
   {
     title: "评论",
-    key: "reviews_count",
+    key: "review_count",
     width: 70,
     sorter: true,
   },
   {
-    title: "折扣",
-    key: "discount",
-    width: 70,
-    render(row: any) {
-      return row.discount ? h(NTag, { size: "small", round: true, bordered: false, type: "error" }, () => row.discount) : h("span", { style: "color:#ccc;" }, "—");
-    },
-  },
-  {
     title: "操作",
     key: "actions",
-    width: 160,
+    width: 120,
     fixed: "right" as const,
     render(row: any) {
       return h(NSpace, { size: 4 }, () => [
         h(NButton, { size: "small", type: "primary", quaternary: true, onClick: () => openDrawer(row) }, () => "✏️ 编辑"),
-        h(NButton, { size: "small", type: "success", quaternary: true, onClick: () => openUpload(row) }, () => "🚀 上传"),
         h(NPopconfirm, {
           onPositiveClick: () => deleteProduct(row),
         }, {
@@ -1657,8 +1505,8 @@ const selectedCategoryLabel = computed(() => {
 });
 
 function clearCategorySelection() {
-  selectedCategoryKeys.value = [];
-  uploadForm.description_category_id = null;
+  editSelectedCategoryKeys.value = [];
+  if (editProduct.value) editProduct.value.description_category_id = null;
 }
 
 // n-tree filter: match node label against search pattern
@@ -1739,8 +1587,8 @@ function onCategoryTreeExpand(keys: any[]) {
 // Only allow selecting leaf nodes (last level only)
 function onCategoryTreeSelect(keys: any[]) {
   if (!keys || keys.length === 0) {
-    selectedCategoryKeys.value = [];
-    uploadForm.description_category_id = null;
+    editSelectedCategoryKeys.value = [];
+    if (editProduct.value) editProduct.value.description_category_id = null;
     return;
   }
   const value = keys[keys.length - 1];
@@ -1756,22 +1604,22 @@ function onCategoryTreeSelect(keys: any[]) {
   const localChildren = categoryTreeMap.value.get(value);
   if ((node && node.children && node.children.length > 0) || (localChildren && localChildren.length > 0)) {
     message.warning('请展开选择最后一级分类');
-    selectedCategoryKeys.value = [];
+    editSelectedCategoryKeys.value = [];
     return;
   }
-  selectedCategoryKeys.value = [value];
-  uploadForm.description_category_id = value;
+  editSelectedCategoryKeys.value = [value];
+  if (editProduct.value) editProduct.value.description_category_id = value;
 }
 
 // Watch store_id change -> reload full category tree
-watch(() => uploadForm.store_id, (newVal) => {
+watch(() => editProduct.value?.store_id, (newVal) => {
   if (newVal) {
     loadCategoryTree(newVal);
   } else {
     categoryTreeNodes.value = [];
     categoryTreeMap.value.clear();
-    selectedCategoryKeys.value = [];
-    uploadForm.description_category_id = null;
+    editSelectedCategoryKeys.value = [];
+    if (editProduct.value) editProduct.value.description_category_id = null;
   }
 });
 

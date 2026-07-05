@@ -276,11 +276,15 @@ async function scrapeOzonProduct(): Promise<ScrapedProduct | null> {
     if (jsonLd.color) attributes.push({ name: '颜色', value: String(jsonLd.color) })
   }
 
-  return {
-    platform: 'ozon',
-    sourceId,
+  // ── 拟人化: 先尝试通过内部 API 获取结构化数据 (评分/规格/视频/标签更准确) ──
+  let apiData: Partial<ScrapedProduct> | null = null
+  try {
+    apiData = await fetchProductDetailFromApi(sourceId, location.href)
+  } catch { /* DOM fallback below */ }
+
+  // ── 从 DOM 提取基础数据 (作为 fallback / 补充) ──
+  const domData = {
     title: getText('h1') || getText('[data-widget="webProductHeading"] span'),
-    currency: 'RUB',
     price: extractDetailPrice(),
     oldPrice: extractDetailOldPrice(),
     images: extractDetailImages(),
@@ -289,12 +293,78 @@ async function scrapeOzonProduct(): Promise<ScrapedProduct | null> {
     brand: extractDetailBrand() || (jsonLd?.brand?.name ?? ''),
     category: extractDetailCategory(),
     sellerName: extractDetailSellerName(),
-    sellerUrl: '',
     attributes,
     description: extractDetailDescription(),
+  }
+
+  // ── 从 DOM 提取视频 (<video> 元素 + 嵌入视频源) ──
+  const domVideos: string[] = []
+  document.querySelectorAll('video source, video').forEach((el) => {
+    const src = (el as HTMLSourceElement).src || (el as HTMLVideoElement).src || ''
+    if (src && src.startsWith('http') && !domVideos.includes(src)) domVideos.push(src)
+  })
+  // Ozon 视频也经常以 data 属性或 iframe 形式出现
+  document.querySelectorAll('[data-video-url], [data-src*="video"]').forEach((el) => {
+    const url = el.getAttribute('data-video-url') || el.getAttribute('data-src') || ''
+    if (url && url.startsWith('http') && !domVideos.includes(url)) domVideos.push(url)
+  })
+
+  // ── 从 DOM 提取标签 (促销/分类/品牌标签) ──
+  const domTags: string[] = []
+  // Ozon 商品页常见标签区域
+  document.querySelectorAll('[data-widget="webPromoLabel"] span, [class*="promo"] span, [class*="tag"] span, [class*="badge"] span').forEach((el) => {
+    const t = el.textContent?.trim() || ''
+    if (t && t.length < 50 && !domTags.includes(t)) domTags.push(t)
+  })
+  // 面包屑最后一级作为分类标签
+  const catLabel = domData.category?.split(' > ').pop()?.trim()
+  if (catLabel && !domTags.includes(catLabel)) domTags.push(catLabel)
+
+  // ── 合并: API 数据优先 (更准确), DOM 数据补充缺失字段 ──
+  const merged: ScrapedProduct = {
+    platform: 'ozon',
+    sourceId,
+    title: apiData?.title || domData.title,
+    currency: 'RUB',
+    price: apiData?.price || domData.price,
+    oldPrice: apiData?.oldPrice || domData.oldPrice,
+    images: (apiData?.images?.length ? apiData.images : domData.images).slice(0, 20),
+    rating: apiData?.rating || domData.rating,
+    reviewCount: apiData?.reviewCount || domData.reviewCount,
+    brand: apiData?.brand || domData.brand,
+    category: apiData?.category || domData.category,
+    sellerName: apiData?.sellerName || domData.sellerName,
+    sellerUrl: apiData?.sellerUrl || '',
+    attributes: (apiData?.attributes?.length ? apiData.attributes : domData.attributes),
+    description: (apiData?.description && apiData.description.length > 10 ? apiData.description : domData.description),
     sourceUrl: location.href,
     scrapedAt: new Date().toISOString(),
+    videoUrls: (apiData?.videoUrls?.length ? apiData.videoUrls : domVideos),
+    skuList: apiData?.skuList || [],
+    specList: apiData?.specList || [],
+    tags: (apiData?.tags?.length ? apiData.tags : domTags),
+    ozonCategoryId: apiData?.ozonCategoryId || 0,
+    ozonTypeId: apiData?.ozonTypeId || 0,
+    discount: apiData?.discount || '',
+    stock: apiData?.stock || '',
+    priceRanges: apiData?.priceRanges || [],
+    minOrderQty: apiData?.minOrderQty || 0,
+    supplierUrl: apiData?.supplierUrl || '',
+    tradeQuantity: apiData?.tradeQuantity || 0,
   }
+
+  console.log('[鲸智 AI] scrapeOzonProduct merged:', {
+    title: merged.title?.substring(0, 60),
+    rating: merged.rating,
+    reviewCount: merged.reviewCount,
+    attrs: merged.attributes?.length,
+    videos: merged.videoUrls?.length,
+    tags: merged.tags?.length,
+    specs: merged.specList?.length,
+    fromApi: !!apiData,
+  })
+
+  return merged
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -1396,6 +1466,18 @@ export default defineContentScript({
             description: '',
             sourceUrl: c.sourceUrl,
             scrapedAt: new Date().toISOString(),
+            videoUrls: [],
+            skuList: [],
+            specList: [],
+            tags: [],
+            ozonCategoryId: 0,
+            ozonTypeId: 0,
+            discount: '',
+            stock: '',
+            priceRanges: [],
+            minOrderQty: 0,
+            supplierUrl: '',
+            tradeQuantity: 0,
           }))
 
           // ★ 拟人化:滚动采集结束后,模拟用户停顿再开始逐个查看详情

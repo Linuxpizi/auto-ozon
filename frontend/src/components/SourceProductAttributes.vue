@@ -136,7 +136,7 @@
               </div>
               <div class="attr-row">
                 <span class="attr-label">评论数</span>
-                <span class="attr-value">{{ product.reviewCount || product.review_count || '-' }}</span>
+                <span class="attr-value">{{ product.review_count || '-' }}</span>
               </div>
               <div class="attr-row">
                 <span class="attr-label">库存状态</span>

@@ -29,12 +29,19 @@ export interface ScrapedProduct {
   skuList: Array<{ sku: string; barcode: string }>
   /** 规格列表 [{weight_g, depth_mm, height_mm, width_mm, color, size, ...}] */
   specList: Array<{ weight_g: number; depth_mm: number; height_mm: number; width_mm: number; [key: string]: any }>
+  /** 商品标签 (品牌、分类、促销标签等) */
+  tags: string[]
 
   // ── 新增:Ozon 内部分类(从内部 API 获取) ──
   /** Ozon description_category_id */
   ozonCategoryId: number
   /** Ozon type_id */
   ozonTypeId: number
+
+  /** 折扣文本 (如 -52%) */
+  discount: string
+  /** 库存文本 (如 Осталось 5 штук) */
+  stock: string
 
   // ── 1688 专有字段 ──
   /** 阶梯价格 [{minQty, maxQty, price}] */

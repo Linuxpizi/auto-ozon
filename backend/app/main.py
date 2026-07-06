@@ -8,6 +8,7 @@ from app.api.routers import dashboard, order, store, monitor, listing, finance, 
 from app.api.routers import prompt_template, title_optimize, product_optimize, image_prompt, ai_text, ai_image
 from app.api.routers import exchange_rate
 from app.api.routers import return_order, feishu_config, powerpaint
+from app.api.routers import image_edit, image_version
 from app.core.db import engine, Base
 from app.services.scheduler_service import lifespan as scheduler_lifespan
 
@@ -116,3 +117,7 @@ app.include_router(exchange_rate.router, prefix="/api/v1", tags=["exchange-rates
 app.include_router(return_order.router, prefix="/api/return-orders", tags=["return-orders"])
 app.include_router(feishu_config.router, prefix="/api/feishu", tags=["feishu"])
 app.include_router(powerpaint.router, tags=["powerpaint"])  # prefix defined in router
+
+# ── Image Edit routes ──────────────────────────────────────────────────
+app.include_router(image_edit.router, prefix="/api/v1/image", tags=["image-edit"])
+app.include_router(image_version.router, prefix="/api/v1/image", tags=["image-version"])

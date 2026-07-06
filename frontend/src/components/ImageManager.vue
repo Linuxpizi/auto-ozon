@@ -61,6 +61,19 @@
                 </template>
                 确认删除此图片?
               </n-popconfirm>
+              <n-tooltip trigger="hover">
+                <template #trigger>
+                  <n-button
+                    size="tiny"
+                    quaternary
+                    type="info"
+                    @click="openEditor(idx)"
+                  >
+                    <template #icon><n-icon :component="CreateOutline" /></template>
+                  </n-button>
+                </template>
+                编辑图片
+              </n-tooltip>
             </n-space>
           </div>
           <div v-if="img.result_url" class="image-manager__badge">
@@ -95,6 +108,22 @@
         <n-button type="primary" :loading="generating" @click="doGenerate">生成</n-button>
       </template>
     </n-modal>
+
+    <!-- Image Editor Modal -->
+    <n-modal
+      v-model:show="showEditor"
+      :mask-closable="false"
+      :close-on-esc="false"
+      style="width: 90vw"
+    >
+      <div style="height: 80vh">
+        <ImageEditor
+          :image-url="editorImageUrl"
+          @apply="onEditorApply"
+          @close="showEditor = false"
+        />
+      </div>
+    </n-modal>
   </div>
 </template>
 
@@ -102,8 +131,9 @@
 import { ref, reactive } from "vue";
 import { useMessage } from "naive-ui";
 import { NImage, NButton, NSpace, NTooltip, NPopconfirm, NTag, NEmpty, NSpin, NForm, NFormItem, NInput, NSlider, NModal, NText, NIcon } from "naive-ui";
-import { LanguageOutline, SwapHorizontalOutline, TrashOutline } from "@vicons/ionicons5";
+import { LanguageOutline, SwapHorizontalOutline, TrashOutline, CreateOutline } from "@vicons/ionicons5";
 import AiButton from "./AiButton.vue";
+import ImageEditor from "./image/ImageEditor.vue";
 import { translateImage, translateBatch, replaceImageSubject, generateImage } from "../api/ai";
 
 interface ImageItem {
@@ -129,6 +159,11 @@ const loading = ref(false);
 const translating = ref(false);
 const generating = ref(false);
 const showGenerateDialog = ref(false);
+
+// ── Image Editor State ────────────────────────────────────────────────
+const showEditor = ref(false);
+const editorImageUrl = ref("");
+const editorImageIndex = ref(-1);
 
 const genForm = reactive({
   title: "",
@@ -207,6 +242,25 @@ async function handleReplace(idx: number) {
 
 function handleRemove(idx: number) {
   emit("remove", idx);
+}
+
+// ── Image Editor ─────────────────────────────────────────────────────
+
+function openEditor(idx: number) {
+  const img = props.images[idx];
+  if (!img) return;
+  editorImageIndex.value = idx;
+  editorImageUrl.value = img.result_url || img.url;
+  showEditor.value = true;
+}
+
+function onEditorApply(editedUrl: string) {
+  const idx = editorImageIndex.value;
+  if (idx < 0 || idx >= props.images.length) return;
+  const img = props.images[idx];
+  img.result_url = editedUrl;
+  showEditor.value = false;
+  message.success("编辑结果已应用到商品图片");
 }
 
 // ── Generate ──────────────────────────────────────────────────────────

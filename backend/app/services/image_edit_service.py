@@ -69,8 +69,10 @@ def _load_image_bytes(image_url: str) -> bytes:
         return resp.content
     # Resolve relative /static/... paths to the actual static directory
     elif image_url.startswith("/static/"):
-        # /static/images/filename.png → IMAGES_DIR / filename
-        rel = image_url.lstrip("/static/")
+        # /static/images/filename.png → STATIC_DIR / images / filename
+        # Do not use str.lstrip here: it strips any of the given characters and
+        # can corrupt paths such as /static/image_versions/... into mage_versions/...
+        rel = image_url.removeprefix("/static/")
         filepath = STATIC_DIR / rel
         if filepath.is_file():
             return filepath.read_bytes()
@@ -237,8 +239,9 @@ IMAGE_QUALITY = 90
 
 
 def _bbox_to_mask(image_bytes: bytes, bbox: dict) -> str:
-    """Convert normalized bbox {x1,y1,x2,y2} to a white-on-black base64 mask.
+    """Convert bbox {x1,y1,x2,y2} to a white-on-black base64 mask.
 
+    Supports both normalized coordinates (0..1) and absolute pixel coordinates.
     The mask has the same dimensions as the source image; the bbox region is
     white (255), the rest is black (0). Returns a data-URI base64 PNG string.
     """
@@ -246,13 +249,30 @@ def _bbox_to_mask(image_bytes: bytes, bbox: dict) -> str:
 
     img = Image.open(io.BytesIO(image_bytes))
     w, h = img.size
-    x1 = int(bbox["x1"] * w)
-    y1 = int(bbox["y1"] * h)
-    x2 = int(bbox["x2"] * w)
-    y2 = int(bbox["y2"] * h)
-    # Clamp to image bounds
+
+    raw_x1 = float(bbox["x1"])
+    raw_y1 = float(bbox["y1"])
+    raw_x2 = float(bbox["x2"])
+    raw_y2 = float(bbox["y2"])
+
+    # Frontend rect selections are emitted in source-image pixel coordinates,
+    # while older callers may still send normalized coordinates. Detect and
+    # support both formats to avoid multiplying pixel values by image size.
+    is_normalized = all(0 <= v <= 1 for v in (raw_x1, raw_y1, raw_x2, raw_y2))
+    if is_normalized:
+        raw_x1, raw_x2 = raw_x1 * w, raw_x2 * w
+        raw_y1, raw_y2 = raw_y1 * h, raw_y2 * h
+
+    # Sort first, then clamp to image bounds. This prevents draw.rectangle from
+    # receiving inverted coordinates after clamping out-of-range boxes.
+    x1, x2 = sorted((int(round(raw_x1)), int(round(raw_x2))))
+    y1, y2 = sorted((int(round(raw_y1)), int(round(raw_y2))))
     x1, x2 = max(0, x1), min(w, x2)
     y1, y2 = max(0, y1), min(h, y2)
+
+    if x1 >= x2 or y1 >= y2:
+        raise ValueError(f"Invalid bbox after normalization/clamp: {bbox} for image size {w}x{h}")
+
     mask = Image.new("L", (w, h), 0)
     draw = ImageDraw.Draw(mask)
     draw.rectangle([x1, y1, x2, y2], fill=255)
@@ -296,18 +316,44 @@ def _composite_masks(mask_uris: list[str], image_bytes: bytes) -> str:
 
 def _merge_prompts(actions: list[EditAction]) -> str:
     """Merge prompts from multiple mask-based actions into one instruction."""
-    prompts = [a.prompt for a in actions if a.prompt]
+    prompts = [a.prompt.strip() for a in actions if a.prompt and a.prompt.strip()]
     unique = list(dict.fromkeys(prompts))  # preserve order, deduplicate
     if not unique:
-        return "Edit the selected regions in this image naturally."
+        return "Edit the selected regions naturally, matching surrounding texture, lighting, perspective, and product-photography quality."
     if len(unique) == 1:
         return unique[0]
-    # Multiple different prompts → combine instructions
-    parts = []
-    for p in unique:
-        p_stripped = p.strip().rstrip(".")
-        parts.append(p_stripped)
-    return " | ".join(parts)
+    # Multiple different prompts → combine into one readable instruction for one AI call.
+    parts = [f"{idx}. {p.rstrip('.')}" for idx, p in enumerate(unique, start=1)]
+    return "Apply these edits to the selected regions in one coherent result:\n" + "\n".join(parts)
+
+
+def _action_instruction(action: EditAction) -> str:
+    """Return the human-readable instruction represented by an action."""
+    if action.prompt and action.prompt.strip():
+        return action.prompt.strip()
+    if action.type == "remove_bg":
+        return "Remove the background and keep the product cleanly isolated."
+    if action.type == "upscale":
+        return f"Upscale/enhance image detail by {action.scale}x."
+    if action.type == "expand":
+        return f"Expand the image canvas toward {action.direction} by ratio {action.expand_ratio}."
+    if action.type in ("brush", "rect"):
+        return "Edit the selected region naturally, matching surrounding texture and lighting."
+    return action.type
+
+
+def _summarize_chain_prompt(actions: list[EditAction]) -> str:
+    """Build a stable prompt summary for version history and debugging."""
+    instructions = []
+    for action in actions:
+        instruction = _action_instruction(action)
+        if instruction not in instructions:
+            instructions.append(instruction)
+    if not instructions:
+        return "Edit chain"
+    if len(instructions) == 1:
+        return instructions[0]
+    return "Edit chain:\n" + "\n".join(f"{idx}. {text}" for idx, text in enumerate(instructions, start=1))
 
 
 def _is_mask_action(action_type: str) -> bool:
@@ -334,23 +380,38 @@ def edit_chain(req: EditChainRequest) -> EditChainResponse:
     # Group consecutive mask-based actions into batches; keep other actions
     # as individual steps.
     execution_plan: list[dict] = []
+    pending_prompt_actions: list[EditAction] = []
     i = 0
     actions = req.actions
     total = len(actions)
     while i < total:
-        if _is_mask_action(actions[i].type):
-            # Gather consecutive mask-based actions
-            batch = []
+        if actions[i].type == "prompt":
+            # A prompt immediately before a mask selection is the user's instruction
+            # for that selection. Hold it briefly so prompt+rect/brush becomes one
+            # masked AI call instead of two separate calls.
+            pending_prompt_actions.append(actions[i])
+            i += 1
+        elif _is_mask_action(actions[i].type):
+            # Gather consecutive mask-based actions and attach any pending prompt
+            # instructions to the first batch.
+            batch = [*pending_prompt_actions]
+            pending_prompt_actions = []
             while i < total and _is_mask_action(actions[i].type):
                 batch.append(actions[i])
                 i += 1
             execution_plan.append({"type": "mask_batch", "actions": batch})
         else:
+            for pending in pending_prompt_actions:
+                execution_plan.append({"type": "single", "action": pending})
+            pending_prompt_actions = []
             execution_plan.append({"type": "single", "action": actions[i]})
             i += 1
+    for pending in pending_prompt_actions:
+        execution_plan.append({"type": "single", "action": pending})
 
     # ── Step 2: Execute the plan ────────────────────────────────────────
     step_counter = 0
+    ai_calls = 0
     for plan_item in execution_plan:
         if plan_item["type"] == "mask_batch":
             batch = plan_item["actions"]
@@ -383,6 +444,7 @@ def edit_chain(req: EditChainRequest) -> EditChainResponse:
                 )
                 edit_resp = edit_image(edit_req)
                 current_image_url = edit_resp.result_url
+                ai_calls += 1
             else:
                 composite_mask = _composite_masks(mask_uris, img_bytes)
                 merged_prompt = _merge_prompts(batch)
@@ -401,6 +463,7 @@ def edit_chain(req: EditChainRequest) -> EditChainResponse:
                 )
                 edit_resp = edit_image(edit_req)
                 current_image_url = edit_resp.result_url
+                ai_calls += 1
 
         elif plan_item["type"] == "single":
             action = plan_item["action"]
@@ -417,6 +480,7 @@ def edit_chain(req: EditChainRequest) -> EditChainResponse:
                 )
                 remove_resp = remove_background(remove_req)
                 current_image_url = remove_resp.result_url
+                ai_calls += 1
 
             elif action.type == "prompt":
                 edit_req = ImageEditRequest(
@@ -430,6 +494,7 @@ def edit_chain(req: EditChainRequest) -> EditChainResponse:
                 )
                 edit_resp = edit_image(edit_req)
                 current_image_url = edit_resp.result_url
+                ai_calls += 1
 
             elif action.type == "expand":
                 expand_req = ImageExpandRequest(
@@ -443,6 +508,7 @@ def edit_chain(req: EditChainRequest) -> EditChainResponse:
                 )
                 expand_resp = expand_image(expand_req)
                 current_image_url = expand_resp.result_url
+                ai_calls += 1
 
             elif action.type == "upscale":
                 upscale_req = ImageUpscaleRequest(
@@ -454,6 +520,7 @@ def edit_chain(req: EditChainRequest) -> EditChainResponse:
                 )
                 upscale_resp = upscale_image(upscale_req)
                 current_image_url = upscale_resp.result_url
+                ai_calls += 1
 
             else:
                 logger.warning("EditChain unknown action type: %s — skipping", action.type)
@@ -467,10 +534,11 @@ def edit_chain(req: EditChainRequest) -> EditChainResponse:
 
     from app.services.image_version_service import create_version
 
+    final_prompt = _summarize_chain_prompt(req.actions)
     version_id = create_version(
         description=f"编辑链 ({len(req.actions)}步)",
         image_bytes=final_bytes,
-        prompt=" | ".join(a.prompt or a.type for a in req.actions if a.prompt or a.type != "prompt"),
+        prompt=final_prompt,
         output_size=f"{target_w}x{target_h}",
     )
 
@@ -481,6 +549,8 @@ def edit_chain(req: EditChainRequest) -> EditChainResponse:
         output_size=f"{target_w}x{target_h}",
         file_size_kb=len(final_bytes) // 1024,
         steps=len(req.actions),
+        final_prompt=final_prompt,
+        ai_calls=ai_calls,
     )
 
 

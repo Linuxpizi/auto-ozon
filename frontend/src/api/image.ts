@@ -93,6 +93,8 @@ export interface EditChainResponse {
   output_size: string;
   file_size_kb: number;
   steps: number;
+  final_prompt?: string;
+  ai_calls?: number;
 }
 
 // ── Output Presets ─────────────────────────────────────────────────────

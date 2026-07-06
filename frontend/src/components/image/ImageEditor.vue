@@ -62,12 +62,11 @@
           <n-button
             type="primary"
             block
-            :loading="state.processing"
-            :disabled="!state.editPrompt"
+            :disabled="!state.editPrompt || state.processing"
             style="margin-top: 8px"
-            @click="executeEdit"
+            @click="addPromptAction"
           >
-            执行编辑
+            加入组合队列
           </n-button>
         </div>
 
@@ -83,7 +82,6 @@
           </n-space>
           <div v-if="state.tool !== 'prompt'" style="margin-top: 8px">
             <n-space align="center" :size="8">
-              <n-button size="tiny" @click="executeWithMask">执行</n-button>
               <n-button size="tiny" @click="addMaskAction">加入队列</n-button>
               <n-button size="tiny" @click="clearTool">取消</n-button>
               <span v-if="state.tool === 'brush'" style="font-size: 12px; color: #999">
@@ -124,9 +122,10 @@
             block
             size="small"
             :loading="state.processing"
+            :disabled="state.processing"
             @click="executeChain"
           >
-            一键执行 ({{ state.actionQueue.length }} 步)
+            一次请求执行 ({{ state.actionQueue.length }} 步)
           </n-button>
           <n-button
             v-if="state.actionQueue.length > 0"
@@ -138,7 +137,7 @@
           >
             清空队列
           </n-button>
-          <n-text v-else depth="3" style="font-size:12px">点击快捷操作或框选/涂鸦后加入队列</n-text>
+          <n-text v-else depth="3" style="font-size:12px">先混合添加自然语言、快捷操作、框选/涂鸦，最后统一请求一次 AI 编辑</n-text>
         </div>
 
         <!-- Output Settings -->
@@ -210,19 +209,13 @@ import { reactive, ref, computed, watch } from 'vue'
 import { NInput, NButton, NSlider, NSpace, NSelect, NBadge, NText, useMessage } from 'naive-ui'
 import ImageCanvas from './ImageCanvas.vue'
 import {
-  editImage,
   editChain,
-  removeBackground as apiRemoveBg,
-  expandImage as apiExpand,
-  upscaleImage as apiUpscale,
   RESOLUTION_PRESETS,
   SIZE_RATIOS,
   calcOutputSize,
-  OUTPUT_PRESETS,
   type EditAction,
   type VersionNode,
 } from '../../api/image'
-import { translateImage } from '../../api/ai'
 
 const props = defineProps({
   imageUrl: { type: String, required: true },
@@ -327,6 +320,14 @@ function actionLabel(a: EditAction): string {
   return a.prompt ? `${label}: ${a.prompt.slice(0, 15)}` : label
 }
 
+function buildMaskPrompt(type: 'brush' | 'rect'): string {
+  const prompt = state.editPrompt.trim()
+  if (prompt) return prompt
+  return type === 'brush'
+    ? 'Edit the brushed area naturally, matching surrounding texture and lighting.'
+    : 'Remove the selected object, fill naturally matching surrounding background.'
+}
+
 function addAction(type: EditAction['type']) {
   const action: EditAction = { type }
   if (type === 'prompt' && state.editPrompt) action.prompt = state.editPrompt
@@ -336,19 +337,29 @@ function addAction(type: EditAction['type']) {
   message.success(`已添加: ${actionLabel(action)}`)
 }
 
+function addPromptAction() {
+  const prompt = state.editPrompt.trim()
+  if (!prompt) return
+  state.actionQueue.push({ type: 'prompt', prompt })
+  state.editPrompt = ''
+  message.success(`已添加: 编辑: ${prompt.slice(0, 15)}`)
+}
+
 function addMaskAction() {
   if (!state.maskData && !state.selectionRect) {
     message.warning('请先在图片上涂鸦或框选区域')
     return
   }
   const type = state.tool as 'brush' | 'rect'
+  const prompt = buildMaskPrompt(type)
   const action: EditAction = {
     type: type === 'brush' ? 'brush' : 'rect',
     mask_data: state.maskData || undefined,
     bbox: state.selectionRect ? { x1: state.selectionRect.x, y1: state.selectionRect.y, x2: state.selectionRect.x + state.selectionRect.w, y2: state.selectionRect.y + state.selectionRect.h } : undefined,
-    prompt: type === 'brush' ? 'Edit the brushed area naturally, matching surrounding texture and lighting.' : 'Remove the selected object, fill naturally matching surrounding background.',
+    prompt,
   }
   state.actionQueue.push(action)
+  state.editPrompt = ''
   state.maskData = null
   state.selectionRect = null
   canvasRef.value?.clearMask()
@@ -368,22 +379,30 @@ async function executeChain() {
   if (state.actionQueue.length === 0) return
   state.processing = true
   try {
+    const actions = state.actionQueue.map((action) => ({ ...action }))
     const res = await editChain({
       image_url: state.currentImageUrl,
-      actions: state.actionQueue,
+      actions,
       custom_width: currentOutputSize.value.width,
       custom_height: currentOutputSize.value.height,
       quality: state.outputQuality,
     })
-    pushVersion(res.result_url, `组合操作 (${res.steps}步)`)
     state.currentImageUrl = res.result_url
+    pushVersion(res.result_url, `组合操作 (${res.steps}步 / ${res.ai_calls ?? '?'}次AI)`, res.version_id, res.final_prompt || actionSummary(actions), res.output_size)
     state.actionQueue.length = 0
-    message.success(`组合操作完成 (${res.steps}步)`)
+    message.success(`组合操作完成 (${res.steps}步，${res.ai_calls ?? 1}次AI调用)`)
   } catch (e: any) {
     message.error('组合操作失败: ' + e.message)
   } finally {
     state.processing = false
   }
+}
+
+function actionSummary(actions: EditAction[]): string {
+  return actions
+    .map((action) => action.prompt || actionLabel(action))
+    .filter(Boolean)
+    .join(' | ')
 }
 
 function onMaskReady(base64: string) {
@@ -394,139 +413,17 @@ function onSelectionReady(rect: { x: number; y: number; w: number; h: number }) 
   state.selectionRect = rect
 }
 
-async function executeEdit() {
-  if (!state.editPrompt || state.processing) return
-  state.processing = true
-  try {
-    const res = await editImage({
-      image_url: state.currentImageUrl,
-      prompt: state.editPrompt,
-      mask: state.maskData || undefined,
-      output_preset: currentOutputSize.value.preset,
-      custom_width: currentOutputSize.value.width,
-      custom_height: currentOutputSize.value.height,
-      quality: state.outputQuality,
-    })
-    pushVersion(res.result_url, state.editPrompt)
-    state.currentImageUrl = res.result_url
-    state.editPrompt = ''
-    state.maskData = null
-    state.tool = 'prompt'
-    message.success('编辑完成')
-  } catch (e: any) {
-    message.error('编辑失败: ' + e.message)
-  } finally {
-    state.processing = false
-  }
-}
-
-async function removeBackground() {
-  state.processing = true
-  try {
-    const res = await apiRemoveBg({
-      image_url: state.currentImageUrl,
-      bg_color: 'white',
-      output_preset: currentOutputSize.value.preset,
-    })
-    pushVersion(res.result_url, '去背景')
-    state.currentImageUrl = res.result_url
-    message.success('去背景完成')
-  } catch (e: any) {
-    message.error('去背景失败: ' + e.message)
-  } finally {
-    state.processing = false
-  }
-}
-
-async function upscaleImage() {
-  state.processing = true
-  try {
-    const res = await apiUpscale({
-      image_url: state.currentImageUrl,
-      scale: 2,
-      output_preset: currentOutputSize.value.preset,
-    })
-    pushVersion(res.result_url, '高清修复')
-    state.currentImageUrl = res.result_url
-    message.success('高清修复完成')
-  } catch (e: any) {
-    message.error('高清修复失败: ' + e.message)
-  } finally {
-    state.processing = false
-  }
-}
-
-async function expandImage() {
-  state.processing = true
-  try {
-    const res = await apiExpand({
-      image_url: state.currentImageUrl,
-      direction: 'all',
-      expand_ratio: 0.5,
-      output_preset: currentOutputSize.value.preset,
-    })
-    pushVersion(res.result_url, 'AI 扩图')
-    state.currentImageUrl = res.result_url
-    message.success('扩图完成')
-  } catch (e: any) {
-    message.error('扩图失败: ' + e.message)
-  } finally {
-    state.processing = false
-  }
-}
-
-async function executeWithMask() {
-  if (!state.maskData && !state.selectionRect) {
-    message.warning('请先在图片上涂鸦或框选区域')
-    return
-  }
-
-  let prompt = ''
-  switch (state.tool) {
-    case 'brush':
-      prompt = 'Seamlessly remove the selected object. Fill the area naturally matching the surrounding background, texture, and lighting.'
-      break
-    case 'rect':
-      prompt = 'Seamlessly remove the selected object. Fill the area naturally matching the surrounding background, texture, and lighting.'
-      break
-  }
-
-  state.processing = true
-  try {
-    const res = await editImage({
-      image_url: state.currentImageUrl,
-      prompt,
-      mask: state.maskData || undefined,
-      output_preset: currentOutputSize.value.preset,
-      custom_width: currentOutputSize.value.width,
-      custom_height: currentOutputSize.value.height,
-      quality: state.outputQuality,
-    })
-    pushVersion(res.result_url, state.tool === 'brush' ? '涂鸦编辑' : '框选编辑')
-    state.currentImageUrl = res.result_url
-    state.maskData = null
-    state.selectionRect = null
-    state.tool = 'prompt'
-    canvasRef.value?.clearMask()
-    message.success('编辑完成')
-  } catch (e: any) {
-    message.error('编辑失败: ' + e.message)
-  } finally {
-    state.processing = false
-  }
-}
-
-function pushVersion(url: string, description: string) {
+function pushVersion(url: string, description: string, versionId?: string, prompt?: string | null, outputSize?: string) {
   const versionNum = state.versions.length
   const node: VersionNode = {
-    version_id: `v${versionNum}`,
+    version_id: versionId || `local_v${versionNum}`,
     description,
     file: '',
     url,
-    prompt: state.editPrompt || null,
+    prompt: prompt || null,
     timestamp: new Date().toISOString(),
     parent_version: state.versions[state.currentVersionIndex]?.version_id || null,
-    output_size: currentOutputSize.value.preset,
+    output_size: outputSize || currentOutputSize.value.preset,
   }
   // Truncate forward history
   state.versions = state.versions.slice(0, state.currentVersionIndex + 1)

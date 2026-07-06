@@ -50,6 +50,8 @@ class EditChainResponse(BaseModel):
     output_size: str = ""
     file_size_kb: int = 0
     steps: int = 0
+    final_prompt: str = Field(default="", description="Final merged instruction sent/recorded for the edit chain")
+    ai_calls: int = Field(default=0, description="Number of backend AI operations executed after batching")
 
 
 # ── Output Presets (Ozon platform sizes) ────────────────────────────────

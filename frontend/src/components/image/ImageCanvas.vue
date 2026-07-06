@@ -122,8 +122,7 @@ const brushBoundingBoxStyle = computed(() => {
     left: b.x * s + 'px',
     top: b.y * s + 'px',
     width: b.w * s + 'px',
-    height: b.h * s+ 'px',
-    height: b.h * props.zoom + 'px',
+    height: b.h * s + 'px',
     border: '1px dashed rgba(255,80,80,0.6)',
     background: 'none',
   }

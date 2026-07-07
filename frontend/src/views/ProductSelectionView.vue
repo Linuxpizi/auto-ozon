@@ -1558,11 +1558,16 @@ function getCategoryTypeId(node: any) {
 }
 
 function makeCategorySelectionKey(categoryId: any, typeId?: any) {
-  return typeId ? `type:${categoryId}:${typeId}` : `cat:${categoryId}`;
+  const hasTypeId = typeId !== null && typeId !== undefined && String(typeId) !== '' && Number(typeId) !== 0;
+  return hasTypeId ? `type:${categoryId}:${typeId}` : `cat:${categoryId}`;
 }
 
-function getCategoryNodeKey(node: any) {
-  return makeCategorySelectionKey(getCategoryId(node), getCategoryTypeId(node));
+function getEffectiveCategoryId(node: any, parentCategoryId: any = null) {
+  return getCategoryId(node) ?? parentCategoryId ?? null;
+}
+
+function getCategoryNodeKey(node: any, parentCategoryId: any = null) {
+  return makeCategorySelectionKey(getEffectiveCategoryId(node, parentCategoryId), getCategoryTypeId(node));
 }
 
 function getCategoryNodeLabel(node: any) {
@@ -1585,22 +1590,28 @@ function hasCategoryChildren(node: any) {
   return Array.isArray(node?.children) && node.children.length > 0;
 }
 
-function toTreeNode(node: any): any {
-  const key = getCategoryNodeKey(node);
+function toTreeNode(node: any, parentCategoryId: any = null): any {
+  const categoryId = getEffectiveCategoryId(node, parentCategoryId);
+  const typeId = getCategoryTypeId(node);
+  const key = makeCategorySelectionKey(categoryId, typeId);
   const children = Array.isArray(node?.children) ? node.children : [];
+  const childParentCategoryId = categoryId ?? parentCategoryId;
   const treeNode: any = {
     key,
     label: getCategoryNodeLabel(node),
     raw: node,
-    description_category_id: getCategoryId(node),
-    type_id: getCategoryTypeId(node),
+    // Ozon type leaf nodes can omit description_category_id and inherit it from the parent category.
+    // Keep the inherited category id on every tree node so selection, persistence and path lookup
+    // use the same key: type:<description_category_id>:<type_id>.
+    description_category_id: categoryId,
+    type_id: typeId,
     // Naive UI will show a loading spinner for non-leaf nodes without children.
     // Since the backend returns the whole category tree at once, build children eagerly
     // and only mark nodes with actual children as expandable.
     isLeaf: children.length === 0,
   };
   if (children.length > 0) {
-    treeNode.children = children.map(toTreeNode);
+    treeNode.children = children.map((child: any) => toTreeNode(child, childParentCategoryId));
   }
   return treeNode;
 }
@@ -1610,26 +1621,30 @@ function toTreeNodes(nodes: any[]): any[] {
 }
 
 // Flatten the entire category tree into categoryTreeMap (parentId -> children[])
-function flattenTree(nodes: any[]) {
+function flattenTree(nodes: any[], parentCategoryId: any = null) {
   for (const n of nodes || []) {
-    const id = getCategoryNodeKey(n);
+    const categoryId = getEffectiveCategoryId(n, parentCategoryId);
+    const childParentCategoryId = categoryId ?? parentCategoryId;
+    const id = getCategoryNodeKey(n, parentCategoryId);
     const children = Array.isArray(n.children) ? n.children : [];
-    const childNodes = children.map(toTreeNode);
+    const childNodes = children.map((child: any) => toTreeNode(child, childParentCategoryId));
     categoryTreeMap.value.set(id, childNodes);
-    if (children.length > 0) flattenTree(children);
+    if (children.length > 0) flattenTree(children, childParentCategoryId);
   }
 }
 
-function buildCategoryPathLabelMap(nodes: any[], parentLabels: string[] = []) {
+function buildCategoryPathLabelMap(nodes: any[], parentLabels: string[] = [], parentCategoryId: any = null) {
   for (const node of nodes || []) {
-    const key = getCategoryNodeKey(node);
+    const categoryId = getEffectiveCategoryId(node, parentCategoryId);
+    const childParentCategoryId = categoryId ?? parentCategoryId;
+    const key = getCategoryNodeKey(node, parentCategoryId);
     const label = getCategoryNodeLabel(node);
     const pathLabels = [...parentLabels, label].filter(Boolean);
     categoryPathLabelMap.value.set(key, pathLabels.join(' -> '));
 
     const children = Array.isArray(node.children) ? node.children : [];
     if (children.length > 0) {
-      buildCategoryPathLabelMap(children, pathLabels);
+      buildCategoryPathLabelMap(children, pathLabels, childParentCategoryId);
     }
   }
 }

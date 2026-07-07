@@ -48,6 +48,7 @@ const emit = defineEmits<{
   (e: 'update:zoom', v: number): void
   (e: 'mask-ready', base64: string): void
   (e: 'selection-ready', rect: { x: number; y: number; w: number; h: number }): void
+  (e: 'selection-history-change', payload: { count: number; canUndo: boolean; canRedo: boolean }): void
   (e: 'clear-mask'): void
 }>()
 
@@ -86,6 +87,11 @@ const dragMode = ref<DragMode>('none')
 // Snapshot at drag start
 const dragStartMouse = ref({ x: 0, y: 0 })
 const dragStartBox = ref<{ x: number; y: number; w: number; h: number } | null>(null)
+
+// Mask history: every quick selection operation (rect/brush) is recorded so it
+// can be undone/redone before sending the final mask to the backend.
+const maskHistory = ref<string[]>([])
+const maskHistoryIndex = ref(0)
 
 // Fit-scale: shrink image to fit container
 const fitScale = computed(() => {
@@ -165,6 +171,44 @@ function initMask() {
   brushMinY.value = Infinity
   brushMaxX.value = 0
   brushMaxY.value = 0
+  resetMaskHistory()
+}
+
+function emitSelectionHistoryState() {
+  emit('selection-history-change', {
+    count: maskHistoryIndex.value,
+    canUndo: maskHistoryIndex.value > 0,
+    canRedo: maskHistoryIndex.value < maskHistory.value.length - 1,
+  })
+}
+
+function resetMaskHistory() {
+  const canvas = maskCanvas.value
+  if (!canvas) return
+  maskHistory.value = [canvas.toDataURL('image/png')]
+  maskHistoryIndex.value = 0
+  emitSelectionHistoryState()
+}
+
+function commitMaskHistory() {
+  const canvas = maskCanvas.value
+  if (!canvas) return
+  const snapshot = canvas.toDataURL('image/png')
+  maskHistory.value = maskHistory.value.slice(0, maskHistoryIndex.value + 1)
+  maskHistory.value.push(snapshot)
+  maskHistoryIndex.value = maskHistory.value.length - 1
+  emitSelectionHistoryState()
+}
+
+function maskHasContent() {
+  const canvas = maskCanvas.value
+  if (!canvas) return false
+  const ctx = canvas.getContext('2d')!
+  const data = ctx.getImageData(0, 0, canvas.width, canvas.height).data
+  for (let i = 3; i < data.length; i += 4) {
+    if (data[i] > 0) return true
+  }
+  return false
 }
 
 function resetCurrentBrushBounds() {
@@ -303,6 +347,7 @@ function onWindowMouseUp() {
     isDrawing.value = false
     if (brushMinX.value !== Infinity) {
       // Keep the exact freeform brush mask. Do not convert it into a rectangle.
+      commitMaskHistory()
       generateMask()
       emit('selection-ready', clampBoxToImage({
         x: brushMinX.value,
@@ -327,6 +372,7 @@ function onWindowMouseUp() {
 
   if (props.tool === 'rect') {
     drawRectToMask(selectionBox.value)
+    commitMaskHistory()
     generateMask()
     emit('selection-ready', { ...selectionBox.value })
     selectionBox.value = null
@@ -373,6 +419,10 @@ function drawRectToMask(box: { x: number; y: number; w: number; h: number }) {
 function generateMask() {
   const canvas = maskCanvas.value
   if (!canvas) return
+  if (!maskHasContent()) {
+    emit('clear-mask')
+    return
+  }
   const ctx = canvas.getContext('2d')!
 
   const tmpCanvas = document.createElement('canvas')
@@ -417,6 +467,42 @@ function clearMask() {
   selectionBox.value = null
   dragMode.value = 'none'
   emit('clear-mask')
+}
+
+function restoreMaskSnapshot(snapshot: string): Promise<void> {
+  const canvas = maskCanvas.value
+  if (!canvas) return Promise.resolve()
+  const ctx = canvas.getContext('2d')!
+  return new Promise((resolve, reject) => {
+    const image = new Image()
+    image.onload = () => {
+      ctx.clearRect(0, 0, canvas.width, canvas.height)
+      ctx.drawImage(image, 0, 0)
+      resolve()
+    }
+    image.onerror = () => reject(new Error('恢复选择区域失败'))
+    image.src = snapshot
+  })
+}
+
+async function undoMask() {
+  if (maskHistoryIndex.value <= 0) return
+  maskHistoryIndex.value -= 1
+  await restoreMaskSnapshot(maskHistory.value[maskHistoryIndex.value])
+  selectionBox.value = null
+  dragMode.value = 'none'
+  generateMask()
+  emitSelectionHistoryState()
+}
+
+async function redoMask() {
+  if (maskHistoryIndex.value >= maskHistory.value.length - 1) return
+  maskHistoryIndex.value += 1
+  await restoreMaskSnapshot(maskHistory.value[maskHistoryIndex.value])
+  selectionBox.value = null
+  dragMode.value = 'none'
+  generateMask()
+  emitSelectionHistoryState()
 }
 
 function onWheel(e: WheelEvent) {
@@ -468,7 +554,7 @@ onBeforeUnmount(() => {
 })
 
 // Public methods
-defineExpose({ clearMask, initMask })
+defineExpose({ clearMask, initMask, undoMask, redoMask })
 </script>
 
 <style scoped>

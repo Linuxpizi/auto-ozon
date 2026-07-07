@@ -1,6 +1,7 @@
 """Unified image editing service — wraps GPT Image Edit API for edit/remove-bg/expand/upscale."""
 import base64
 import contextvars
+from dataclasses import dataclass
 import hashlib
 import io
 import json
@@ -118,6 +119,22 @@ def _image_info(data: bytes) -> dict[str, Any]:
     except Exception as exc:
         info.update({"decode_error": f"{exc.__class__.__name__}: {exc}"})
     return info
+
+
+def _image_suffix_from_bytes(data: bytes) -> str:
+    """Choose a temp-file suffix without changing image bytes."""
+    try:
+        with Image.open(io.BytesIO(data)) as img:
+            fmt = (img.format or "").lower()
+    except Exception:
+        return ".png"
+    return {
+        "jpeg": ".jpg",
+        "jpg": ".jpg",
+        "png": ".png",
+        "webp": ".webp",
+        "gif": ".gif",
+    }.get(fmt, f".{fmt}" if fmt else ".png")
 
 
 def _mask_b64_info(mask_b64: Optional[str]) -> Optional[dict[str, Any]]:
@@ -568,6 +585,21 @@ OPENAI_IMAGE_EDIT_SIZES: tuple[tuple[int, int], ...] = (
 RESOLUTION_PRESETS = {"1k": 1000, "2k": 2000, "4k": 4000}
 
 
+@dataclass(frozen=True)
+class ResolvedOutputSize:
+    """Backend-owned output-size decision.
+
+    ``target_width``/``target_height`` are the business dimensions requested by
+    the UI (resolution + ratio or legacy preset). ``openai_size`` is the nearest
+    canvas size that the OpenAI image edit API accepts. The frontend must submit
+    raw selections only; all parsing, defaults and OpenAI adaptation live here.
+    """
+
+    target_width: int
+    target_height: int
+    openai_size: str
+
+
 def _closest_openai_size(width: int, height: int) -> str:
     """Map arbitrary requested pixels to an OpenAI-supported canvas size."""
     if width <= 0 or height <= 0:
@@ -613,6 +645,25 @@ def _resolve_gpt_size(
     if custom_w and custom_h:
         return _closest_openai_size(custom_w, custom_h)
     return GPT_SIZE_MAP.get(preset, GPT_SIZE_MAP["ozon_main"])
+
+
+def _resolve_output_size(
+    preset: str,
+    custom_w: Optional[int] = None,
+    custom_h: Optional[int] = None,
+    resolution: Optional[str] = None,
+    size_ratio: Optional[str] = None,
+) -> ResolvedOutputSize:
+    """Resolve raw frontend size fields and adapt them to OpenAI.
+
+    Contract:
+    - Frontend sends ``resolution`` and ``size_ratio`` exactly as selected.
+    - Backend owns all parsing, fallback and compatibility behavior.
+    - OpenAI receives only one of its supported edit canvas sizes.
+    """
+    target_w, target_h = _resolve_target_size(preset, custom_w, custom_h, resolution, size_ratio)
+    gpt_size = _resolve_gpt_size(preset, target_w, target_h)
+    return ResolvedOutputSize(target_width=target_w, target_height=target_h, openai_size=gpt_size)
 
 
 def _resolve_target_size(
@@ -691,56 +742,32 @@ def _prepare_image_and_mask(
     mask_b64: Optional[str],
     gpt_size: str,
 ) -> Tuple[bytes, Optional[bytes]]:
-    """Normalize the image (and optional mask) to EXACTLY the same API size
-    required by the OpenAI edit API.
+    """Return original image bytes and an optional OpenAI-compatible mask.
 
-    The OpenAI images.edit endpoint requires the mask to have the exact same
-    pixel dimensions as the image. Intermediate results in an edit chain can be
-    any size, and a frontend-generated mask is only guaranteed to match the
-    image it was drawn on — not later chain steps. To make this robust once and
-    for all, we resize BOTH the image and the mask to the same target canvas
-    (derived from ``gpt_size``) right before the API call. ``gpt_size`` may be
-    rectangular (for example ``1024x1536``), so do not collapse it to a square.
+    IMPORTANT: the user-provided input image must be passed to OpenAI exactly as
+    received. Do not resize, crop, pad, re-encode, color-convert, normalize, or
+    otherwise mutate ``image_bytes`` here. ``gpt_size`` controls only the OpenAI
+    requested output canvas size; it must not be applied to the input image.
 
-    Returns ``(image_png_bytes, mask_png_bytes_or_none)``.
+    Mask bytes are generated/auxiliary data, so they may be converted to the
+    alpha semantics expected by OpenAI. If needed, only the mask is aligned to
+    the original image dimensions; the input image remains byte-for-byte intact.
     """
-    try:
-        target_w_str, target_h_str = gpt_size.lower().split("x", 1)
-        target = (int(target_w_str), int(target_h_str))
-    except (ValueError, AttributeError):
-        target = (1024, 1024)
-
-    # Load image, fit onto a transparent/white API canvas of target size so
-    # aspect ratio is preserved and the mask can align 1:1.
-    src = Image.open(io.BytesIO(image_bytes)).convert("RGBA")
-    src_w, src_h = src.size
-    scale = min(target[0] / src_w, target[1] / src_h)
-    new_w, new_h = max(1, int(round(src_w * scale))), max(1, int(round(src_h * scale)))
-    resized = src.resize((new_w, new_h), Image.LANCZOS)
-
-    canvas = Image.new("RGBA", target, (255, 255, 255, 255))
-    off_x = (target[0] - new_w) // 2
-    off_y = (target[1] - new_h) // 2
-    canvas.paste(resized, (off_x, off_y))
-
-    img_buf = io.BytesIO()
-    # Send a plain RGB PNG for the source image. Some OpenAI-compatible
-    # gateways are stricter than OpenAI and intermittently fail on fully-opaque
-    # RGBA source images even though the official API accepts PNG. The mask
-    # remains RGBA below, because its alpha channel defines the edit region.
-    canvas.convert("RGB").save(img_buf, format="PNG")
-    image_out = img_buf.getvalue()
+    image_out = image_bytes
 
     mask_out: Optional[bytes] = None
     if mask_b64:
         raw = mask_b64.split(",", 1)[1] if mask_b64.startswith("data:") else mask_b64
         mask_img = Image.open(io.BytesIO(base64.b64decode(raw))).convert("L")
 
-        # Reproject the mask through the SAME transform applied to the image so
-        # the white (edit) regions land on the correct pixels of the square.
-        mask_resized = mask_img.resize((new_w, new_h), Image.NEAREST)
-        mask_canvas = Image.new("L", target, 0)
-        mask_canvas.paste(mask_resized, (off_x, off_y))
+        with Image.open(io.BytesIO(image_bytes)) as src:
+            original_size = src.size
+
+        # Align only the mask to the original image dimensions. Never resize or
+        # re-encode the image itself.
+        mask_canvas = mask_img
+        if mask_canvas.size != original_size:
+            mask_canvas = mask_canvas.resize(original_size, Image.NEAREST)
 
         # OpenAI expects an RGBA mask where transparent = edit area. Convert the
         # white=edit convention into alpha: white(255) -> alpha 0 (edit),
@@ -748,7 +775,7 @@ def _prepare_image_and_mask(
         # Keep RGB as the user's conventional white=edit / black=keep mask,
         # and set alpha for OpenAI semantics: transparent=edit, opaque=keep.
         # This works with gateways that inspect either alpha or RGB channels.
-        rgba_mask = Image.new("RGBA", target, (0, 0, 0, 255))
+        rgba_mask = Image.new("RGBA", original_size, (0, 0, 0, 255))
         rgb_mask = Image.merge("RGB", (mask_canvas, mask_canvas, mask_canvas))
         rgba_mask.paste(rgb_mask, (0, 0))
         alpha = mask_canvas.point(lambda v: 0 if v > 127 else 255)
@@ -762,9 +789,8 @@ def _prepare_image_and_mask(
 
 
 def _prepare_image_for_openai(image_bytes: bytes, gpt_size: str) -> bytes:
-    """Normalize a reference image to the same OpenAI canvas as the base image."""
-    prepared_image, _ = _prepare_image_and_mask(image_bytes, None, gpt_size)
-    return prepared_image
+    """Return a reference/input image byte-for-byte unchanged for OpenAI."""
+    return image_bytes
 
 
 def _build_edit_prompt(prompt: str, has_reference_image: bool, has_mask: bool) -> str:
@@ -791,23 +817,24 @@ def edit_image(req: ImageEditRequest) -> ImageEditResponse:
         image_bytes = _load_image_bytes(req.image_url)
         prompt = _require_prompt(req.prompt, "图片编辑")
         reference_bytes = _load_image_bytes(req.reference_image) if req.reference_image else None
-        target_w, target_h = _resolve_target_size(req.output_preset, req.custom_width, req.custom_height, req.resolution, req.size_ratio)
-        gpt_size = _resolve_gpt_size(req.output_preset, target_w, target_h)
+        output_size = _resolve_output_size(req.output_preset, req.custom_width, req.custom_height, req.resolution, req.size_ratio)
+        target_w, target_h = output_size.target_width, output_size.target_height
+        gpt_size = output_size.openai_size
         final_prompt = _build_edit_prompt(prompt, bool(reference_bytes), bool(req.mask))
 
-        # Normalize image (and mask, if any) to the exact requested OpenAI size so
-        # mask and image dimensions match without backend crop/quality post-processing.
+        # Do not alter the input image. Only output size selection is adapted to
+        # OpenAI; the image bytes sent below stay exactly as loaded.
         prepared_image, prepared_mask = _prepare_image_and_mask(image_bytes, req.mask, gpt_size)
         prepared_reference = _prepare_image_for_openai(reference_bytes, gpt_size) if reference_bytes else None
 
-        with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as tmp:
+        with tempfile.NamedTemporaryFile(suffix=_image_suffix_from_bytes(prepared_image), delete=False) as tmp:
             tmp.write(prepared_image)
             tmp_path = tmp.name
 
         reference_path = None
         reference_file = None
         if prepared_reference:
-            reference_path = tmp_path + "_reference.png"
+            reference_path = tmp_path + f"_reference{_image_suffix_from_bytes(prepared_reference)}"
             with open(reference_path, "wb") as f:
                 f.write(prepared_reference)
             reference_file = open(reference_path, "rb")
@@ -1042,7 +1069,8 @@ def edit_chain(req: EditChainRequest) -> EditChainResponse:
     )
 
     current_image_url = req.image_url
-    target_w, target_h = _resolve_target_size(req.output_preset, req.custom_width, req.custom_height, req.resolution, req.size_ratio)
+    output_size = _resolve_output_size(req.output_preset, req.custom_width, req.custom_height, req.resolution, req.size_ratio)
+    target_w, target_h = output_size.target_width, output_size.target_height
 
     # ── Step 1: Compile the execution plan ──────────────────────────────
     # Group consecutive mask-based actions into batches; keep other actions
@@ -1344,18 +1372,19 @@ def expand_image(req: ImageExpandRequest) -> ImageExpandResponse:
     try:
         client = _get_client()
         image_bytes = _load_image_bytes(req.image_url)
-        target_w, target_h = _resolve_target_size(req.output_preset, req.custom_width, req.custom_height, req.resolution, req.size_ratio)
+        output_size = _resolve_output_size(req.output_preset, req.custom_width, req.custom_height, req.resolution, req.size_ratio)
+        target_w, target_h = output_size.target_width, output_size.target_height
 
         # Calculate expansion sizes
         img = Image.open(io.BytesIO(image_bytes))
         orig_w, orig_h = img.size
-        gpt_size = _resolve_gpt_size(req.output_preset, target_w, target_h)
+        gpt_size = output_size.openai_size
 
         expand_prompt = _require_prompt(req.prompt, "AI扩图")
 
         prepared_image, _ = _prepare_image_and_mask(image_bytes, None, gpt_size)
 
-        with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as tmp:
+        with tempfile.NamedTemporaryFile(suffix=_image_suffix_from_bytes(prepared_image), delete=False) as tmp:
             tmp.write(prepared_image)
             tmp_path = tmp.name
 
@@ -1413,12 +1442,13 @@ def upscale_image(req: ImageUpscaleRequest) -> ImageUpscaleResponse:
 
         upscale_prompt = _require_prompt(req.prompt, "高清修复")
 
-        target_w, target_h = _resolve_target_size(req.output_preset or "ozon_detail_sq", req.custom_width, req.custom_height, req.resolution, req.size_ratio)
-        gpt_size = _resolve_gpt_size(req.output_preset or "ozon_detail_sq", target_w, target_h)
+        output_size = _resolve_output_size(req.output_preset or "ozon_detail_sq", req.custom_width, req.custom_height, req.resolution, req.size_ratio)
+        target_w, target_h = output_size.target_width, output_size.target_height
+        gpt_size = output_size.openai_size
 
         prepared_image, _ = _prepare_image_and_mask(image_bytes, None, gpt_size)
 
-        with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as tmp:
+        with tempfile.NamedTemporaryFile(suffix=_image_suffix_from_bytes(prepared_image), delete=False) as tmp:
             tmp.write(prepared_image)
             tmp_path = tmp.name
 

@@ -40,6 +40,7 @@
           @update:zoom="state.zoom = $event"
           @mask-ready="onMaskReady"
           @selection-ready="onSelectionReady"
+          @selection-history-change="onSelectionHistoryChange"
           @clear-mask="onCanvasClear"
         />
         <!-- Compare slider -->
@@ -164,6 +165,26 @@
             >
               清空选择区域
             </n-button>
+            <n-space :size="6" style="width: 100%">
+              <n-button
+                size="small"
+                block
+                secondary
+                :disabled="state.processing || !state.selectionCanUndo"
+                @click="undoSelection"
+              >
+                ↩️ 撤销选择
+              </n-button>
+              <n-button
+                size="small"
+                block
+                secondary
+                :disabled="state.processing || !state.selectionCanRedo"
+                @click="redoSelection"
+              >
+                ↪️ 重做选择
+              </n-button>
+            </n-space>
           </n-space>
 
           <n-text depth="3" class="hint-text">
@@ -263,6 +284,8 @@ const state = reactive({
   referenceImageData: null as string | null,
   referenceImagePreview: '',
   selectionCount: 0,
+  selectionCanUndo: false,
+  selectionCanRedo: false,
   brushSize: 20,
   resolution: '1k',
   sizeRatio: '3:4',
@@ -326,6 +349,14 @@ function setTool(tool: SelectionTool) {
 
 function clearSelections() {
   canvasRef.value?.clearMask()
+}
+
+function undoSelection() {
+  canvasRef.value?.undoMask()
+}
+
+function redoSelection() {
+  canvasRef.value?.redoMask()
 }
 
 function selectReferenceImage() {
@@ -414,12 +445,20 @@ function onMaskReady(base64: string) {
 }
 
 function onSelectionReady() {
-  state.selectionCount += 1
+  // Selection count is driven by ImageCanvas history so undo/redo stays accurate.
+}
+
+function onSelectionHistoryChange(payload: { count: number; canUndo: boolean; canRedo: boolean }) {
+  state.selectionCount = payload.count
+  state.selectionCanUndo = payload.canUndo
+  state.selectionCanRedo = payload.canRedo
 }
 
 function onCanvasClear() {
   state.maskData = null
   state.selectionCount = 0
+  state.selectionCanUndo = false
+  state.selectionCanRedo = false
 }
 
 function pushVersion(url: string, description: string, versionId?: string, prompt?: string | null, outputSize?: string) {
@@ -433,7 +472,7 @@ function pushVersion(url: string, description: string, versionId?: string, promp
     prompt: prompt || null,
     timestamp: new Date().toISOString(),
     parent_version: state.versions[state.currentVersionIndex]?.version_id || null,
-    output_size: outputSize || `${state.resolution}/${state.sizeRatio}`,
+    output_size: outputSize || '',
   }
   // Truncate forward history
   state.versions = state.versions.slice(0, state.currentVersionIndex + 1)

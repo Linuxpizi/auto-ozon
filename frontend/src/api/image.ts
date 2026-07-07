@@ -18,6 +18,7 @@ export interface ImageEditRequest {
   image_url: string;
   prompt: string;
   mask?: string;
+  reference_image?: string;
   output_preset?: string;
   resolution?: string;
   size_ratio?: string;
@@ -119,39 +120,39 @@ export interface EditChainResponse {
 // ── 分辨率 (Resolution) ──
 export const RESOLUTION_PRESETS: Record<
   string,
-  { label: string; size: number }
+  { label: string }
 > = {
-  '1k': { label: '1K (1000px)', size: 1000 },
-  '2k': { label: '2K (2000px)', size: 2000 },
-  '4k': { label: '4K (4000px)', size: 4000 },
+  '1k': { label: '1K' },
+  '2k': { label: '2K' },
+  '4k': { label: '4K' },
 };
 
 // ── 尺寸比例 (Size Ratio) ──
 export const SIZE_RATIOS: Record<
   string,
-  { label: string; w: number; h: number }
+  { label: string }
 > = {
-  '1:1':  { label: '1:1 正方形',    w: 1, h: 1 },
-  '3:4':  { label: '3:4 竖版',      w: 3, h: 4 },
-  '4:3':  { label: '4:3 横版',      w: 4, h: 3 },
-  '16:9': { label: '16:9 宽屏',     w: 16, h: 9 },
-  '9:16': { label: '9:16 竖屏',     w: 9, h: 16 },
-  '2:3':  { label: '2:3 竖版',      w: 2, h: 3 },
+  '1:1':  { label: '1:1 正方形' },
+  '3:4':  { label: '3:4 竖版' },
+  '4:3':  { label: '4:3 横版' },
+  '16:9': { label: '16:9 宽屏' },
+  '9:16': { label: '9:16 竖屏' },
+  '2:3':  { label: '2:3 竖版' },
 };
 
 // ── 兼容旧代码的组合预设 ──
 export const OUTPUT_PRESETS: Record<
   string,
-  { label: string; width: number; height: number; ratio: string }
+  { label: string; ratio: string }
 > = {
-  ozon_main:      { label: 'Ozon 主图',      width: 900,  height: 1200, ratio: '3:4' },
-  ozon_secondary: { label: 'Ozon 辅图',      width: 900,  height: 1200, ratio: '3:4' },
-  ozon_detail_h:  { label: 'Ozon 详情(横)',  width: 1200, height: 900,  ratio: '4:3' },
-  ozon_detail_sq: { label: 'Ozon 详情(方)',  width: 1000, height: 1000, ratio: '1:1' },
-  ozon_banner:    { label: 'Ozon Banner',    width: 1200, height: 675,  ratio: '16:9' },
-  tb_main:        { label: '淘宝主图',       width: 800,  height: 800,  ratio: '1:1' },
-  pdd_main:       { label: '拼多多主图',     width: 800,  height: 800,  ratio: '1:1' },
-  ali_main:       { label: '1688 主图',      width: 800,  height: 800,  ratio: '1:1' },
+  ozon_main:      { label: 'Ozon 主图',      ratio: '3:4' },
+  ozon_secondary: { label: 'Ozon 辅图',      ratio: '3:4' },
+  ozon_detail_h:  { label: 'Ozon 详情(横)',  ratio: '4:3' },
+  ozon_detail_sq: { label: 'Ozon 详情(方)',  ratio: '1:1' },
+  ozon_banner:    { label: 'Ozon Banner',    ratio: '16:9' },
+  tb_main:        { label: '淘宝主图',       ratio: '1:1' },
+  pdd_main:       { label: '拼多多主图',     ratio: '1:1' },
+  ali_main:       { label: '1688 主图',      ratio: '1:1' },
 };
 
 // ── Image Edit ─────────────────────────────────────────────────────────

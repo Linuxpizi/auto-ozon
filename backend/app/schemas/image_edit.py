@@ -80,6 +80,7 @@ class ImageEditRequest(BaseModel):
     image_url: str = Field(..., description="原始图片 URL 或 base64")
     prompt: str = Field(..., description="编辑指令 (自然语言)")
     mask: Optional[str] = Field(None, description="遮罩 base64 (白色=编辑区域)")
+    reference_image: Optional[str] = Field(None, description="参考/替换产品图片 URL 或 base64；用于把该产品主体替换到原图主产品")
     output_preset: str = Field(default="ozon_main", description="输出尺寸预设")
     resolution: Optional[str] = Field(default=None, description="前端原样传入的分辨率, e.g. 1k / 2k / 4k")
     size_ratio: Optional[str] = Field(default=None, description="前端原样传入的比例, e.g. 3:4 / 1:1")

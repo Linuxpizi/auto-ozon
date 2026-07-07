@@ -57,18 +57,57 @@
           <n-input
             v-model:value="state.editPrompt"
             type="textarea"
-            placeholder="必填：描述要对选中区域做什么，例如：把选中区域改成白色背景、去掉文字、替换为木纹..."
+            placeholder="必填：直接描述要怎么修改图片，例如：把背景改成白色、去掉文字、替换为木纹、整体更高级..."
             :rows="5"
             :disabled="state.processing"
           />
           <n-text depth="3" class="hint-text">
-            提示词必填；后端只会使用这里输入的原文，不会自动补充。
+            提示词必填；可不选择区域，后端会按这段描述直接编辑整张图。
+          </n-text>
+        </div>
+
+        <!-- Reference Product Image -->
+        <div class="panel-section">
+          <div class="section-title">🧩 添加产品图片 <span class="optional">可选</span></div>
+          <input
+            ref="referenceInputRef"
+            type="file"
+            accept="image/*"
+            class="hidden-file-input"
+            :disabled="state.processing"
+            @change="onReferenceImageChange"
+          />
+          <div v-if="state.referenceImagePreview" class="reference-preview">
+            <img :src="state.referenceImagePreview" alt="参考产品图" />
+          </div>
+          <n-space vertical :size="6">
+            <n-button
+              size="small"
+              block
+              :disabled="state.processing"
+              @click="selectReferenceImage"
+            >
+              {{ state.referenceImagePreview ? '更换产品图片' : '添加产品图片' }}
+            </n-button>
+            <n-button
+              v-if="state.referenceImagePreview"
+              size="small"
+              block
+              quaternary
+              :disabled="state.processing"
+              @click="clearReferenceImage"
+            >
+              移除添加的图片
+            </n-button>
+          </n-space>
+          <n-text depth="3" class="hint-text">
+            用途：把添加图片里的产品主体，替换到当前宣传图中的主要产品；前端只原样提交图片，识别和替换逻辑由后端 AI 处理。
           </n-text>
         </div>
 
         <!-- Selection Tools -->
         <div class="panel-section">
-          <div class="section-title">⚡ 快捷操作</div>
+          <div class="section-title">⚡ 快捷操作 <span class="optional">可选</span></div>
           <n-space :wrap="true" :size="[6, 6]">
             <n-button
               size="small"
@@ -128,7 +167,7 @@
           </n-space>
 
           <n-text depth="3" class="hint-text">
-            已选择 {{ state.selectionCount }} 个区域；可连续框选多个矩形，也可用画笔涂出任意形状区域。
+            快捷操作不是必填；不选择区域时会直接按自然语言编辑整张图。已选择 {{ state.selectionCount }} 个区域。
           </n-text>
         </div>
 
@@ -204,6 +243,7 @@ const emit = defineEmits<{
 
 const message = useMessage()
 const canvasRef = ref<InstanceType<typeof ImageCanvas>>()
+const referenceInputRef = ref<HTMLInputElement>()
 
 type SelectionTool = 'brush' | 'rect'
 
@@ -220,6 +260,8 @@ const state = reactive({
   tool: 'rect' as SelectionTool,
   editPrompt: '',
   maskData: null as string | null,
+  referenceImageData: null as string | null,
+  referenceImagePreview: '',
   selectionCount: 0,
   brushSize: 20,
   resolution: '1k',
@@ -240,7 +282,7 @@ const sizeRatioOptions = Object.entries(SIZE_RATIOS).map(([key, v]) => ({
 }))
 
 const canSubmitEdit = computed(() => {
-  return Boolean(state.editPrompt.trim() && state.maskData && !state.processing)
+  return Boolean(state.editPrompt.trim() && !state.processing)
 })
 
 const toolHint = computed(() => {
@@ -270,6 +312,7 @@ watch(
       ]
       state.currentVersionIndex = 0
       state.maskData = null
+      clearReferenceImage()
       state.selectionCount = 0
       canvasRef.value?.clearMask()
     }
@@ -283,6 +326,42 @@ function setTool(tool: SelectionTool) {
 
 function clearSelections() {
   canvasRef.value?.clearMask()
+}
+
+function selectReferenceImage() {
+  referenceInputRef.value?.click()
+}
+
+function fileToDataUrl(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onload = () => resolve(String(reader.result || ''))
+    reader.onerror = () => reject(reader.error || new Error('读取图片失败'))
+    reader.readAsDataURL(file)
+  })
+}
+
+async function onReferenceImageChange(event: Event) {
+  const input = event.target as HTMLInputElement
+  const file = input.files?.[0]
+  input.value = ''
+  if (!file) return
+  if (!file.type.startsWith('image/')) {
+    message.warning('请选择图片文件')
+    return
+  }
+  try {
+    const dataUrl = await fileToDataUrl(file)
+    state.referenceImageData = dataUrl
+    state.referenceImagePreview = dataUrl
+  } catch (e) {
+    message.error('读取添加的产品图片失败: ' + normalizeErrorMessage(e))
+  }
+}
+
+function clearReferenceImage() {
+  state.referenceImageData = null
+  state.referenceImagePreview = ''
 }
 
 function normalizeErrorMessage(e: unknown): string {
@@ -302,24 +381,25 @@ async function executeEdit() {
     message.warning('请输入自然语言编辑提示词')
     return
   }
-  if (!state.maskData) {
-    message.warning('请先使用框选或画笔选择至少一个编辑区域')
-    return
-  }
 
   state.processing = true
   try {
     const res = await editImage({
       image_url: state.currentImageUrl,
       prompt,
-      mask: state.maskData,
+      mask: state.maskData || undefined,
+      reference_image: state.referenceImageData || undefined,
       resolution: state.resolution,
       size_ratio: state.sizeRatio,
     })
     const resultUrl = normalizeImageUrl(res.result_url)
     state.currentImageUrl = resultUrl
-    pushVersion(resultUrl, `区域编辑 (${state.selectionCount}区)`, res.version_id, prompt, res.output_size)
+    const description = state.referenceImageData
+      ? '产品图替换编辑'
+      : state.maskData ? `区域编辑 (${state.selectionCount}区)` : '自然语言编辑'
+    pushVersion(resultUrl, description, res.version_id, prompt, res.output_size)
     state.editPrompt = ''
+    clearReferenceImage()
     clearSelections()
     message.success('图片编辑完成')
   } catch (e: any) {
@@ -471,6 +551,32 @@ function applyToProduct() {
 
 .required {
   color: #ff6b6b;
+}
+
+.optional {
+  font-size: 11px;
+  font-weight: 400;
+  color: var(--text-tertiary, #777);
+}
+
+.hidden-file-input {
+  display: none;
+}
+
+.reference-preview {
+  width: 100%;
+  height: 120px;
+  margin-bottom: 8px;
+  border: 1px solid var(--border-color, rgba(255,255,255,0.08));
+  border-radius: 6px;
+  overflow: hidden;
+  background: rgba(255,255,255,0.04);
+}
+
+.reference-preview img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
 }
 
 .hint-text {

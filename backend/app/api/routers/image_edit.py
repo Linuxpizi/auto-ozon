@@ -58,6 +58,10 @@ def _request_payload_summary(req: Any) -> dict[str, Any]:
         mask = data.get("mask") or data.get("mask_data")
         summary["has_mask"] = bool(mask)
         summary["mask_chars"] = len(mask) if mask else 0
+    if "reference_image" in data:
+        reference_image = data.get("reference_image")
+        summary["has_reference_image"] = bool(reference_image)
+        summary["reference_image_chars"] = len(reference_image) if reference_image else 0
     if "actions" in data:
         actions = data.get("actions") or []
         summary["actions_count"] = len(actions)

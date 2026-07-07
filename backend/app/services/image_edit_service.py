@@ -184,6 +184,7 @@ def _openai_call_fields(kwargs: dict[str, Any]) -> dict[str, Any]:
     prompt = kwargs.get("prompt") or ""
     image_file = kwargs.get("image")
     mask_file = kwargs.get("mask")
+    image_files = image_file if isinstance(image_file, (list, tuple)) else ([image_file] if image_file else [])
     return {
         "model": kwargs.get("model"),
         "size": kwargs.get("size"),
@@ -192,9 +193,10 @@ def _openai_call_fields(kwargs: dict[str, Any]) -> dict[str, Any]:
         "response_format": kwargs.get("response_format"),
         "timeout": kwargs.get("timeout"),
         "has_mask": bool(mask_file),
+        "image_count": len(image_files),
         "prompt_chars": len(prompt),
         "prompt_preview": prompt[:240],
-        "image_file": getattr(image_file, "name", None),
+        "image_file": [getattr(item, "name", None) for item in image_files],
         "mask_file": getattr(mask_file, "name", None),
     }
 
@@ -326,8 +328,14 @@ def _copy_upload_file_for_debug(file_obj: Any, operation: str, kind: str) -> Opt
 def _persist_openai_request_files(operation: str, kwargs: dict[str, Any]) -> dict[str, Any]:
     """Save the exact image/mask files sent to OpenAI for local debugging."""
     try:
+        image_arg = kwargs.get("image")
+        image_files = image_arg if isinstance(image_arg, (list, tuple)) else [image_arg]
         saved = {
-            "image": _copy_upload_file_for_debug(kwargs.get("image"), operation, "image"),
+            "image": [
+                _copy_upload_file_for_debug(file_obj, operation, f"image{idx + 1}")
+                for idx, file_obj in enumerate(image_files)
+                if file_obj
+            ],
             "mask": _copy_upload_file_for_debug(kwargs.get("mask"), operation, "mask"),
         }
         _log_event(logging.INFO, "openai.images.edit.debug_files_saved", operation=operation, files=saved)
@@ -753,6 +761,26 @@ def _prepare_image_and_mask(
     return image_out, mask_out
 
 
+def _prepare_image_for_openai(image_bytes: bytes, gpt_size: str) -> bytes:
+    """Normalize a reference image to the same OpenAI canvas as the base image."""
+    prepared_image, _ = _prepare_image_and_mask(image_bytes, None, gpt_size)
+    return prepared_image
+
+
+def _build_edit_prompt(prompt: str, has_reference_image: bool, has_mask: bool) -> str:
+    """Centralize backend-only prompt logic; frontend submits user text as-is."""
+    if not has_reference_image:
+        return prompt
+    target_scope = "用户用遮罩标记的区域" if has_mask else "当前宣传图中的主要产品主体"
+    return (
+        f"{prompt}\n\n"
+        "附加产品替换要求：本次请求包含两张输入图片。第一张是当前商品宣传图，第二张是用户添加的产品参考图。"
+        f"请以第二张图片中的产品主体为准，把它自然替换到第一张图片的{target_scope}；"
+        "尽量保留第一张图片的背景、构图、光影、平台宣传图质感和文字版式。"
+        "不要把第二张图片的背景一起搬过去，重点迁移产品外观、颜色、材质和关键细节。"
+    )
+
+
 # ── Core: Unified Edit ─────────────────────────────────────────────────
 
 
@@ -762,16 +790,27 @@ def edit_image(req: ImageEditRequest) -> ImageEditResponse:
         client = _get_client()
         image_bytes = _load_image_bytes(req.image_url)
         prompt = _require_prompt(req.prompt, "图片编辑")
+        reference_bytes = _load_image_bytes(req.reference_image) if req.reference_image else None
         target_w, target_h = _resolve_target_size(req.output_preset, req.custom_width, req.custom_height, req.resolution, req.size_ratio)
         gpt_size = _resolve_gpt_size(req.output_preset, target_w, target_h)
+        final_prompt = _build_edit_prompt(prompt, bool(reference_bytes), bool(req.mask))
 
         # Normalize image (and mask, if any) to the exact requested OpenAI size so
         # mask and image dimensions match without backend crop/quality post-processing.
         prepared_image, prepared_mask = _prepare_image_and_mask(image_bytes, req.mask, gpt_size)
+        prepared_reference = _prepare_image_for_openai(reference_bytes, gpt_size) if reference_bytes else None
 
         with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as tmp:
             tmp.write(prepared_image)
             tmp_path = tmp.name
+
+        reference_path = None
+        reference_file = None
+        if prepared_reference:
+            reference_path = tmp_path + "_reference.png"
+            with open(reference_path, "wb") as f:
+                f.write(prepared_reference)
+            reference_file = open(reference_path, "rb")
 
         mask_file = None
         mask_path = None
@@ -783,7 +822,8 @@ def edit_image(req: ImageEditRequest) -> ImageEditResponse:
 
         try:
             with open(tmp_path, "rb") as img_file:
-                kwargs = dict(model=OPENAI_IMAGE_MODEL, image=img_file, prompt=prompt, n=1, size=gpt_size)
+                image_arg = [img_file, reference_file] if reference_file else img_file
+                kwargs = dict(model=OPENAI_IMAGE_MODEL, image=image_arg, prompt=final_prompt, n=1, size=gpt_size)
                 # Keep service calls aligned with the verified smoke test and
                 # avoid proxy defaults that may return a temporary URL instead
                 # of inline bytes.
@@ -802,7 +842,7 @@ def edit_image(req: ImageEditRequest) -> ImageEditResponse:
             version_id = create_version(
                 description=req.prompt[:40] + ("..." if len(req.prompt) > 40 else ""),
                 image_bytes=final_bytes,
-                prompt=req.prompt,
+                prompt=final_prompt,
                 output_size=f"{target_w}x{target_h}",
             )
 
@@ -819,6 +859,10 @@ def edit_image(req: ImageEditRequest) -> ImageEditResponse:
                 mask_file.close()
             if mask_path and os.path.exists(mask_path):
                 os.unlink(mask_path)
+            if reference_file:
+                reference_file.close()
+            if reference_path and os.path.exists(reference_path):
+                os.unlink(reference_path)
 
     except Exception as e:
         logger.error("Image edit failed: %s", e)

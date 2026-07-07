@@ -13,7 +13,7 @@
         :style="{ width: displayWidth + 'px', height: displayHeight + 'px' }"
         @mousedown="onCanvasMouseDown"
       />
-      <!-- Editable selection box (rect tool, and brush bounding box after drawing) -->
+      <!-- Temporary selection box while dragging a rectangular area -->
       <div
         v-if="activeBox"
         class="selection-box"
@@ -66,13 +66,14 @@ const isDrawing = ref(false)
 const lastX = ref(0)
 const lastY = ref(0)
 
-// Brush bounding box (in image pixel coords)
+// Brush bounding box for the current stroke (in image pixel coords)
 const brushMinX = ref(Infinity)
 const brushMinY = ref(Infinity)
 const brushMaxX = ref(0)
 const brushMaxY = ref(0)
 
-// The active editable selection box (image pixel coords). Shared by rect & brush.
+// The active temporary selection box (image pixel coords). Rect selections are
+// committed into the mask canvas on mouseup so multiple regions can be stacked.
 const selectionBox = ref<{ x: number; y: number; w: number; h: number } | null>(null)
 
 const MIN_SIZE = 8 // min box size in image px
@@ -107,7 +108,7 @@ const displayHeight = computed(() => naturalH.value * effectiveScale.value)
 const scrollWidth = computed(() => Math.max(displayWidth.value, 1))
 const scrollHeight = computed(() => Math.max(displayHeight.value, 1))
 
-// activeBox: show for rect (always when box exists) or brush (after drawing)
+// activeBox: show only while creating/adjusting a rectangle.
 const activeBox = computed(() => selectionBox.value)
 
 const selectionStyle = computed(() => {
@@ -166,6 +167,13 @@ function initMask() {
   brushMaxY.value = 0
 }
 
+function resetCurrentBrushBounds() {
+  brushMinX.value = Infinity
+  brushMinY.value = Infinity
+  brushMaxX.value = 0
+  brushMaxY.value = 0
+}
+
 function getCanvasCoords(e: MouseEvent): { x: number; y: number } {
   const rect = maskCanvas.value!.getBoundingClientRect()
   if (!rect.width || !rect.height || !naturalW.value || !naturalH.value) {
@@ -201,9 +209,12 @@ function onCanvasMouseDown(e: MouseEvent) {
   const { x, y } = getCanvasCoords(e)
 
   if (props.tool === 'brush') {
+    resetCurrentBrushBounds()
     isDrawing.value = true
     lastX.value = x
     lastY.value = y
+    // A click without movement should still create a visible circular edit area.
+    drawBrushStroke(x, y, x, y)
     attachWindowListeners()
     return
   }
@@ -291,14 +302,15 @@ function onWindowMouseUp() {
   if (isDrawing.value && props.tool === 'brush') {
     isDrawing.value = false
     if (brushMinX.value !== Infinity) {
-      // Set the editable bounding box from the drawn strokes
-      selectionBox.value = clampBoxToImage({
+      // Keep the exact freeform brush mask. Do not convert it into a rectangle.
+      generateMask()
+      emit('selection-ready', clampBoxToImage({
         x: brushMinX.value,
         y: brushMinY.value,
         w: brushMaxX.value - brushMinX.value,
         h: brushMaxY.value - brushMinY.value,
-      })
-      generateMask()
+      }))
+      resetCurrentBrushBounds()
     }
     return
   }
@@ -314,10 +326,10 @@ function onWindowMouseUp() {
   }
 
   if (props.tool === 'rect') {
+    drawRectToMask(selectionBox.value)
+    generateMask()
     emit('selection-ready', { ...selectionBox.value })
-  } else if (props.tool === 'brush') {
-    // Regenerate a rectangular mask from the adjusted bounding box (plan A)
-    generateRectMaskFromBox()
+    selectionBox.value = null
   }
 }
 
@@ -342,6 +354,20 @@ function drawBrushStroke(x1: number, y1: number, x2: number, y2: number) {
   brushMinY.value = Math.min(brushMinY.value, Math.min(y1, y2) - pad)
   brushMaxX.value = Math.max(brushMaxX.value, Math.max(x1, x2) + pad)
   brushMaxY.value = Math.max(brushMaxY.value, Math.max(y1, y2) + pad)
+}
+
+function drawRectToMask(box: { x: number; y: number; w: number; h: number }) {
+  const canvas = maskCanvas.value
+  if (!canvas) return
+  const ctx = canvas.getContext('2d')!
+  ctx.globalCompositeOperation = 'source-over'
+  ctx.fillStyle = 'rgba(255, 0, 0, 0.5)'
+  ctx.fillRect(
+    Math.round(box.x),
+    Math.round(box.y),
+    Math.round(box.w),
+    Math.round(box.h)
+  )
 }
 
 function generateMask() {
@@ -370,29 +396,6 @@ function generateMask() {
   }
 
   tmpCtx.putImageData(targetData, 0, 0)
-  emit('mask-ready', tmpCanvas.toDataURL('image/png'))
-}
-
-/** Plan A: after adjusting the brush bounding box, produce a rectangular mask. */
-function generateRectMaskFromBox() {
-  if (!selectionBox.value) return
-  const box = selectionBox.value
-
-  const tmpCanvas = document.createElement('canvas')
-  tmpCanvas.width = naturalW.value
-  tmpCanvas.height = naturalH.value
-  const tmpCtx = tmpCanvas.getContext('2d')!
-
-  tmpCtx.fillStyle = '#000000'
-  tmpCtx.fillRect(0, 0, tmpCanvas.width, tmpCanvas.height)
-  tmpCtx.fillStyle = '#FFFFFF'
-  tmpCtx.fillRect(
-    Math.round(box.x),
-    Math.round(box.y),
-    Math.round(box.w),
-    Math.round(box.h)
-  )
-
   emit('mask-ready', tmpCanvas.toDataURL('image/png'))
 }
 
@@ -425,13 +428,15 @@ function onWheel(e: WheelEvent) {
   }
 }
 
-// Reset selection when switching tools
+// Preserve the accumulated mask when switching tools; only remove any
+// in-progress temporary rectangle.
 watch(
   () => props.tool,
   () => {
     selectionBox.value = null
     dragMode.value = 'none'
-    initMask()
+    isDrawing.value = false
+    resetCurrentBrushBounds()
   }
 )
 

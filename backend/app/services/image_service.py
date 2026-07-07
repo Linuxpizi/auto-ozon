@@ -135,7 +135,6 @@ def replace_image_subject(req: AIImageReplaceRequest) -> AIImageReplaceResponse:
 
     prompt = (
         f"Transform this image: {req.prompt}. "
-        "Maintain professional product photography quality."
     )
 
     try:

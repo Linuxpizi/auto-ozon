@@ -6,6 +6,11 @@ import { apiGet, apiPost, assetUrl } from "./index";
 export { assetUrl };
 
 const IMAGE_PREFIX = "/v1/image";
+const IMAGE_AI_TIMEOUT_MS = 135_000;
+
+const imageAiRequestOptions = {
+  headers: { "X-Request-Timeout-Ms": String(IMAGE_AI_TIMEOUT_MS) },
+};
 
 // ── Types ──────────────────────────────────────────────────────────────
 
@@ -14,9 +19,10 @@ export interface ImageEditRequest {
   prompt: string;
   mask?: string;
   output_preset?: string;
+  resolution?: string;
+  size_ratio?: string;
   custom_width?: number;
   custom_height?: number;
-  quality?: number;
   context?: string;
 }
 
@@ -30,8 +36,11 @@ export interface ImageEditResponse {
 
 export interface ImageRemoveBgRequest {
   image_url: string;
+  prompt?: string;
   bg_color?: string;
   output_preset?: string;
+  resolution?: string;
+  size_ratio?: string;
 }
 
 export interface ImageExpandRequest {
@@ -40,12 +49,17 @@ export interface ImageExpandRequest {
   expand_ratio?: number;
   prompt?: string;
   output_preset?: string;
+  resolution?: string;
+  size_ratio?: string;
 }
 
 export interface ImageUpscaleRequest {
   image_url: string;
+  prompt?: string;
   scale?: number;
   output_preset?: string;
+  resolution?: string;
+  size_ratio?: string;
 }
 
 export interface VersionNode {
@@ -83,9 +97,10 @@ export interface EditChainRequest {
   image_url: string;
   actions: EditAction[];
   output_preset?: string;
+  resolution?: string;
+  size_ratio?: string;
   custom_width?: number;
   custom_height?: number;
-  quality?: number;
 }
 
 export interface EditChainResponse {
@@ -124,17 +139,6 @@ export const SIZE_RATIOS: Record<
   '2:3':  { label: '2:3 竖版',      w: 2, h: 3 },
 };
 
-// ── 根据分辨率+比例计算实际像素 ──
-export function calcOutputSize(resolutionKey: string, ratioKey: string): { width: number; height: number; preset: string } {
-  const res = RESOLUTION_PRESETS[resolutionKey] || RESOLUTION_PRESETS['1k'];
-  const ratio = SIZE_RATIOS[ratioKey] || SIZE_RATIOS['3:4'];
-  const base = res.size;
-  const diag = Math.sqrt(ratio.w * ratio.w + ratio.h * ratio.h);
-  const width = Math.round((ratio.w / diag) * base);
-  const height = Math.round((ratio.h / diag) * base);
-  return { width, height, preset: `${resolutionKey}_${ratioKey}` };
-}
-
 // ── 兼容旧代码的组合预设 ──
 export const OUTPUT_PRESETS: Record<
   string,
@@ -154,22 +158,22 @@ export const OUTPUT_PRESETS: Record<
 
 /** Unified image editing (natural language + optional mask) */
 export async function editImage(params: ImageEditRequest) {
-  return apiPost<ImageEditResponse>(`${IMAGE_PREFIX}/edit`, params);
+  return apiPost<ImageEditResponse>(`${IMAGE_PREFIX}/edit`, params, imageAiRequestOptions);
 }
 
 /** Remove background (white/transparent) */
 export async function removeBackground(params: ImageRemoveBgRequest) {
-  return apiPost<ImageEditResponse>(`${IMAGE_PREFIX}/remove-bg`, params);
+  return apiPost<ImageEditResponse>(`${IMAGE_PREFIX}/remove-bg`, params, imageAiRequestOptions);
 }
 
 /** AI expand image edges (outpainting) */
 export async function expandImage(params: ImageExpandRequest) {
-  return apiPost<ImageEditResponse>(`${IMAGE_PREFIX}/expand`, params);
+  return apiPost<ImageEditResponse>(`${IMAGE_PREFIX}/expand`, params, imageAiRequestOptions);
 }
 
 /** High-resolution upscale */
 export async function upscaleImage(params: ImageUpscaleRequest) {
-  return apiPost<ImageEditResponse>(`${IMAGE_PREFIX}/upscale`, params);
+  return apiPost<ImageEditResponse>(`${IMAGE_PREFIX}/upscale`, params, imageAiRequestOptions);
 }
 
 // ── Version Management ─────────────────────────────────────────────────
@@ -190,5 +194,5 @@ export async function restoreVersion(imageId: string, versionId: string) {
 
 /** Multi-step composite editing — execute a sequence of actions in one request */
 export async function editChain(params: EditChainRequest) {
-  return apiPost<EditChainResponse>(`${IMAGE_PREFIX}/edit-chain`, params);
+  return apiPost<EditChainResponse>(`${IMAGE_PREFIX}/edit-chain`, params, imageAiRequestOptions);
 }

@@ -11,6 +11,7 @@
             :options="resolutionOptions"
             size="small"
             style="width: 130px"
+            :disabled="state.processing"
           />
         </n-space>
         <n-space align="center" :size="6">
@@ -20,6 +21,7 @@
             :options="sizeRatioOptions"
             size="small"
             style="width: 130px"
+            :disabled="state.processing"
           />
         </n-space>
         <n-button size="small" quaternary @click="emit('close')">✕ 关闭</n-button>
@@ -32,13 +34,13 @@
         <ImageCanvas
           ref="canvasRef"
           :image-url="state.currentImageUrl"
-          :tool="canvasTool"
+          :tool="state.tool"
           :brush-size="state.brushSize"
           :zoom="state.zoom"
           @update:zoom="state.zoom = $event"
           @mask-ready="onMaskReady"
           @selection-ready="onSelectionReady"
-          @clear-mask="state.maskData = null"
+          @clear-mask="onCanvasClear"
         />
         <!-- Compare slider -->
         <div v-if="state.showCompare && originalUrl" class="compare-overlay">
@@ -51,112 +53,83 @@
       <div class="tool-panel">
         <!-- Prompt Input -->
         <div class="panel-section">
-          <div class="section-title">📝 自然语言编辑</div>
+          <div class="section-title">📝 自然语言编辑 <span class="required">*</span></div>
           <n-input
             v-model:value="state.editPrompt"
             type="textarea"
-            placeholder="描述你要的编辑效果，例如：把背景换成纯白色..."
-            :rows="3"
+            placeholder="必填：描述要对选中区域做什么，例如：把选中区域改成白色背景、去掉文字、替换为木纹..."
+            :rows="5"
             :disabled="state.processing"
           />
-          <n-button
-            type="primary"
-            block
-            :disabled="!state.editPrompt || state.processing"
-            style="margin-top: 8px"
-            @click="addPromptAction"
-          >
-            加入组合队列
-          </n-button>
-        </div>
-
-        <!-- Quick Actions (组合操作) -->
-        <div class="panel-section">
-          <div class="section-title">⚡ 快捷操作</div>
-          <n-space :wrap="true" :size="[6, 6]">
-            <n-button size="small" @click="setTool('brush')">🖌️ 涂鸦</n-button>
-            <n-button size="small" @click="setTool('rect')">⬜ 框选</n-button>
-            <n-button size="small" :disabled="state.processing || isActionQueued('remove_bg')" @click="addAction('remove_bg')">去背景</n-button>
-            <n-button size="small" :disabled="state.processing || isActionQueued('upscale')" @click="addAction('upscale')">高清修复</n-button>
-            <n-button size="small" :disabled="state.processing || isActionQueued('expand')" @click="addAction('expand')">AI 扩图</n-button>
-          </n-space>
-          <div v-if="state.tool !== 'prompt'" style="margin-top: 8px">
-            <n-space align="center" :size="8">
-              <n-button size="tiny" :disabled="state.processing || isQueueFull" @click="addMaskAction">加入队列</n-button>
-              <n-button size="tiny" @click="clearTool">取消</n-button>
-              <span v-if="state.tool === 'brush'" style="font-size: 12px; color: #999">
-                画笔:
-                <n-slider
-                  v-model:value="state.brushSize"
-                  :min="5"
-                  :max="60"
-                  :step="1"
-                  style="width: 80px; display: inline-block"
-                />
-              </span>
-            </n-space>
-          </div>
-        </div>
-
-        <!-- 操作队列 -->
-        <div class="panel-section">
-          <div class="section-title">
-            操作队列
-            <n-badge v-if="state.actionQueue.length > 0" :value="state.actionQueue.length" :max="99" />
-          </div>
-          <div v-if="state.actionQueue.length > 0" class="action-queue">
-            <div
-              v-for="(action, i) in state.actionQueue"
-              :key="i"
-              class="action-item"
-              :class="{ 'action-item--editing': false }"
-            >
-              <span class="action-icon">{{ actionIcon(action.type) }}</span>
-              <span class="action-label">{{ actionLabel(action) }}</span>
-              <n-button size="tiny" quaternary @click="removeAction(i)" style="padding:0 4px">✕</n-button>
-            </div>
-          </div>
-          <n-button
-            v-if="state.actionQueue.length > 0"
-            type="primary"
-            block
-            size="small"
-            :loading="state.processing"
-            :disabled="state.processing"
-            @click="executeChain"
-          >
-            一次请求执行 ({{ state.actionQueue.length }} 步)
-          </n-button>
-          <n-button
-            v-if="state.actionQueue.length > 0"
-            size="tiny"
-            quaternary
-            block
-            @click="clearQueue"
-            style="margin-top:4px"
-          >
-            清空队列
-          </n-button>
-          <n-text v-else depth="3" style="font-size:12px">先混合添加自然语言、快捷操作、框选/涂鸦，最后统一请求一次 AI 编辑</n-text>
-          <n-text depth="3" style="font-size:11px; display:block; margin-top:4px">
-            最多 {{ MAX_ACTION_QUEUE }} 步；去背景 / 高清修复 / AI 扩图每次组合仅允许加入一次。
+          <n-text depth="3" class="hint-text">
+            提示词必填；后端只会使用这里输入的原文，不会自动补充。
           </n-text>
         </div>
 
-        <!-- Output Settings -->
+        <!-- Selection Tools -->
         <div class="panel-section">
-          <div class="section-title">🎨 输出设置</div>
-          <div class="setting-row">
-            <span>质量:</span>
+          <div class="section-title">⚡ 快捷操作</div>
+          <n-space :wrap="true" :size="[6, 6]">
+            <n-button
+              size="small"
+              :type="state.tool === 'rect' ? 'primary' : 'default'"
+              :disabled="state.processing"
+              @click="setTool('rect')"
+            >
+              ⬜ 框选
+            </n-button>
+            <n-button
+              size="small"
+              :type="state.tool === 'brush' ? 'primary' : 'default'"
+              :disabled="state.processing"
+              @click="setTool('brush')"
+            >
+              🖌️ 画笔
+            </n-button>
+          </n-space>
+
+          <div class="tool-status">
+            <n-text depth="3" style="font-size:12px">
+              {{ toolHint }}
+            </n-text>
+          </div>
+
+          <div v-if="state.tool === 'brush'" class="setting-row" style="margin-top: 8px">
+            <span>画笔:</span>
             <n-slider
-              v-model:value="state.outputQuality"
-              :min="50"
-              :max="100"
-              :step="5"
+              v-model:value="state.brushSize"
+              :min="5"
+              :max="60"
+              :step="1"
               style="flex: 1"
             />
-            <span style="font-size: 12px; color: #666">{{ state.outputQuality }}%</span>
+            <span style="font-size: 12px; color: #666">{{ state.brushSize }}</span>
           </div>
+
+          <n-space vertical :size="6" style="margin-top: 10px">
+            <n-button
+              type="primary"
+              block
+              :loading="state.processing"
+              :disabled="!canSubmitEdit"
+              @click="executeEdit"
+            >
+              执行编辑
+            </n-button>
+            <n-button
+              size="small"
+              block
+              quaternary
+              :disabled="state.processing || !state.maskData"
+              @click="clearSelections"
+            >
+              清空选择区域
+            </n-button>
+          </n-space>
+
+          <n-text depth="3" class="hint-text">
+            已选择 {{ state.selectionCount }} 个区域；可连续框选多个矩形，也可用画笔涂出任意形状区域。
+          </n-text>
         </div>
 
         <!-- Version Timeline -->
@@ -209,16 +182,13 @@
 
 <script setup lang="ts">
 import { reactive, ref, computed, watch } from 'vue'
-import { NInput, NButton, NSlider, NSpace, NSelect, NBadge, NText, useMessage } from 'naive-ui'
+import { NInput, NButton, NSlider, NSpace, NSelect, NText, useMessage } from 'naive-ui'
 import ImageCanvas from './ImageCanvas.vue'
 import {
   assetUrl,
-  editChain,
+  editImage,
   RESOLUTION_PRESETS,
   SIZE_RATIOS,
-  OUTPUT_PRESETS,
-  calcOutputSize,
-  type EditAction,
   type VersionNode,
 } from '../../api/image'
 
@@ -235,8 +205,7 @@ const emit = defineEmits<{
 const message = useMessage()
 const canvasRef = ref<InstanceType<typeof ImageCanvas>>()
 
-const MAX_ACTION_QUEUE = 8
-const SINGLETON_ACTION_TYPES = new Set<EditAction['type']>(['remove_bg', 'upscale', 'expand'])
+type SelectionTool = 'brush' | 'rect'
 
 function normalizeImageUrl(url: string): string {
   return assetUrl(url)
@@ -248,19 +217,16 @@ const state = reactive({
   currentImageUrl: normalizeImageUrl(props.imageUrl),
   versions: [] as VersionNode[],
   currentVersionIndex: -1,
-  tool: 'prompt' as 'prompt' | 'brush' | 'rect',
+  tool: 'rect' as SelectionTool,
   editPrompt: '',
   maskData: null as string | null,
-  selectionRect: null as { x: number; y: number; w: number; h: number } | null,
+  selectionCount: 0,
   brushSize: 20,
   resolution: '1k',
   sizeRatio: '3:4',
-  outputQuality: 90,
   processing: false,
   zoom: 1,
   showCompare: false,
-  // 组合操作队列
-  actionQueue: [] as EditAction[],
 })
 
 const resolutionOptions = Object.entries(RESOLUTION_PRESETS).map(([key, v]) => ({
@@ -273,15 +239,14 @@ const sizeRatioOptions = Object.entries(SIZE_RATIOS).map(([key, v]) => ({
   value: key,
 }))
 
-/** 计算当前分辨率+比例对应的实际尺寸 */
-const currentOutputSize = computed(() => calcOutputSize(state.resolution, state.sizeRatio))
-
-const canvasTool = computed(() => {
-  if (state.tool === 'brush' || state.tool === 'rect') return state.tool
-  return 'prompt'
+const canSubmitEdit = computed(() => {
+  return Boolean(state.editPrompt.trim() && state.maskData && !state.processing)
 })
 
-const isQueueFull = computed(() => state.actionQueue.length >= MAX_ACTION_QUEUE)
+const toolHint = computed(() => {
+  if (state.tool === 'brush') return '画笔模式：按住鼠标涂抹，可连续绘制多个任意形状区域。'
+  return '框选模式：拖拽创建矩形选区，可连续框选多个区域。'
+})
 
 // Initialize first version
 watch(
@@ -304,81 +269,20 @@ watch(
         },
       ]
       state.currentVersionIndex = 0
+      state.maskData = null
+      state.selectionCount = 0
+      canvasRef.value?.clearMask()
     }
   },
   { immediate: true }
 )
 
-function setTool(tool: 'prompt' | 'brush' | 'rect') {
+function setTool(tool: SelectionTool) {
   state.tool = tool
-  state.maskData = null
-  state.selectionRect = null
 }
 
-function clearTool() {
-  state.tool = 'prompt'
-  state.maskData = null
-  state.selectionRect = null
+function clearSelections() {
   canvasRef.value?.clearMask()
-}
-
-// ── 组合操作队列 ─────────────────────────────────────────────────────
-
-function actionIcon(type: string): string {
-  const icons: Record<string, string> = { prompt: '📝', remove_bg: '🧹', brush: '🖌️', rect: '⬜', upscale: '🔍', expand: '🖼️' }
-  return icons[type] || '⚡'
-}
-
-function actionLabel(a: EditAction): string {
-  const labels: Record<string, string> = { prompt: '编辑', remove_bg: '去背景', brush: '涂鸦', rect: '框选', upscale: '高清修复', expand: 'AI 扩图' }
-  const label = labels[a.type] || a.type
-  return a.prompt ? `${label}: ${a.prompt.slice(0, 15)}` : label
-}
-
-function buildMaskPrompt(type: 'brush' | 'rect'): string {
-  const prompt = state.editPrompt.trim()
-  if (prompt) return prompt
-  return type === 'brush'
-    ? 'Edit the brushed area naturally, matching surrounding texture and lighting.'
-    : 'Remove the selected object, fill naturally matching surrounding background.'
-}
-
-function defaultActionPrompt(type: EditAction['type']): string | undefined {
-  const prompts: Partial<Record<EditAction['type'], string>> = {
-    remove_bg: 'Remove the background completely and keep the product cleanly isolated for e-commerce listing.',
-    upscale: 'Enhance image sharpness, clarity, and fine details while preserving the product appearance.',
-    expand: 'Extend the image canvas naturally. Match the original lighting, perspective, colors, and product photography style.',
-  }
-  return prompts[type]
-}
-
-function isActionQueued(type: EditAction['type']): boolean {
-  return state.actionQueue.some((action) => action.type === type)
-}
-
-function enqueueAction(action: EditAction): boolean {
-  if (state.processing) return false
-  if (isQueueFull.value) {
-    message.warning(`组合队列最多支持 ${MAX_ACTION_QUEUE} 步，请先执行或清理队列`)
-    return false
-  }
-  if (SINGLETON_ACTION_TYPES.has(action.type) && isActionQueued(action.type)) {
-    message.warning(`${actionLabel(action)} 已在队列中，不能重复加入`)
-    return false
-  }
-  state.actionQueue.push(action)
-  return true
-}
-
-function resolveOutputPreset(): string {
-  const ratioPresetMap: Record<string, string> = {
-    '1:1': 'ozon_detail_sq',
-    '3:4': 'ozon_main',
-    '4:3': 'ozon_detail_h',
-    '16:9': 'ozon_banner',
-  }
-  const preset = ratioPresetMap[state.sizeRatio] || 'ozon_main'
-  return OUTPUT_PRESETS[preset] ? preset : 'ozon_main'
 }
 
 function normalizeErrorMessage(e: unknown): string {
@@ -392,94 +296,50 @@ function normalizeErrorMessage(e: unknown): string {
   return '未知错误'
 }
 
-function addAction(type: EditAction['type']) {
-  const action: EditAction = { type }
-  const prompt = state.editPrompt.trim() || defaultActionPrompt(type)
-  if (prompt) action.prompt = prompt
-  if (type === 'expand') { action.direction = 'all'; action.expand_ratio = 0.5 }
-  if (type === 'upscale') action.scale = 2
-  if (!enqueueAction(action)) return
-  if (state.editPrompt.trim()) state.editPrompt = ''
-  message.success(`已添加: ${actionLabel(action)}`)
-}
-
-function addPromptAction() {
+async function executeEdit() {
   const prompt = state.editPrompt.trim()
-  if (!prompt) return
-  if (!enqueueAction({ type: 'prompt', prompt })) return
-  state.editPrompt = ''
-  message.success(`已添加: 编辑: ${prompt.slice(0, 15)}`)
-}
-
-function addMaskAction() {
-  if (!state.maskData && !state.selectionRect) {
-    message.warning('请先在图片上涂鸦或框选区域')
+  if (!prompt) {
+    message.warning('请输入自然语言编辑提示词')
     return
   }
-  const type = state.tool as 'brush' | 'rect'
-  const prompt = buildMaskPrompt(type)
-  const action: EditAction = {
-    type: type === 'brush' ? 'brush' : 'rect',
-    mask_data: state.maskData || undefined,
-    bbox: state.selectionRect ? { x1: state.selectionRect.x, y1: state.selectionRect.y, x2: state.selectionRect.x + state.selectionRect.w, y2: state.selectionRect.y + state.selectionRect.h } : undefined,
-    prompt,
+  if (!state.maskData) {
+    message.warning('请先使用框选或画笔选择至少一个编辑区域')
+    return
   }
-  if (!enqueueAction(action)) return
-  state.editPrompt = ''
-  state.maskData = null
-  state.selectionRect = null
-  canvasRef.value?.clearMask()
-  message.success(`已添加: ${actionLabel(action)}`)
-  state.tool = 'prompt'
-}
 
-function removeAction(index: number) {
-  state.actionQueue.splice(index, 1)
-}
-
-function clearQueue() {
-  state.actionQueue.length = 0
-}
-
-async function executeChain() {
-  if (state.actionQueue.length === 0) return
   state.processing = true
   try {
-    const actions = state.actionQueue.map((action) => ({ ...action }))
-    const outputSize = currentOutputSize.value
-    const res = await editChain({
+    const res = await editImage({
       image_url: state.currentImageUrl,
-      actions,
-      output_preset: resolveOutputPreset(),
-      custom_width: outputSize.width,
-      custom_height: outputSize.height,
-      quality: state.outputQuality,
+      prompt,
+      mask: state.maskData,
+      resolution: state.resolution,
+      size_ratio: state.sizeRatio,
     })
     const resultUrl = normalizeImageUrl(res.result_url)
     state.currentImageUrl = resultUrl
-    pushVersion(resultUrl, `组合操作 (${res.steps}步 / ${res.ai_calls ?? '?'}次AI)`, res.version_id, res.final_prompt || actionSummary(actions), res.output_size)
-    state.actionQueue.length = 0
-    message.success(`组合操作完成 (${res.steps}步，${res.ai_calls ?? 1}次AI调用)`)
+    pushVersion(resultUrl, `区域编辑 (${state.selectionCount}区)`, res.version_id, prompt, res.output_size)
+    state.editPrompt = ''
+    clearSelections()
+    message.success('图片编辑完成')
   } catch (e: any) {
-    message.error('组合操作失败: ' + normalizeErrorMessage(e))
+    message.error('图片编辑失败: ' + normalizeErrorMessage(e))
   } finally {
     state.processing = false
   }
-}
-
-function actionSummary(actions: EditAction[]): string {
-  return actions
-    .map((action) => action.prompt || actionLabel(action))
-    .filter(Boolean)
-    .join(' | ')
 }
 
 function onMaskReady(base64: string) {
   state.maskData = base64
 }
 
-function onSelectionReady(rect: { x: number; y: number; w: number; h: number }) {
-  state.selectionRect = rect
+function onSelectionReady() {
+  state.selectionCount += 1
+}
+
+function onCanvasClear() {
+  state.maskData = null
+  state.selectionCount = 0
 }
 
 function pushVersion(url: string, description: string, versionId?: string, prompt?: string | null, outputSize?: string) {
@@ -493,7 +353,7 @@ function pushVersion(url: string, description: string, versionId?: string, promp
     prompt: prompt || null,
     timestamp: new Date().toISOString(),
     parent_version: state.versions[state.currentVersionIndex]?.version_id || null,
-    output_size: outputSize || currentOutputSize.value.preset,
+    output_size: outputSize || `${state.resolution}/${state.sizeRatio}`,
   }
   // Truncate forward history
   state.versions = state.versions.slice(0, state.currentVersionIndex + 1)
@@ -505,6 +365,7 @@ function undo() {
   if (state.currentVersionIndex > 0) {
     state.currentVersionIndex--
     state.currentImageUrl = state.versions[state.currentVersionIndex].url
+    clearSelections()
   }
 }
 
@@ -512,12 +373,14 @@ function redo() {
   if (state.currentVersionIndex < state.versions.length - 1) {
     state.currentVersionIndex++
     state.currentImageUrl = state.versions[state.currentVersionIndex].url
+    clearSelections()
   }
 }
 
 function restoreVersion(index: number) {
   state.currentVersionIndex = index
   state.currentImageUrl = state.versions[index].url
+  clearSelections()
 }
 
 function downloadImage() {
@@ -585,7 +448,7 @@ function applyToProduct() {
 }
 
 .tool-panel {
-  width: 260px;
+  width: 280px;
   flex-shrink: 0;
   height: 100%;
   min-height: 0;
@@ -604,6 +467,24 @@ function applyToProduct() {
   font-weight: 600;
   color: var(--text-secondary, #aaa);
   margin-bottom: 6px;
+}
+
+.required {
+  color: #ff6b6b;
+}
+
+.hint-text {
+  display: block;
+  font-size: 12px;
+  line-height: 1.45;
+  margin-top: 6px;
+}
+
+.tool-status {
+  margin-top: 8px;
+  padding: 8px;
+  border-radius: 4px;
+  background: rgba(255,255,255,0.04);
 }
 
 .setting-row {
@@ -649,34 +530,6 @@ function applyToProduct() {
 
 .version-item--active .version-dot {
   background: #409eff;
-}
-
-.action-queue {
-  max-height: 200px;
-  overflow-y: auto;
-  margin-bottom: 6px;
-}
-
-.action-item {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 4px 8px;
-  border-radius: 4px;
-  font-size: 12px;
-  background: rgba(255,255,255,0.04);
-  margin-bottom: 2px;
-}
-
-.action-icon {
-  flex-shrink: 0;
-}
-
-.action-label {
-  flex: 1;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
 .editor-footer {

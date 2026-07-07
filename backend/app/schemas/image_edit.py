@@ -38,9 +38,10 @@ class EditChainRequest(BaseModel):
     actions: List[EditAction] = Field(..., min_length=1, max_length=8,
                                        description="Actions to execute in sequence (1-8)")
     output_preset: str = Field(default="ozon_main")
+    resolution: Optional[str] = Field(default=None, description="前端原样传入的分辨率, e.g. 1k / 2k / 4k")
+    size_ratio: Optional[str] = Field(default=None, description="前端原样传入的比例, e.g. 3:4 / 1:1")
     custom_width: Optional[int] = None
     custom_height: Optional[int] = None
-    quality: int = Field(default=90, ge=1, le=100)
 
 
 class EditChainResponse(BaseModel):
@@ -80,9 +81,10 @@ class ImageEditRequest(BaseModel):
     prompt: str = Field(..., description="编辑指令 (自然语言)")
     mask: Optional[str] = Field(None, description="遮罩 base64 (白色=编辑区域)")
     output_preset: str = Field(default="ozon_main", description="输出尺寸预设")
+    resolution: Optional[str] = Field(default=None, description="前端原样传入的分辨率, e.g. 1k / 2k / 4k")
+    size_ratio: Optional[str] = Field(default=None, description="前端原样传入的比例, e.g. 3:4 / 1:1")
     custom_width: Optional[int] = Field(None, description="自定义宽度")
     custom_height: Optional[int] = Field(None, description="自定义高度")
-    quality: int = Field(default=90, ge=1, le=100, description="输出质量")
     context: Optional[str] = Field(None, description="商品上下文 (类目/风格等)")
     # 兼容字段: edit-chain 内部转换使用
     mask_data: Optional[str] = Field(None, description="同 mask, 编辑链内部透传")
@@ -104,8 +106,11 @@ class ImageEditResponse(BaseModel):
 
 class ImageRemoveBgRequest(BaseModel):
     image_url: str = Field(..., description="原始图片 URL 或 base64")
+    prompt: Optional[str] = Field(None, description="编辑指令；后端不会自动补充")
     bg_color: str = Field(default="white", description="背景色: white / transparent")
     output_preset: str = Field(default="ozon_main")
+    resolution: Optional[str] = None
+    size_ratio: Optional[str] = None
     custom_width: Optional[int] = None
     custom_height: Optional[int] = None
 
@@ -127,6 +132,8 @@ class ImageExpandRequest(BaseModel):
     expand_ratio: float = Field(default=0.5, ge=0.25, le=1.0, description="扩展比例")
     prompt: Optional[str] = Field(None, description="可选: 引导生成方向")
     output_preset: str = Field(default="ozon_detail_h")
+    resolution: Optional[str] = None
+    size_ratio: Optional[str] = None
     custom_width: Optional[int] = None
     custom_height: Optional[int] = None
 
@@ -144,8 +151,11 @@ class ImageExpandResponse(BaseModel):
 
 class ImageUpscaleRequest(BaseModel):
     image_url: str = Field(..., description="原始图片 URL 或 base64")
+    prompt: Optional[str] = Field(None, description="编辑指令；后端不会自动补充")
     scale: int = Field(default=2, ge=2, le=4, description="倍率: 2 或 4")
     output_preset: Optional[str] = Field(None, description="如指定则裁剪到目标尺寸")
+    resolution: Optional[str] = None
+    size_ratio: Optional[str] = None
     custom_width: Optional[int] = None
     custom_height: Optional[int] = None
 

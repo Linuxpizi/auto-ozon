@@ -54,10 +54,13 @@ export async function apiGet<T = any>(path: string, params?: Record<string, stri
   return request(url);
 }
 
-export async function apiPost<T = any>(path: string, body?: any): Promise<T> {
+export async function apiPost<T = any>(path: string, body?: any, options?: RequestInit): Promise<T> {
+  const headers = new Headers(options?.headers || undefined);
+  if (body) headers.set("Content-Type", "application/json");
   return request(path, {
+    ...options,
     method: "POST",
-    headers: body ? { "Content-Type": "application/json" } : undefined,
+    headers,
     body: body ? JSON.stringify(body) : undefined,
   });
 }

@@ -76,13 +76,13 @@
           <n-space :wrap="true" :size="[6, 6]">
             <n-button size="small" @click="setTool('brush')">🖌️ 涂鸦</n-button>
             <n-button size="small" @click="setTool('rect')">⬜ 框选</n-button>
-            <n-button size="small" @click="addAction('remove_bg')">去背景</n-button>
-            <n-button size="small" @click="addAction('upscale')">高清修复</n-button>
-            <n-button size="small" @click="addAction('expand')">AI 扩图</n-button>
+            <n-button size="small" :disabled="state.processing || isActionQueued('remove_bg')" @click="addAction('remove_bg')">去背景</n-button>
+            <n-button size="small" :disabled="state.processing || isActionQueued('upscale')" @click="addAction('upscale')">高清修复</n-button>
+            <n-button size="small" :disabled="state.processing || isActionQueued('expand')" @click="addAction('expand')">AI 扩图</n-button>
           </n-space>
           <div v-if="state.tool !== 'prompt'" style="margin-top: 8px">
             <n-space align="center" :size="8">
-              <n-button size="tiny" @click="addMaskAction">加入队列</n-button>
+              <n-button size="tiny" :disabled="state.processing || isQueueFull" @click="addMaskAction">加入队列</n-button>
               <n-button size="tiny" @click="clearTool">取消</n-button>
               <span v-if="state.tool === 'brush'" style="font-size: 12px; color: #999">
                 画笔:
@@ -138,6 +138,9 @@
             清空队列
           </n-button>
           <n-text v-else depth="3" style="font-size:12px">先混合添加自然语言、快捷操作、框选/涂鸦，最后统一请求一次 AI 编辑</n-text>
+          <n-text depth="3" style="font-size:11px; display:block; margin-top:4px">
+            最多 {{ MAX_ACTION_QUEUE }} 步；去背景 / 高清修复 / AI 扩图每次组合仅允许加入一次。
+          </n-text>
         </div>
 
         <!-- Output Settings -->
@@ -209,9 +212,11 @@ import { reactive, ref, computed, watch } from 'vue'
 import { NInput, NButton, NSlider, NSpace, NSelect, NBadge, NText, useMessage } from 'naive-ui'
 import ImageCanvas from './ImageCanvas.vue'
 import {
+  assetUrl,
   editChain,
   RESOLUTION_PRESETS,
   SIZE_RATIOS,
+  OUTPUT_PRESETS,
   calcOutputSize,
   type EditAction,
   type VersionNode,
@@ -230,10 +235,17 @@ const emit = defineEmits<{
 const message = useMessage()
 const canvasRef = ref<InstanceType<typeof ImageCanvas>>()
 
-const originalUrl = ref(props.imageUrl)
+const MAX_ACTION_QUEUE = 8
+const SINGLETON_ACTION_TYPES = new Set<EditAction['type']>(['remove_bg', 'upscale', 'expand'])
+
+function normalizeImageUrl(url: string): string {
+  return assetUrl(url)
+}
+
+const originalUrl = ref(normalizeImageUrl(props.imageUrl))
 
 const state = reactive({
-  currentImageUrl: props.imageUrl,
+  currentImageUrl: normalizeImageUrl(props.imageUrl),
   versions: [] as VersionNode[],
   currentVersionIndex: -1,
   tool: 'prompt' as 'prompt' | 'brush' | 'rect',
@@ -269,19 +281,22 @@ const canvasTool = computed(() => {
   return 'prompt'
 })
 
+const isQueueFull = computed(() => state.actionQueue.length >= MAX_ACTION_QUEUE)
+
 // Initialize first version
 watch(
   () => props.imageUrl,
   (url) => {
     if (url) {
-      originalUrl.value = url
-      state.currentImageUrl = url
+      const normalizedUrl = normalizeImageUrl(url)
+      originalUrl.value = normalizedUrl
+      state.currentImageUrl = normalizedUrl
       state.versions = [
         {
           version_id: 'v0',
           description: '原图',
           file: '',
-          url,
+          url: normalizedUrl,
           prompt: null,
           timestamp: new Date().toISOString(),
           parent_version: null,
@@ -328,19 +343,70 @@ function buildMaskPrompt(type: 'brush' | 'rect'): string {
     : 'Remove the selected object, fill naturally matching surrounding background.'
 }
 
+function defaultActionPrompt(type: EditAction['type']): string | undefined {
+  const prompts: Partial<Record<EditAction['type'], string>> = {
+    remove_bg: 'Remove the background completely and keep the product cleanly isolated for e-commerce listing.',
+    upscale: 'Enhance image sharpness, clarity, and fine details while preserving the product appearance.',
+    expand: 'Extend the image canvas naturally. Match the original lighting, perspective, colors, and product photography style.',
+  }
+  return prompts[type]
+}
+
+function isActionQueued(type: EditAction['type']): boolean {
+  return state.actionQueue.some((action) => action.type === type)
+}
+
+function enqueueAction(action: EditAction): boolean {
+  if (state.processing) return false
+  if (isQueueFull.value) {
+    message.warning(`组合队列最多支持 ${MAX_ACTION_QUEUE} 步，请先执行或清理队列`)
+    return false
+  }
+  if (SINGLETON_ACTION_TYPES.has(action.type) && isActionQueued(action.type)) {
+    message.warning(`${actionLabel(action)} 已在队列中，不能重复加入`)
+    return false
+  }
+  state.actionQueue.push(action)
+  return true
+}
+
+function resolveOutputPreset(): string {
+  const ratioPresetMap: Record<string, string> = {
+    '1:1': 'ozon_detail_sq',
+    '3:4': 'ozon_main',
+    '4:3': 'ozon_detail_h',
+    '16:9': 'ozon_banner',
+  }
+  const preset = ratioPresetMap[state.sizeRatio] || 'ozon_main'
+  return OUTPUT_PRESETS[preset] ? preset : 'ozon_main'
+}
+
+function normalizeErrorMessage(e: unknown): string {
+  if (e instanceof Error) return e.message
+  if (typeof e === 'string') return e
+  if (e && typeof e === 'object') {
+    const detail = (e as any).detail || (e as any).message
+    if (typeof detail === 'string') return detail
+    try { return JSON.stringify(detail || e) } catch { /* ignore */ }
+  }
+  return '未知错误'
+}
+
 function addAction(type: EditAction['type']) {
   const action: EditAction = { type }
-  if (type === 'prompt' && state.editPrompt) action.prompt = state.editPrompt
+  const prompt = state.editPrompt.trim() || defaultActionPrompt(type)
+  if (prompt) action.prompt = prompt
   if (type === 'expand') { action.direction = 'all'; action.expand_ratio = 0.5 }
   if (type === 'upscale') action.scale = 2
-  state.actionQueue.push(action)
+  if (!enqueueAction(action)) return
+  if (state.editPrompt.trim()) state.editPrompt = ''
   message.success(`已添加: ${actionLabel(action)}`)
 }
 
 function addPromptAction() {
   const prompt = state.editPrompt.trim()
   if (!prompt) return
-  state.actionQueue.push({ type: 'prompt', prompt })
+  if (!enqueueAction({ type: 'prompt', prompt })) return
   state.editPrompt = ''
   message.success(`已添加: 编辑: ${prompt.slice(0, 15)}`)
 }
@@ -358,7 +424,7 @@ function addMaskAction() {
     bbox: state.selectionRect ? { x1: state.selectionRect.x, y1: state.selectionRect.y, x2: state.selectionRect.x + state.selectionRect.w, y2: state.selectionRect.y + state.selectionRect.h } : undefined,
     prompt,
   }
-  state.actionQueue.push(action)
+  if (!enqueueAction(action)) return
   state.editPrompt = ''
   state.maskData = null
   state.selectionRect = null
@@ -380,19 +446,22 @@ async function executeChain() {
   state.processing = true
   try {
     const actions = state.actionQueue.map((action) => ({ ...action }))
+    const outputSize = currentOutputSize.value
     const res = await editChain({
       image_url: state.currentImageUrl,
       actions,
-      custom_width: currentOutputSize.value.width,
-      custom_height: currentOutputSize.value.height,
+      output_preset: resolveOutputPreset(),
+      custom_width: outputSize.width,
+      custom_height: outputSize.height,
       quality: state.outputQuality,
     })
-    state.currentImageUrl = res.result_url
-    pushVersion(res.result_url, `组合操作 (${res.steps}步 / ${res.ai_calls ?? '?'}次AI)`, res.version_id, res.final_prompt || actionSummary(actions), res.output_size)
+    const resultUrl = normalizeImageUrl(res.result_url)
+    state.currentImageUrl = resultUrl
+    pushVersion(resultUrl, `组合操作 (${res.steps}步 / ${res.ai_calls ?? '?'}次AI)`, res.version_id, res.final_prompt || actionSummary(actions), res.output_size)
     state.actionQueue.length = 0
     message.success(`组合操作完成 (${res.steps}步，${res.ai_calls ?? 1}次AI调用)`)
   } catch (e: any) {
-    message.error('组合操作失败: ' + e.message)
+    message.error('组合操作失败: ' + normalizeErrorMessage(e))
   } finally {
     state.processing = false
   }
@@ -415,11 +484,12 @@ function onSelectionReady(rect: { x: number; y: number; w: number; h: number }) 
 
 function pushVersion(url: string, description: string, versionId?: string, prompt?: string | null, outputSize?: string) {
   const versionNum = state.versions.length
+  const normalizedUrl = normalizeImageUrl(url)
   const node: VersionNode = {
     version_id: versionId || `local_v${versionNum}`,
     description,
     file: '',
-    url,
+    url: normalizedUrl,
     prompt: prompt || null,
     timestamp: new Date().toISOString(),
     parent_version: state.versions[state.currentVersionIndex]?.version_id || null,
@@ -467,11 +537,15 @@ function applyToProduct() {
 .image-editor {
   display: flex;
   flex-direction: column;
+  width: 100%;
   height: 100%;
+  min-width: 0;
+  min-height: 0;
   background: var(--bg-main, #1a1a2e);
   color: var(--text-primary, #e0e0e0);
   border-radius: 8px;
   overflow: hidden;
+  box-sizing: border-box;
 }
 
 .editor-header {
@@ -500,18 +574,21 @@ function applyToProduct() {
 .canvas-area {
   flex: 1;
   display: flex;
-  align-items: center;
-  justify-content: center;
-  overflow: auto;
+  align-items: stretch;
+  justify-content: stretch;
+  overflow: hidden;
   padding: 12px;
   position: relative;
   background: var(--bg-elevated, #16213e);
   min-width: 0;
+  min-height: 0;
 }
 
 .tool-panel {
   width: 260px;
   flex-shrink: 0;
+  height: 100%;
+  min-height: 0;
   border-left: 1px solid var(--border-color, rgba(255,255,255,0.08));
   overflow-y: auto;
   padding: 12px;

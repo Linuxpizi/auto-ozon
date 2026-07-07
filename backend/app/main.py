@@ -1,9 +1,11 @@
 import logging
 import traceback
 from contextlib import asynccontextmanager
+from pathlib import Path
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from fastapi.staticfiles import StaticFiles
 from app.api.routers import dashboard, order, store, monitor, listing, finance, task_config, precision_listing, intelligence, browser_sync, selection, upload
 from app.api.routers import prompt_template, title_optimize, product_optimize, image_prompt, ai_text, ai_image
 from app.api.routers import exchange_rate
@@ -68,6 +70,13 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title="鲸智 AI backend", lifespan=lifespan)
+
+# Generated/edited images are returned as /static/... URLs by image services.
+# Mount the backend static directory explicitly so the frontend can render those
+# result images instead of hanging on broken /static paths.
+STATIC_DIR = Path(__file__).resolve().parent / "static"
+STATIC_DIR.mkdir(parents=True, exist_ok=True)
+app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 
 
 @app.exception_handler(Exception)

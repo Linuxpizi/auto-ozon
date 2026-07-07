@@ -627,13 +627,20 @@
     </n-modal>
 
     <!-- ━━━ 图片编辑器 (ImageEditor) ━━━ -->
-    <n-modal v-model:show="editorVisible" :mask-closable="true" :close-on-esc="true"
-             style="width: 85vw; max-width: 1400px;" content-style="padding: 0; height: 75vh;">
-      <ImageEditor
-        :image-url="editorImageUrl"
-        @apply="onEditorApply"
-        @close="editorVisible = false"
-      />
+    <n-modal
+      v-model:show="editorVisible"
+      :mask-closable="true"
+      :close-on-esc="true"
+      style="width: 85vw; max-width: 1400px; height: 75vh;"
+      content-style="padding: 0; height: 75vh; overflow: hidden;"
+    >
+      <div class="image-editor-modal">
+        <ImageEditor
+          :image-url="editorImageUrl"
+          @apply="onEditorApply"
+          @close="editorVisible = false"
+        />
+      </div>
     </n-modal>
 
   </div>
@@ -1677,6 +1684,14 @@ onMounted(() => {
 </script>
 
 <style scoped>
+.image-editor-modal {
+  width: 100%;
+  height: 75vh;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+}
+
 /* ═══════════════════════════════════════════════════════
    选品中心 — 全局样式
    ═══════════════════════════════════════════════════════ */

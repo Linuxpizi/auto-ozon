@@ -1,7 +1,9 @@
 /**
  * Image Edit API — edit, remove-bg, expand, upscale, edit-chain, version management
  */
-import { apiGet, apiPost } from "./index";
+import { apiGet, apiPost, assetUrl } from "./index";
+
+export { assetUrl };
 
 const IMAGE_PREFIX = "/v1/image";
 

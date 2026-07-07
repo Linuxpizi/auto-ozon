@@ -1,5 +1,5 @@
 """Schemas for PowerPaint image editing endpoints."""
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class PowerPaintResponse(BaseModel):
@@ -11,6 +11,8 @@ class PowerPaintResponse(BaseModel):
 
 
 class PowerPaintDeviceResponse(BaseModel):
+    model_config = ConfigDict(protected_namespaces=())
+
     device: str
     dtype: str
     model_dir: str

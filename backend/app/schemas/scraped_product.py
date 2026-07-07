@@ -1,7 +1,7 @@
 from typing import Optional, List, Any
 from datetime import datetime, timezone
 import re
-from pydantic import BaseModel, model_validator
+from pydantic import BaseModel, ConfigDict, model_validator
 
 
 def _camel_to_snake(name: str) -> str:
@@ -110,8 +110,7 @@ class ScrapedProductRead(ScrapedProductBase):
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class SyncProductsRequest(BaseModel):

@@ -1,4 +1,5 @@
 """AI Image Service — image translation, subject replacement, and generation via GPT Image."""
+
 import base64
 import logging
 import os
@@ -7,7 +8,12 @@ from pathlib import Path
 
 from openai import OpenAI
 
-from app.core.config import OPENAI_API_KEY, OPENAI_BASE_URL, OPENAI_IMAGE_MODEL
+from app.core.config import (
+    OPENAI_API_KEY,
+    OPENAI_BASE_URL,
+    OPENAI_IMAGE_MODEL,
+    OPENAI_IMAGE_TIMEOUT_SECONDS,
+)
 from app.schemas.ai import (
     AIImageTranslateRequest,
     AIImageTranslateResponse,
@@ -25,7 +31,11 @@ STATIC_DIR = Path(__file__).resolve().parent.parent / "static" / "images"
 
 def _get_image_client() -> OpenAI:
     """Create an OpenAI client configured for image operations."""
-    return OpenAI(api_key=OPENAI_API_KEY, base_url=OPENAI_BASE_URL)
+    return OpenAI(
+        api_key=OPENAI_API_KEY,
+        base_url=OPENAI_BASE_URL,
+        timeout=OPENAI_IMAGE_TIMEOUT_SECONDS,
+    )  # timeout for image operations
 
 
 def _save_image_result(image_data: bytes, prefix: str = "ai_img") -> str:
@@ -44,6 +54,7 @@ def _load_image_as_b64(image_url: str) -> str:
         return image_url.split(",", 1)[1]
     elif image_url.startswith("http"):
         import httpx
+
         resp = httpx.get(image_url, timeout=30)
         resp.raise_for_status()
         return base64.b64encode(resp.content).decode()
@@ -56,6 +67,7 @@ def _load_image_as_b64(image_url: str) -> str:
 
 
 # ── Image Translate ──────────────────────────────────────────────────────
+
 
 def translate_image(req: AIImageTranslateRequest) -> AIImageTranslateResponse:
     """
@@ -125,6 +137,7 @@ def translate_image(req: AIImageTranslateRequest) -> AIImageTranslateResponse:
 
 # ── Image Subject Replace ───────────────────────────────────────────────
 
+
 def replace_image_subject(req: AIImageReplaceRequest) -> AIImageReplaceResponse:
     """
     Replace the subject/background of an image using GPT Image Edit.
@@ -133,9 +146,7 @@ def replace_image_subject(req: AIImageReplaceRequest) -> AIImageReplaceResponse:
     client = _get_image_client()
     b64_data = _load_image_as_b64(req.image_url)
 
-    prompt = (
-        f"Transform this image: {req.prompt}. "
-    )
+    prompt = f"Transform this image: {req.prompt}. "
 
     try:
         import tempfile
@@ -184,6 +195,7 @@ def replace_image_subject(req: AIImageReplaceRequest) -> AIImageReplaceResponse:
 
 # ── Image Generation ────────────────────────────────────────────────────
 
+
 def generate_image(req: AIImageGenerateRequest) -> AIImageGenerateResponse:
     """
     Generate product images from text description using GPT Image Generation.
@@ -201,7 +213,11 @@ def generate_image(req: AIImageGenerateRequest) -> AIImageGenerateResponse:
         parts.append(f"Style: {req.style}")
 
     if parts:
-        prompt = "Professional e-commerce product photo. " + ". ".join(parts) + ". White background, studio lighting, high resolution."
+        prompt = (
+            "Professional e-commerce product photo. "
+            + ". ".join(parts)
+            + ". White background, studio lighting, high resolution."
+        )
     else:
         prompt = "Professional e-commerce product photo with white background, studio lighting, high resolution."
 

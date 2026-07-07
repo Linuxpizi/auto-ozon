@@ -6,7 +6,7 @@ import { apiGet, apiPost, assetUrl } from "./index";
 export { assetUrl };
 
 const IMAGE_PREFIX = "/v1/image";
-const IMAGE_AI_TIMEOUT_MS = 135_000;
+const IMAGE_AI_TIMEOUT_MS = 310_000;
 
 const imageAiRequestOptions = {
   headers: { "X-Request-Timeout-Ms": String(IMAGE_AI_TIMEOUT_MS) },

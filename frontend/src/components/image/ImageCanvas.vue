@@ -430,7 +430,11 @@ function generateMask() {
   tmpCanvas.height = naturalH.value
   const tmpCtx = tmpCanvas.getContext('2d')!
 
-  tmpCtx.fillStyle = '#000000'
+  // OpenAI image-edit mask contract:
+  // - mask PNG must have the exact same width/height as the source image
+  // - fully transparent pixels (alpha = 0) are the editable area
+  // - opaque pixels (alpha = 255) are kept unchanged
+  tmpCtx.fillStyle = 'rgba(0, 0, 0, 1)'
   tmpCtx.fillRect(0, 0, tmpCanvas.width, tmpCanvas.height)
 
   const maskData = ctx.getImageData(0, 0, canvas.width, canvas.height)
@@ -438,10 +442,10 @@ function generateMask() {
 
   for (let i = 0; i < maskData.data.length; i += 4) {
     if (maskData.data[i + 3] > 0) {
-      targetData.data[i] = 255
-      targetData.data[i + 1] = 255
-      targetData.data[i + 2] = 255
-      targetData.data[i + 3] = 255
+      targetData.data[i] = 0
+      targetData.data[i + 1] = 0
+      targetData.data[i + 2] = 0
+      targetData.data[i + 3] = 0
     }
   }
 

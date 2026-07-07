@@ -1,11 +1,17 @@
 """Prompt Engine — template management, routing, rendering, and LLM execution."""
+
 import json
 import logging
 import re
 from typing import Any, Dict, Optional
 from openai import OpenAI
 
-from app.core.config import DEEPSEEK_API_KEY, DEEPSEEK_BASE_URL, DEEPSEEK_MODEL
+from app.core.config import (
+    DEEPSEEK_API_KEY,
+    DEEPSEEK_BASE_URL,
+    DEEPSEEK_MODEL,
+    OPENAI_IMAGE_TIMEOUT_SECONDS,
+)
 from app.models.prompt_template import PromptTemplate
 from app.schemas.prompt_template import (
     TitleOptimizeRequest,
@@ -19,14 +25,18 @@ logger = logging.getLogger(__name__)
 
 # ── LLM Client ──────────────────────────────────────────────────────────
 
+
 def _get_client(model: Optional[str] = None) -> OpenAI:
     return OpenAI(
         api_key=DEEPSEEK_API_KEY,
         base_url=DEEPSEEK_BASE_URL,
+        timeout=OPENAI_IMAGE_TIMEOUT_SECONDS,
     )
 
 
-def _call_llm(system_prompt: str, user_content: str, model: str = DEEPSEEK_MODEL) -> str:
+def _call_llm(
+    system_prompt: str, user_content: str, model: str = DEEPSEEK_MODEL
+) -> str:
     client = _get_client(model)
     response = client.chat.completions.create(
         model=model,
@@ -67,6 +77,7 @@ def _extract_json(text: str) -> Dict[str, Any]:
 # Known parameter placeholders: {{platform}}, {{country}}, {{language}},
 # {{category}}, {{brand}}, {{attribute}}, {{feature}}, {{audience}}, {{tone}}, {{output}}
 
+
 def render_prompt(template: str, params: Dict[str, Any]) -> str:
     """Replace {{key}} placeholders in the template with actual values."""
     result = template
@@ -79,6 +90,7 @@ def render_prompt(template: str, params: Dict[str, Any]) -> str:
 
 
 # ── Input Builders ──────────────────────────────────────────────────────
+
 
 def build_title_input(req: TitleOptimizeRequest) -> Dict[str, Any]:
     """Build the JSON input for title optimization prompt."""
@@ -123,6 +135,7 @@ def build_product_input(req: ProductOptimizeRequest) -> Dict[str, Any]:
 
 # ── Template Router ─────────────────────────────────────────────────────
 
+
 def resolve_template(
     db_session,
     platform: str,
@@ -139,6 +152,7 @@ def resolve_template(
 
 
 # ── Title Optimizer ─────────────────────────────────────────────────────
+
 
 def optimize_title(req: TitleOptimizeRequest, db_session) -> TitleOptimizeResponse:
     """Execute title optimization using the resolved template."""
@@ -173,7 +187,9 @@ def optimize_title(req: TitleOptimizeRequest, db_session) -> TitleOptimizeRespon
     elif "title" in parsed:
         resp.title = parsed["title"]
     if "keywords" in parsed:
-        resp.keywords = parsed["keywords"] if isinstance(parsed["keywords"], list) else []
+        resp.keywords = (
+            parsed["keywords"] if isinstance(parsed["keywords"], list) else []
+        )
     if "reason" in parsed:
         resp.reason = parsed["reason"]
     if "seo_score" in parsed:
@@ -184,7 +200,10 @@ def optimize_title(req: TitleOptimizeRequest, db_session) -> TitleOptimizeRespon
 
 # ── Product Optimizer ───────────────────────────────────────────────────
 
-def optimize_product(req: ProductOptimizeRequest, db_session) -> ProductOptimizeResponse:
+
+def optimize_product(
+    req: ProductOptimizeRequest, db_session
+) -> ProductOptimizeResponse:
     """Execute product optimization using the resolved template."""
     template = resolve_template(
         db_session,

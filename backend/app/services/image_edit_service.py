@@ -1,4 +1,5 @@
 """Unified image editing service — wraps GPT Image Edit API for edit/remove-bg/expand/upscale."""
+
 import base64
 import contextvars
 from dataclasses import dataclass
@@ -54,7 +55,9 @@ from app.schemas.image_edit import (
 
 logger = logging.getLogger(__name__)
 
-_request_id_var: contextvars.ContextVar[str] = contextvars.ContextVar("image_edit_request_id", default="-")
+_request_id_var: contextvars.ContextVar[str] = contextvars.ContextVar(
+    "image_edit_request_id", default="-"
+)
 _openai_semaphore = threading.BoundedSemaphore(max(1, OPENAI_IMAGE_MAX_CONCURRENCY))
 _OPENAI_SEMAPHORE_WAIT_SECONDS = 5
 
@@ -80,7 +83,11 @@ def _json_default(value: Any) -> str:
 def _log_event(level: int, event: str, **fields: Any) -> None:
     """Emit one structured JSON log line with the current image-edit request id."""
     payload = {"rid": _rid(), "event": event, **fields}
-    logger.log(level, "[image_edit] %s", json.dumps(payload, ensure_ascii=False, default=_json_default))
+    logger.log(
+        level,
+        "[image_edit] %s",
+        json.dumps(payload, ensure_ascii=False, default=_json_default),
+    )
 
 
 def _log_exception(event: str, exc: Exception, **fields: Any) -> None:
@@ -91,7 +98,10 @@ def _log_exception(event: str, exc: Exception, **fields: Any) -> None:
         "exc": str(exc),
         **fields,
     }
-    logger.exception("[image_edit] %s", json.dumps(payload, ensure_ascii=False, default=_json_default))
+    logger.exception(
+        "[image_edit] %s",
+        json.dumps(payload, ensure_ascii=False, default=_json_default),
+    )
 
 
 def _elapsed_ms(started_at: float) -> int:
@@ -108,14 +118,24 @@ def _redact_url(url: Optional[str], max_len: int = 180) -> Optional[str]:
     if url.startswith("data:"):
         head = url.split(",", 1)[0]
         return f"{head},<base64:{len(url)} chars>"
-    return url if len(url) <= max_len else f"{url[:max_len]}...<truncated:{len(url)} chars>"
+    return (
+        url
+        if len(url) <= max_len
+        else f"{url[:max_len]}...<truncated:{len(url)} chars>"
+    )
 
 
 def _image_info(data: bytes) -> dict[str, Any]:
     info: dict[str, Any] = {"bytes": len(data), "sha256_12": _sha12(data)}
     try:
         with Image.open(io.BytesIO(data)) as img:
-            info.update({"size": f"{img.width}x{img.height}", "mode": img.mode, "format": img.format})
+            info.update(
+                {
+                    "size": f"{img.width}x{img.height}",
+                    "mode": img.mode,
+                    "format": img.format,
+                }
+            )
     except Exception as exc:
         info.update({"decode_error": f"{exc.__class__.__name__}: {exc}"})
     return info
@@ -145,13 +165,27 @@ def _mask_b64_info(mask_b64: Optional[str]) -> Optional[dict[str, Any]]:
         data = base64.b64decode(raw)
         info = _image_info(data)
         with Image.open(io.BytesIO(data)) as img:
-            gray = img.convert("L")
-            bbox = gray.point(lambda v: 255 if v > 0 else 0).getbbox()
-            extrema = gray.getextrema()
-            info.update({"nonzero_bbox": bbox, "luma_extrema": extrema})
+            rgba = img.convert("RGBA")
+            alpha = rgba.getchannel("A")
+            alpha_extrema = alpha.getextrema()
+            if alpha_extrema[0] < 255:
+                edit_bbox = alpha.point(lambda v: 255 if v == 0 else 0).getbbox()
+            else:
+                gray = rgba.convert("L")
+                edit_bbox = gray.point(lambda v: 255 if v > 127 else 0).getbbox()
+            info.update(
+                {
+                    "edit_bbox": edit_bbox,
+                    "alpha_extrema": alpha_extrema,
+                    "luma_extrema": rgba.convert("L").getextrema(),
+                }
+            )
         return info
     except Exception as exc:
-        return {"decode_error": f"{exc.__class__.__name__}: {exc}", "chars": len(mask_b64)}
+        return {
+            "decode_error": f"{exc.__class__.__name__}: {exc}",
+            "chars": len(mask_b64),
+        }
 
 
 def _openai_error_debug(exc: Exception) -> dict[str, Any]:
@@ -163,6 +197,7 @@ def _openai_error_debug(exc: Exception) -> dict[str, Any]:
         "body": getattr(exc, "body", None),
         "code": getattr(exc, "code", None),
         "type": getattr(exc, "type", None),
+        "cause_chain": _exception_chain_debug(exc),
     }
     response = getattr(exc, "response", None)
     if response is not None:
@@ -170,7 +205,14 @@ def _openai_error_debug(exc: Exception) -> dict[str, Any]:
         debug["response_headers"] = {
             key: value
             for key, value in dict(headers).items()
-            if key.lower() in {"content-type", "x-request-id", "openai-request-id", "cf-ray", "retry-after"}
+            if key.lower()
+            in {
+                "content-type",
+                "x-request-id",
+                "openai-request-id",
+                "cf-ray",
+                "retry-after",
+            }
         }
         try:
             debug["response_json"] = response.json()
@@ -180,6 +222,46 @@ def _openai_error_debug(exc: Exception) -> dict[str, Any]:
             except Exception:
                 pass
     return debug
+
+
+def _exception_chain_debug(exc: Exception) -> list[dict[str, Any]]:
+    """Return exception cause/context chain details for diagnosing transport failures."""
+    chain: list[dict[str, Any]] = []
+    seen: set[int] = set()
+    current: BaseException | None = exc
+
+    while current is not None and id(current) not in seen and len(chain) < 8:
+        seen.add(id(current))
+        chain.append(
+            {
+                "exc_type": current.__class__.__name__,
+                "module": current.__class__.__module__,
+                "message": str(current),
+            }
+        )
+        current = current.__cause__ or current.__context__
+
+    return chain
+
+
+def _is_likely_upstream_gateway_disconnect(exc: Exception) -> bool:
+    """Heuristically detect proxy/upstream gateway disconnects hidden as APIConnectionError."""
+    chain = _exception_chain_debug(exc)
+    haystack = " ".join(
+        f"{item.get('module')} {item.get('exc_type')} {item.get('message')}"
+        for item in chain
+    ).lower()
+    return any(
+        marker in haystack
+        for marker in (
+            "remoteprotocolerror",
+            "server disconnected",
+            "connection reset",
+            "readerror",
+            "network is unreachable",
+            "connection error",
+        )
+    )
 
 
 def _action_debug(action: EditAction) -> dict[str, Any]:
@@ -201,7 +283,11 @@ def _openai_call_fields(kwargs: dict[str, Any]) -> dict[str, Any]:
     prompt = kwargs.get("prompt") or ""
     image_file = kwargs.get("image")
     mask_file = kwargs.get("mask")
-    image_files = image_file if isinstance(image_file, (list, tuple)) else ([image_file] if image_file else [])
+    image_files = (
+        image_file
+        if isinstance(image_file, (list, tuple))
+        else ([image_file] if image_file else [])
+    )
     return {
         "model": kwargs.get("model"),
         "size": kwargs.get("size"),
@@ -218,6 +304,71 @@ def _openai_call_fields(kwargs: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _file_printable_info(file_obj: Any) -> dict[str, Any]:
+    """Return printable metadata for an upload file without consuming it."""
+    info: dict[str, Any] = {
+        "type": file_obj.__class__.__name__,
+        "name": getattr(file_obj, "name", None),
+        "mode": getattr(file_obj, "mode", None),
+        "closed": getattr(file_obj, "closed", None),
+    }
+
+    try:
+        pos = file_obj.tell()
+        info["position"] = pos
+    except Exception as exc:
+        pos = None
+        info["position_error"] = f"{exc.__class__.__name__}: {exc}"
+
+    data: Optional[bytes] = None
+    try:
+        if pos is not None:
+            file_obj.seek(0)
+        data = file_obj.read()
+        if isinstance(data, str):
+            data = data.encode()
+        info["bytes"] = len(data)
+        info["sha256_12"] = _sha12(data)
+        info["image"] = _image_info(data)
+    except Exception as exc:
+        info["read_error"] = f"{exc.__class__.__name__}: {exc}"
+    finally:
+        if pos is not None:
+            try:
+                file_obj.seek(pos)
+            except Exception as exc:
+                info["restore_position_error"] = f"{exc.__class__.__name__}: {exc}"
+
+    return info
+
+
+def _openai_printable_value(value: Any) -> Any:
+    """Convert OpenAI kwargs values to JSON-printable, non-binary debug data."""
+    if value is None or isinstance(value, (str, int, float, bool)):
+        return value
+    if isinstance(value, Path):
+        return str(value)
+    if isinstance(value, (list, tuple)):
+        return [_openai_printable_value(item) for item in value]
+    if isinstance(value, dict):
+        return {str(key): _openai_printable_value(item) for key, item in value.items()}
+    if isinstance(value, (bytes, bytearray)):
+        data = bytes(value)
+        return {
+            "type": type(value).__name__,
+            "bytes": len(data),
+            "sha256_12": _sha12(data),
+        }
+    if hasattr(value, "read"):
+        return _file_printable_info(value)
+    return repr(value)
+
+
+def _openai_printable_kwargs(kwargs: dict[str, Any]) -> dict[str, Any]:
+    """Return every OpenAI images.edit kwarg in a printable form."""
+    return {key: _openai_printable_value(value) for key, value in kwargs.items()}
+
+
 def _call_openai_image_edit(client: OpenAI, operation: str, **kwargs: Any):
     """Call OpenAI image edit with verbose logs, hard timeout and concurrency guard."""
     # Be explicit per request. Some OpenAI SDK/resource paths can otherwise fall
@@ -225,8 +376,22 @@ def _call_openai_image_edit(client: OpenAI, operation: str, **kwargs: Any):
     # longer timeout. Image edits commonly take 30-120s on proxy gateways.
     kwargs.setdefault("timeout", float(OPENAI_IMAGE_TIMEOUT_SECONDS))
     fields = _openai_call_fields(kwargs)
+    printable_kwargs = _openai_printable_kwargs(kwargs)
     debug_files = _persist_openai_request_files(operation, kwargs)
-    _log_event(logging.INFO, "openai.images.edit.start", operation=operation, debug_files=debug_files, **fields)
+    _log_event(
+        logging.INFO,
+        "openai.images.edit.kwargs",
+        operation=operation,
+        kwargs=printable_kwargs,
+    )
+    _log_event(
+        logging.INFO,
+        "openai.images.edit.start",
+        operation=operation,
+        debug_files=debug_files,
+        request=printable_kwargs,
+        **fields,
+    )
     started_at = time.perf_counter()
     acquired = _openai_semaphore.acquire(timeout=_OPENAI_SEMAPHORE_WAIT_SECONDS)
     if not acquired:
@@ -253,15 +418,24 @@ def _call_openai_image_edit(client: OpenAI, operation: str, **kwargs: Any):
             data_count=len(data),
             first_has_b64=bool(getattr(first, "b64_json", None)) if first else False,
             first_has_url=bool(getattr(first, "url", None)) if first else False,
-            first_revised_prompt=getattr(first, "revised_prompt", None) if first else None,
+            first_revised_prompt=(
+                getattr(first, "revised_prompt", None) if first else None
+            ),
         )
         return result
     except OpenAIError as exc:
+        elapsed_ms = _elapsed_ms(started_at)
         _log_exception(
             "openai.images.edit.failed",
             exc,
             operation=operation,
-            elapsed_ms=_elapsed_ms(started_at),
+            elapsed_ms=elapsed_ms,
+            configured_timeout_seconds=OPENAI_IMAGE_TIMEOUT_SECONDS,
+            likely_upstream_gateway_disconnect=(
+                isinstance(exc, APIConnectionError)
+                and elapsed_ms < (OPENAI_IMAGE_TIMEOUT_SECONDS * 1000 * 0.8)
+                and _is_likely_upstream_gateway_disconnect(exc)
+            ),
             request=fields,
             openai_error=_openai_error_debug(exc),
         )
@@ -276,6 +450,7 @@ class ImageEditServiceError(RuntimeError):
     def __init__(self, message: str, status_code: int = 500) -> None:
         super().__init__(message)
         self.status_code = status_code
+
 
 # ── Directories ─────────────────────────────────────────────────────────
 STATIC_DIR = Path(__file__).resolve().parent.parent / "static"
@@ -297,7 +472,9 @@ def _safe_debug_part(value: str) -> str:
     return cleaned.strip("_")[:40] or "unknown"
 
 
-def _copy_upload_file_for_debug(file_obj: Any, operation: str, kind: str) -> Optional[dict[str, Any]]:
+def _copy_upload_file_for_debug(
+    file_obj: Any, operation: str, kind: str
+) -> Optional[dict[str, Any]]:
     """Persist an upload file object without changing its current read position."""
     if not file_obj:
         return None
@@ -342,7 +519,9 @@ def _copy_upload_file_for_debug(file_obj: Any, operation: str, kind: str) -> Opt
     }
 
 
-def _persist_openai_request_files(operation: str, kwargs: dict[str, Any]) -> dict[str, Any]:
+def _persist_openai_request_files(
+    operation: str, kwargs: dict[str, Any]
+) -> dict[str, Any]:
     """Save the exact image/mask files sent to OpenAI for local debugging."""
     try:
         image_arg = kwargs.get("image")
@@ -355,11 +534,31 @@ def _persist_openai_request_files(operation: str, kwargs: dict[str, Any]) -> dic
             ],
             "mask": _copy_upload_file_for_debug(kwargs.get("mask"), operation, "mask"),
         }
-        _log_event(logging.INFO, "openai.images.edit.debug_files_saved", operation=operation, files=saved)
+        _log_event(
+            logging.INFO,
+            "openai.images.edit.debug_files_saved",
+            operation=operation,
+            files=saved,
+        )
         return saved
     except Exception as exc:
-        _log_exception("openai.images.edit.debug_files_save_failed", exc, operation=operation)
+        _log_exception(
+            "openai.images.edit.debug_files_save_failed", exc, operation=operation
+        )
         return {"error": f"{exc.__class__.__name__}: {exc}"}
+
+
+def _cache_client() -> httpx.Client:
+    return httpx.Client(
+        timeout=httpx.Timeout(
+            timeout=OPENAI_IMAGE_TIMEOUT_SECONDS,
+            connect=30,
+            read=OPENAI_IMAGE_TIMEOUT_SECONDS,
+            write=OPENAI_IMAGE_TIMEOUT_SECONDS,
+            pool=OPENAI_IMAGE_TIMEOUT_SECONDS,
+        ),
+        trust_env=False,
+    )
 
 
 def _get_client() -> OpenAI:
@@ -374,25 +573,31 @@ def _get_client() -> OpenAI:
         max_concurrency=OPENAI_IMAGE_MAX_CONCURRENCY,
     )
     if not OPENAI_API_KEY:
-        _log_event(logging.ERROR, "openai.client.missing_api_key", base_url=OPENAI_BASE_URL, model=OPENAI_IMAGE_MODEL)
+        _log_event(
+            logging.ERROR,
+            "openai.client.missing_api_key",
+            base_url=OPENAI_BASE_URL,
+            model=OPENAI_IMAGE_MODEL,
+        )
         raise ImageEditServiceError(
             "OpenAI 图片服务未配置 OPENAI_API_KEY，请先检查 backend/.env。",
             status_code=503,
         )
     if not OPENAI_IMAGE_MODEL:
-        _log_event(logging.ERROR, "openai.client.missing_model", base_url=OPENAI_BASE_URL)
+        _log_event(
+            logging.ERROR, "openai.client.missing_model", base_url=OPENAI_BASE_URL
+        )
         raise ImageEditServiceError(
             "OpenAI 图片服务未配置 OPENAI_IMAGE_MODEL，请先检查 backend/.env。",
             status_code=503,
         )
-    timeout = httpx.Timeout(
+    return OpenAI(
+        api_key=OPENAI_API_KEY,
+        base_url=OPENAI_BASE_URL,
+        http_client=_cache_client(),
         timeout=OPENAI_IMAGE_TIMEOUT_SECONDS,
-        connect=min(15, OPENAI_IMAGE_TIMEOUT_SECONDS),
-        read=OPENAI_IMAGE_TIMEOUT_SECONDS,
-        write=min(30, OPENAI_IMAGE_TIMEOUT_SECONDS),
-        pool=min(15, OPENAI_IMAGE_TIMEOUT_SECONDS),
+        max_retries=0,
     )
-    return OpenAI(api_key=OPENAI_API_KEY, base_url=OPENAI_BASE_URL, timeout=timeout, max_retries=0)
 
 
 def _extract_openai_message(exc: Exception) -> str:
@@ -408,7 +613,9 @@ def _extract_openai_message(exc: Exception) -> str:
         try:
             data = response.json()
             if isinstance(data, dict):
-                error = data.get("error") if isinstance(data.get("error"), dict) else data
+                error = (
+                    data.get("error") if isinstance(data.get("error"), dict) else data
+                )
                 code = error.get("code") or error.get("type")
                 message = error.get("message") or str(exc)
                 return f"{code}: {message}" if code else message
@@ -448,14 +655,30 @@ def _raise_openai_error(operation: str, exc: OpenAIError) -> None:
     elif isinstance(exc, NotFoundError):
         hint = f"模型或接口不存在，请检查 OPENAI_IMAGE_MODEL={OPENAI_IMAGE_MODEL!r} 是否被当前中转站支持。"
     elif isinstance(exc, BadRequestError):
-        hint = "请求参数不被图片接口接受，请重点检查模型、size、mask 尺寸/格式和 prompt。"
+        hint = (
+            "请求参数不被图片接口接受，请重点检查模型、size、mask 尺寸/格式和 prompt。"
+        )
     elif isinstance(exc, RateLimitError):
         hint = "图片接口限流或额度不足，请稍后重试或检查中转站额度。"
-    elif isinstance(exc, (APIConnectionError, APITimeoutError)):
+    elif isinstance(exc, APIConnectionError) and _is_likely_upstream_gateway_disconnect(
+        exc
+    ):
+        hint = (
+            "图片服务连接被上游/中转站网关提前断开。后端与 OpenAI SDK 已配置等待 "
+            f"{OPENAI_IMAGE_TIMEOUT_SECONDS}s；如果日志 elapsed_ms 约 60s，说明不是本项目 60s 超时，"
+            "而是 OPENAI_BASE_URL 对应的中转站、CDN、负载均衡或其上游连接有约 60s 的网关限制。"
+            "请更换支持长耗时图片编辑的中转站/模型通道，或让中转站把 read/proxy timeout 调到 300s 以上。"
+        )
+    elif isinstance(exc, APITimeoutError):
         hint = (
             f"图片服务处理超时，当前后端等待 {OPENAI_IMAGE_TIMEOUT_SECONDS}s。"
             "图片编辑/局部重绘可能需要更久；如果上游最终能出图，请调大 backend/.env 的 "
             "OPENAI_IMAGE_TIMEOUT_SECONDS（例如 180 或 300）后重启后端。"
+        )
+    elif isinstance(exc, APIConnectionError):
+        hint = (
+            "图片服务连接失败。后端请求超时配置已应用到 OpenAI SDK；"
+            "请检查网络、中转站可用性、OPENAI_BASE_URL，以及中转站是否支持图片编辑接口的长连接。"
         )
     else:
         hint = "图片服务返回异常，请检查中转站日志、模型配置和请求参数。"
@@ -523,7 +746,11 @@ def _load_image_bytes(image_url: str) -> bytes:
             from urllib.parse import urlparse, unquote
 
             parsed = urlparse(image_url)
-            if parsed.hostname in {"127.0.0.1", "localhost", "0.0.0.0"} and parsed.path.startswith("/static/"):
+            if parsed.hostname in {
+                "127.0.0.1",
+                "localhost",
+                "0.0.0.0",
+            } and parsed.path.startswith("/static/"):
                 source = "local_static_http"
                 rel = unquote(parsed.path).removeprefix("/static/")
                 filepath = STATIC_DIR / rel
@@ -531,7 +758,9 @@ def _load_image_bytes(image_url: str) -> bytes:
                 if filepath.is_file():
                     data = filepath.read_bytes()
                 else:
-                    raise FileNotFoundError(f"Cannot resolve local static URL: {image_url} (tried {filepath})")
+                    raise FileNotFoundError(
+                        f"Cannot resolve local static URL: {image_url} (tried {filepath})"
+                    )
             else:
                 import httpx
 
@@ -553,7 +782,9 @@ def _load_image_bytes(image_url: str) -> bytes:
                 if fallback.is_file():
                     data = fallback.read_bytes()
                 else:
-                    raise FileNotFoundError(f"Cannot resolve static path: {image_url} (tried {STATIC_DIR / rel}, {fallback})")
+                    raise FileNotFoundError(
+                        f"Cannot resolve static path: {image_url} (tried {STATIC_DIR / rel}, {fallback})"
+                    )
         elif os.path.isfile(image_url):
             source = "filesystem"
             resolved_path = Path(image_url)
@@ -572,7 +803,12 @@ def _load_image_bytes(image_url: str) -> bytes:
         )
         return data
     except Exception as exc:
-        _log_exception("image.load.failed", exc, image_url=safe_url, elapsed_ms=_elapsed_ms(started_at))
+        _log_exception(
+            "image.load.failed",
+            exc,
+            image_url=safe_url,
+            elapsed_ms=_elapsed_ms(started_at),
+        )
         raise
 
 
@@ -661,9 +897,13 @@ def _resolve_output_size(
     - Backend owns all parsing, fallback and compatibility behavior.
     - OpenAI receives only one of its supported edit canvas sizes.
     """
-    target_w, target_h = _resolve_target_size(preset, custom_w, custom_h, resolution, size_ratio)
+    target_w, target_h = _resolve_target_size(
+        preset, custom_w, custom_h, resolution, size_ratio
+    )
     gpt_size = _resolve_gpt_size(preset, target_w, target_h)
-    return ResolvedOutputSize(target_width=target_w, target_height=target_h, openai_size=gpt_size)
+    return ResolvedOutputSize(
+        target_width=target_w, target_height=target_h, openai_size=gpt_size
+    )
 
 
 def _resolve_target_size(
@@ -685,7 +925,9 @@ def _resolve_target_size(
     parsed_ratio = _parse_ratio_pair(size_ratio) if size_ratio else None
     if parsed_resolution or parsed_ratio:
         base = parsed_resolution or max(p["width"], p["height"])
-        ratio_w, ratio_h = parsed_ratio or _parse_ratio_pair(p["ratio"]) or (p["width"], p["height"])
+        ratio_w, ratio_h = (
+            parsed_ratio or _parse_ratio_pair(p["ratio"]) or (p["width"], p["height"])
+        )
         if ratio_w >= ratio_h:
             return base, max(1, round(base * ratio_h / ratio_w))
         return max(1, round(base * ratio_w / ratio_h)), base
@@ -698,19 +940,116 @@ def _result_to_bytes(result) -> bytes:
     img_data = result.data[0]
     if hasattr(img_data, "b64_json") and img_data.b64_json:
         data = base64.b64decode(img_data.b64_json)
-        _log_event(logging.INFO, "openai.result.bytes", source="b64_json", image=_image_info(data), elapsed_ms=_elapsed_ms(started_at))
+        _log_event(
+            logging.INFO,
+            "openai.result.bytes",
+            source="b64_json",
+            image=_image_info(data),
+            elapsed_ms=_elapsed_ms(started_at),
+        )
         return data
     elif hasattr(img_data, "url") and img_data.url:
         import httpx
 
-        _log_event(logging.INFO, "openai.result.download.start", url=_redact_url(img_data.url))
+        _log_event(
+            logging.INFO, "openai.result.download.start", url=_redact_url(img_data.url)
+        )
         resp = httpx.get(img_data.url, timeout=30)
         resp.raise_for_status()
         data = resp.content
-        _log_event(logging.INFO, "openai.result.bytes", source="url", image=_image_info(data), elapsed_ms=_elapsed_ms(started_at))
+        _log_event(
+            logging.INFO,
+            "openai.result.bytes",
+            source="url",
+            image=_image_info(data),
+            elapsed_ms=_elapsed_ms(started_at),
+        )
         return data
     _log_event(logging.ERROR, "openai.result.empty", result_type=type(result).__name__)
     raise ValueError("API returned no image data")
+
+
+def _resize_image_bytes_to_target(
+    image_bytes: bytes,
+    target_width: int,
+    target_height: int,
+) -> bytes:
+    """Crop/resize image bytes as PNG at the exact business output size.
+
+    OpenAI only accepts a small set of edit canvas sizes and some gateways may
+    return an image whose pixel dimensions differ from both the requested
+    OpenAI canvas and the user's business selection. The UI selection
+    (resolution + ratio, e.g. 1k + 3:4 => 750x1000) is the final contract, so
+    every AI result is normalized before saving/versioning.
+
+    The conversion is intentionally cover-style: first center-crop to the
+    requested aspect ratio, then resize to the exact requested pixels. This
+    guarantees the final file is exactly 1k/2k/4k-derived dimensions without
+    stretching the generated content out of proportion.
+    """
+    if target_width <= 0 or target_height <= 0:
+        return image_bytes
+
+    started_at = time.perf_counter()
+    with Image.open(io.BytesIO(image_bytes)) as img:
+        original_size = img.size
+        if original_size == (target_width, target_height):
+            _log_event(
+                logging.INFO,
+                "image.output_size.already_target",
+                target_size=f"{target_width}x{target_height}",
+                image=_image_info(image_bytes),
+                elapsed_ms=_elapsed_ms(started_at),
+            )
+            return image_bytes
+
+        target_ratio = target_width / target_height
+        source_ratio = img.width / img.height
+        crop_left = 0
+        crop_top = 0
+        crop_right = img.width
+        crop_bottom = img.height
+
+        if source_ratio > target_ratio:
+            crop_width = max(1, round(img.height * target_ratio))
+            crop_left = max(0, (img.width - crop_width) // 2)
+            crop_right = min(img.width, crop_left + crop_width)
+        elif source_ratio < target_ratio:
+            crop_height = max(1, round(img.width / target_ratio))
+            crop_top = max(0, (img.height - crop_height) // 2)
+            crop_bottom = min(img.height, crop_top + crop_height)
+
+        has_transparency = img.mode in {"RGBA", "LA"} or (
+            img.mode == "P" and "transparency" in img.info
+        )
+        target_mode = "RGBA" if has_transparency else "RGB"
+        cropped = img.crop((crop_left, crop_top, crop_right, crop_bottom))
+        resized = cropped.convert(target_mode).resize(
+            (target_width, target_height), Image.Resampling.LANCZOS
+        )
+        buf = io.BytesIO()
+        resized.save(buf, format="PNG")
+        data = buf.getvalue()
+
+    with Image.open(io.BytesIO(data)) as verified:
+        if verified.size != (target_width, target_height):
+            raise ImageEditServiceError(
+                "图片尺寸转换失败："
+                f"期望 {target_width}x{target_height}，"
+                f"实际 {verified.width}x{verified.height}。",
+                status_code=500,
+            )
+
+    _log_event(
+        logging.INFO,
+        "image.output_size.normalized",
+        original_size=f"{original_size[0]}x{original_size[1]}",
+        target_size=f"{target_width}x{target_height}",
+        crop_box=f"{crop_left},{crop_top},{crop_right},{crop_bottom}",
+        image=_image_info(data),
+        elapsed_ms=_elapsed_ms(started_at),
+    )
+    return data
 
 
 def _require_prompt(prompt: Optional[str], operation: str) -> str:
@@ -758,7 +1097,7 @@ def _prepare_image_and_mask(
     mask_out: Optional[bytes] = None
     if mask_b64:
         raw = mask_b64.split(",", 1)[1] if mask_b64.startswith("data:") else mask_b64
-        mask_img = Image.open(io.BytesIO(base64.b64decode(raw))).convert("L")
+        mask_img = Image.open(io.BytesIO(base64.b64decode(raw))).convert("RGBA")
 
         with Image.open(io.BytesIO(image_bytes)) as src:
             original_size = src.size
@@ -769,16 +1108,28 @@ def _prepare_image_and_mask(
         if mask_canvas.size != original_size:
             mask_canvas = mask_canvas.resize(original_size, Image.NEAREST)
 
-        # OpenAI expects an RGBA mask where transparent = edit area. Convert the
-        # white=edit convention into alpha: white(255) -> alpha 0 (edit),
-        # black(0) -> alpha 255 (keep).
-        # Keep RGB as the user's conventional white=edit / black=keep mask,
-        # and set alpha for OpenAI semantics: transparent=edit, opaque=keep.
-        # This works with gateways that inspect either alpha or RGB channels.
+        # OpenAI SDK 2.44 documents `mask` as:
+        #   "An additional image whose fully transparent areas (e.g. where
+        #    alpha is zero) indicate where `image` should be edited. ... Must
+        #    be a valid PNG file, less than 4MB, and have the same dimensions
+        #    as `image`."
+        # Therefore the generated upload mask must express edit/keep ONLY via
+        # alpha. RGB is intentionally fixed and not used as a secondary
+        # white/black hint.
+        source_alpha = mask_canvas.getchannel("A")
+        if source_alpha.getextrema()[0] < 255:
+            # Already an OpenAI-style alpha mask: alpha 0 means edit; any
+            # non-zero alpha means keep because the API wording requires fully
+            # transparent areas.
+            alpha = source_alpha.point(lambda v: 0 if v == 0 else 255)
+        else:
+            # Internal UI/bbox masks are opaque black/white PNGs where white
+            # means selected edit area and black means keep. Convert that
+            # project convention into OpenAI's official alpha convention.
+            luminance = mask_canvas.convert("L")
+            alpha = luminance.point(lambda v: 0 if v > 127 else 255)
+
         rgba_mask = Image.new("RGBA", original_size, (0, 0, 0, 255))
-        rgb_mask = Image.merge("RGB", (mask_canvas, mask_canvas, mask_canvas))
-        rgba_mask.paste(rgb_mask, (0, 0))
-        alpha = mask_canvas.point(lambda v: 0 if v > 127 else 255)
         rgba_mask.putalpha(alpha)
 
         mask_buf = io.BytesIO()
@@ -816,25 +1167,43 @@ def edit_image(req: ImageEditRequest) -> ImageEditResponse:
         client = _get_client()
         image_bytes = _load_image_bytes(req.image_url)
         prompt = _require_prompt(req.prompt, "图片编辑")
-        reference_bytes = _load_image_bytes(req.reference_image) if req.reference_image else None
-        output_size = _resolve_output_size(req.output_preset, req.custom_width, req.custom_height, req.resolution, req.size_ratio)
+        reference_bytes = (
+            _load_image_bytes(req.reference_image) if req.reference_image else None
+        )
+        output_size = _resolve_output_size(
+            req.output_preset,
+            req.custom_width,
+            req.custom_height,
+            req.resolution,
+            req.size_ratio,
+        )
         target_w, target_h = output_size.target_width, output_size.target_height
         gpt_size = output_size.openai_size
         final_prompt = _build_edit_prompt(prompt, bool(reference_bytes), bool(req.mask))
 
         # Do not alter the input image. Only output size selection is adapted to
         # OpenAI; the image bytes sent below stay exactly as loaded.
-        prepared_image, prepared_mask = _prepare_image_and_mask(image_bytes, req.mask, gpt_size)
-        prepared_reference = _prepare_image_for_openai(reference_bytes, gpt_size) if reference_bytes else None
+        prepared_image, prepared_mask = _prepare_image_and_mask(
+            image_bytes, req.mask, gpt_size
+        )
+        prepared_reference = (
+            _prepare_image_for_openai(reference_bytes, gpt_size)
+            if reference_bytes
+            else None
+        )
 
-        with tempfile.NamedTemporaryFile(suffix=_image_suffix_from_bytes(prepared_image), delete=False) as tmp:
+        with tempfile.NamedTemporaryFile(
+            suffix=_image_suffix_from_bytes(prepared_image), delete=False
+        ) as tmp:
             tmp.write(prepared_image)
             tmp_path = tmp.name
 
         reference_path = None
         reference_file = None
         if prepared_reference:
-            reference_path = tmp_path + f"_reference{_image_suffix_from_bytes(prepared_reference)}"
+            reference_path = (
+                tmp_path + f"_reference{_image_suffix_from_bytes(prepared_reference)}"
+            )
             with open(reference_path, "wb") as f:
                 f.write(prepared_reference)
             reference_file = open(reference_path, "rb")
@@ -850,7 +1219,13 @@ def edit_image(req: ImageEditRequest) -> ImageEditResponse:
         try:
             with open(tmp_path, "rb") as img_file:
                 image_arg = [img_file, reference_file] if reference_file else img_file
-                kwargs = dict(model=OPENAI_IMAGE_MODEL, image=image_arg, prompt=final_prompt, n=1, size=gpt_size)
+                kwargs = dict(
+                    model=OPENAI_IMAGE_MODEL,
+                    image=image_arg,
+                    prompt=final_prompt,
+                    n=1,
+                    size=gpt_size,
+                )
                 # Keep service calls aligned with the verified smoke test and
                 # avoid proxy defaults that may return a temporary URL instead
                 # of inline bytes.
@@ -860,8 +1235,9 @@ def edit_image(req: ImageEditRequest) -> ImageEditResponse:
                     kwargs["mask"] = mask_file
                 result = _call_openai_image_edit(client, "图片编辑", **kwargs)
 
-
-            final_bytes = _result_to_bytes(result)
+            final_bytes = _resize_image_bytes_to_target(
+                _result_to_bytes(result), target_w, target_h
+            )
             result_url = _save_image(final_bytes, prefix="edit")
 
             from app.services.image_version_service import create_version
@@ -898,8 +1274,6 @@ def edit_image(req: ImageEditRequest) -> ImageEditResponse:
 
 # ── Multi-step Composite Edit Chain ────────────────────────────────────
 
-IMAGE_QUALITY = 90
-
 
 def _bbox_to_mask(image_bytes: bytes, bbox: dict) -> str:
     """Convert bbox {x1,y1,x2,y2} to a white-on-black base64 mask.
@@ -934,7 +1308,9 @@ def _bbox_to_mask(image_bytes: bytes, bbox: dict) -> str:
     y1, y2 = max(0, y1), min(h, y2)
 
     if x1 >= x2 or y1 >= y2:
-        raise ValueError(f"Invalid bbox after normalization/clamp: {bbox} for image size {w}x{h}")
+        raise ValueError(
+            f"Invalid bbox after normalization/clamp: {bbox} for image size {w}x{h}"
+        )
 
     mask = Image.new("L", (w, h), 0)
     draw = ImageDraw.Draw(mask)
@@ -956,25 +1332,44 @@ def _resolve_mask(image_bytes: bytes, action: EditAction) -> Optional[str]:
 
 
 def _composite_masks(mask_uris: list[str], image_bytes: bytes) -> str:
-    """OR-composite multiple base64 mask images into one mask.
-    All white pixels from any mask become white in the output.
+    """OR-composite multiple base64 mask images into one OpenAI alpha mask.
+
+    Supports both mask conventions used by this project:
+    - official/OpenAI alpha masks: alpha 0 means edit, alpha 255 means keep;
+    - legacy UI/bbox masks: opaque white means edit, opaque black means keep.
+
+    The returned PNG uses the official OpenAI contract: transparent edit areas
+    over an opaque keep area, with dimensions exactly matching ``image_bytes``.
     Returns a data-URI base64 PNG string."""
     base_size = Image.open(io.BytesIO(image_bytes)).size
     bg = Image.new("L", base_size, 0)
     for uri in mask_uris:
         b64_data = uri.split(",", 1)[1] if uri.startswith("data:") else uri
         mask_data = base64.b64decode(b64_data)
-        mask_img = Image.open(io.BytesIO(mask_data)).convert("L")
+        mask_img = Image.open(io.BytesIO(mask_data)).convert("RGBA")
         # Frontend brush masks and backend-generated bbox masks may have
         # different dimensions. Normalize every mask to the current image before
         # compositing, otherwise Image.composite/ImageChops will fail with
         # "images do not match" during mixed brush + rect chains.
         if mask_img.size != base_size:
             mask_img = mask_img.resize(base_size, Image.NEAREST)
-        # OR composite: pixel = max(existing, this_mask)
-        bg = ImageChops.lighter(bg, mask_img)
+
+        source_alpha = mask_img.getchannel("A")
+        if source_alpha.getextrema()[0] < 255:
+            # Official alpha mask: only fully transparent pixels are edit area.
+            edit_area = source_alpha.point(lambda v: 255 if v == 0 else 0)
+        else:
+            # Legacy/bbox convention: opaque white pixels are edit area.
+            edit_area = mask_img.convert("L").point(lambda v: 255 if v > 127 else 0)
+
+        # OR composite edit areas: pixel = max(existing, this_mask)
+        bg = ImageChops.lighter(bg, edit_area)
+
+    alpha = bg.point(lambda v: 0 if v > 0 else 255)
+    out = Image.new("RGBA", base_size, (0, 0, 0, 255))
+    out.putalpha(alpha)
     buf = io.BytesIO()
-    bg.save(buf, format="PNG")
+    out.save(buf, format="PNG")
     b64 = base64.b64encode(buf.getvalue()).decode()
     return f"data:image/png;base64,{b64}"
 
@@ -992,7 +1387,9 @@ def _chain_action_label(action: EditAction) -> str:
     return labels.get(action.type, action.type)
 
 
-def _raise_chain_step_error(step: int, total: int, action: EditAction, exc: Exception) -> None:
+def _raise_chain_step_error(
+    step: int, total: int, action: EditAction, exc: Exception
+) -> None:
     """Raise a clear edit-chain error without losing the original exception."""
     status_code = getattr(exc, "status_code", 500)
     raise ImageEditServiceError(
@@ -1053,7 +1450,9 @@ def edit_chain(req: EditChainRequest) -> EditChainResponse:
     This drastically reduces AI API calls: 3× rect = 1 call instead of 3.
     """
     if not req.actions:
-        raise ImageEditServiceError("组合操作失败：至少需要一个操作步骤。", status_code=400)
+        raise ImageEditServiceError(
+            "组合操作失败：至少需要一个操作步骤。", status_code=400
+        )
 
     chain_started_at = time.perf_counter()
     _log_event(
@@ -1069,7 +1468,13 @@ def edit_chain(req: EditChainRequest) -> EditChainResponse:
     )
 
     current_image_url = req.image_url
-    output_size = _resolve_output_size(req.output_preset, req.custom_width, req.custom_height, req.resolution, req.size_ratio)
+    output_size = _resolve_output_size(
+        req.output_preset,
+        req.custom_width,
+        req.custom_height,
+        req.resolution,
+        req.size_ratio,
+    )
     target_w, target_h = output_size.target_width, output_size.target_height
 
     # ── Step 1: Compile the execution plan ──────────────────────────────
@@ -1139,8 +1544,10 @@ def edit_chain(req: EditChainRequest) -> EditChainResponse:
                 )
                 logger.info(
                     "EditChain mask-batch %d/%d: %d actions (types=%s)",
-                    step_start, total,
-                    len(batch), [a.type for a in batch],
+                    step_start,
+                    total,
+                    len(batch),
+                    [a.type for a in batch],
                 )
 
                 try:
@@ -1173,7 +1580,8 @@ def edit_chain(req: EditChainRequest) -> EditChainResponse:
                         merged_prompt = _merge_prompts(batch)
                         logger.info(
                             "  → 1 AI call with %d mask regions: %s",
-                            len(mask_uris), merged_prompt[:80],
+                            len(mask_uris),
+                            merged_prompt[:80],
                         )
                         edit_req = ImageEditRequest(
                             image_url=current_image_url,
@@ -1185,35 +1593,7 @@ def edit_chain(req: EditChainRequest) -> EditChainResponse:
                             custom_height=req.custom_height,
                             mask=composite_mask,
                         )
-                        try:
-                            edit_resp = edit_image(edit_req)
-                        except Exception as mask_exc:
-                            _log_exception(
-                                "edit_chain.mask_edit.failed_retry_without_mask",
-                                mask_exc,
-                                step_start=step_start,
-                                step_end=step_counter,
-                                mask_regions=len(mask_uris),
-                                fallback="prompt_only",
-                            )
-                            fallback_req = ImageEditRequest(
-                                image_url=current_image_url,
-                                prompt=merged_prompt,
-                                output_preset=req.output_preset,
-                                resolution=req.resolution,
-                                size_ratio=req.size_ratio,
-                                custom_width=req.custom_width,
-                                custom_height=req.custom_height,
-                            )
-                            edit_resp = edit_image(fallback_req)
-                            _log_event(
-                                logging.WARNING,
-                                "edit_chain.mask_edit.fallback_success",
-                                step_start=step_start,
-                                step_end=step_counter,
-                                mask_regions=len(mask_uris),
-                                result_url=edit_resp.result_url,
-                            )
+                        edit_resp = edit_image(edit_req)
                         current_image_url = edit_resp.result_url
                         ai_calls += 1
                     _log_event(
@@ -1235,7 +1615,9 @@ def edit_chain(req: EditChainRequest) -> EditChainResponse:
                         step_end=step_counter,
                         elapsed_ms=_elapsed_ms(step_started_at),
                     )
-                    failing_action = next((a for a in batch if _is_mask_action(a.type)), batch[0])
+                    failing_action = next(
+                        (a for a in batch if _is_mask_action(a.type)), batch[0]
+                    )
                     _raise_chain_step_error(step_start, total, failing_action, e)
 
             elif plan_item["type"] == "single":
@@ -1250,7 +1632,13 @@ def edit_chain(req: EditChainRequest) -> EditChainResponse:
                     total=total,
                     action=_action_debug(action),
                 )
-                logger.info("EditChain step %d/%d: type=%s prompt=%s", step_counter, total, action.type, action.prompt or "")
+                logger.info(
+                    "EditChain step %d/%d: type=%s prompt=%s",
+                    step_counter,
+                    total,
+                    action.type,
+                    action.prompt or "",
+                )
 
                 try:
                     if action.type in ("prompt", "remove_bg", "expand", "upscale"):
@@ -1274,7 +1662,9 @@ def edit_chain(req: EditChainRequest) -> EditChainResponse:
                         ai_calls += 1
 
                     else:
-                        logger.warning("EditChain unknown action type: %s — skipping", action.type)
+                        logger.warning(
+                            "EditChain unknown action type: %s — skipping", action.type
+                        )
                     _log_event(
                         logging.INFO,
                         "edit_chain.step.success",
@@ -1299,7 +1689,9 @@ def edit_chain(req: EditChainRequest) -> EditChainResponse:
                     _raise_chain_step_error(step_counter, total, action, e)
 
         # ── Save final result as a version ──────────────────────────────────
-        final_bytes = _load_image_bytes(current_image_url)
+        final_bytes = _resize_image_bytes_to_target(
+            _load_image_bytes(current_image_url), target_w, target_h
+        )
         result_url = _save_image(final_bytes, prefix="chain")
 
         from app.services.image_version_service import create_version
@@ -1372,7 +1764,13 @@ def expand_image(req: ImageExpandRequest) -> ImageExpandResponse:
     try:
         client = _get_client()
         image_bytes = _load_image_bytes(req.image_url)
-        output_size = _resolve_output_size(req.output_preset, req.custom_width, req.custom_height, req.resolution, req.size_ratio)
+        output_size = _resolve_output_size(
+            req.output_preset,
+            req.custom_width,
+            req.custom_height,
+            req.resolution,
+            req.size_ratio,
+        )
         target_w, target_h = output_size.target_width, output_size.target_height
 
         # Calculate expansion sizes
@@ -1384,7 +1782,9 @@ def expand_image(req: ImageExpandRequest) -> ImageExpandResponse:
 
         prepared_image, _ = _prepare_image_and_mask(image_bytes, None, gpt_size)
 
-        with tempfile.NamedTemporaryFile(suffix=_image_suffix_from_bytes(prepared_image), delete=False) as tmp:
+        with tempfile.NamedTemporaryFile(
+            suffix=_image_suffix_from_bytes(prepared_image), delete=False
+        ) as tmp:
             tmp.write(prepared_image)
             tmp_path = tmp.name
 
@@ -1402,7 +1802,9 @@ def expand_image(req: ImageExpandRequest) -> ImageExpandResponse:
                     response_format="b64_json",
                 )
 
-            final_bytes = _result_to_bytes(result)
+            final_bytes = _resize_image_bytes_to_target(
+                _result_to_bytes(result), target_w, target_h
+            )
             result_url = _save_image(final_bytes, prefix="expand")
 
             from app.services.image_version_service import create_version
@@ -1442,13 +1844,21 @@ def upscale_image(req: ImageUpscaleRequest) -> ImageUpscaleResponse:
 
         upscale_prompt = _require_prompt(req.prompt, "高清修复")
 
-        output_size = _resolve_output_size(req.output_preset or "ozon_detail_sq", req.custom_width, req.custom_height, req.resolution, req.size_ratio)
+        output_size = _resolve_output_size(
+            req.output_preset or "ozon_detail_sq",
+            req.custom_width,
+            req.custom_height,
+            req.resolution,
+            req.size_ratio,
+        )
         target_w, target_h = output_size.target_width, output_size.target_height
         gpt_size = output_size.openai_size
 
         prepared_image, _ = _prepare_image_and_mask(image_bytes, None, gpt_size)
 
-        with tempfile.NamedTemporaryFile(suffix=_image_suffix_from_bytes(prepared_image), delete=False) as tmp:
+        with tempfile.NamedTemporaryFile(
+            suffix=_image_suffix_from_bytes(prepared_image), delete=False
+        ) as tmp:
             tmp.write(prepared_image)
             tmp_path = tmp.name
 
@@ -1466,7 +1876,9 @@ def upscale_image(req: ImageUpscaleRequest) -> ImageUpscaleResponse:
                     response_format="b64_json",
                 )
 
-            final_bytes = _result_to_bytes(result)
+            final_bytes = _resize_image_bytes_to_target(
+                _result_to_bytes(result), target_w, target_h
+            )
             result_url = _save_image(final_bytes, prefix="upscale")
             final_w, final_h = target_w, target_h
 

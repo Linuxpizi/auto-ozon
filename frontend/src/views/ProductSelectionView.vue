@@ -336,7 +336,7 @@
                           :cascade="false"
                           :pattern="editCategorySearchPattern || undefined"
                           :filter="filterCategoryTree"
-                          @update:selected-keys="onEditCategoryTreeSelect"
+                          @update:selected-keys="onCategoryTreeSelect"
                           @update:expanded-keys="onCategoryTreeExpand"
                         />
                       </div>
@@ -749,28 +749,23 @@ const drawerSaving = ref(false);
 // ── 编辑抽屉: 店铺与分类选择 ──
 const editCategoryPopoverShow = ref(false);
 const editSelectedCategoryKeys = ref<any[]>([]);
+const editSelectedCategoryPathLabel = ref('');
 const editCategorySearchPattern = ref('');
 
 const editSelectedCategoryLabel = computed(() => {
+  if (editSelectedCategoryPathLabel.value) return editSelectedCategoryPathLabel.value;
   if (!editSelectedCategoryKeys.value.length) return '';
   const key = editSelectedCategoryKeys.value[0];
-  for (const [, children] of categoryTreeMap.value) {
-    const found = children.find((c: any) => c.key === key);
-    if (found) return found.label;
-  }
-  function findLabel(nodes: any[]): string {
-    for (const n of nodes) {
-      if (n.key === key) return n.label;
-      if (n.children) { const f = findLabel(n.children); if (f) return f; }
-    }
-    return '';
-  }
-  return findLabel(categoryTreeNodes.value);
+  return getCategoryPathLabelByKey(key);
 });
 
 function onEditStoreChange(val: number | null) {
   editProduct.value.description_category_id = null;
+  editProduct.value.type_id = null;
+  editProduct.value.ozon_category_id = 0;
+  editProduct.value.ozon_type_id = 0;
   editSelectedCategoryKeys.value = [];
+  editSelectedCategoryPathLabel.value = '';
   if (val) {
     loadCategoryTree(val);
   } else {
@@ -779,18 +774,13 @@ function onEditStoreChange(val: number | null) {
   }
 }
 
-function onEditCategoryTreeSelect(keys: any[]) {
-  editSelectedCategoryKeys.value = keys;
-  if (keys.length) {
-    editProduct.value.description_category_id = keys[0];
-  } else {
-    editProduct.value.description_category_id = null;
-  }
-}
-
 function clearEditCategorySelection() {
   editSelectedCategoryKeys.value = [];
+  editSelectedCategoryPathLabel.value = '';
   editProduct.value.description_category_id = null;
+  editProduct.value.type_id = null;
+  editProduct.value.ozon_category_id = 0;
+  editProduct.value.ozon_type_id = 0;
 }
 
 const hasChanges = computed(() => {
@@ -799,23 +789,21 @@ const hasChanges = computed(() => {
 });
 
 function openDrawer(product: any) {
-  editProduct.value = JSON.parse(JSON.stringify(product));
-  editProductSnapshot.value = JSON.parse(JSON.stringify(product));
+  const normalizedProduct = {
+    ...JSON.parse(JSON.stringify(product)),
+    description_category_id: product.description_category_id || product.ozon_category_id || null,
+    type_id: product.type_id || product.ozon_type_id || null,
+  };
+  editProduct.value = normalizedProduct;
+  editProductSnapshot.value = JSON.parse(JSON.stringify(normalizedProduct));
   // initialize edit category state from product
-  editSelectedCategoryKeys.value = product.description_category_id ? [product.description_category_id] : [];
+  const initialCategoryId = normalizedProduct.description_category_id;
+  const initialTypeId = normalizedProduct.type_id;
+  editSelectedCategoryKeys.value = initialCategoryId ? [makeCategorySelectionKey(initialCategoryId, initialTypeId)] : [];
+  editSelectedCategoryPathLabel.value = '';
   editCategorySearchPattern.value = '';
   editCategoryPopoverShow.value = false;
-  // load category tree if store_id is set
-  if (product.store_id) {
-    loadCategoryTree(product.store_id);
-  }
-  if (!storeOptions.value.length) {
-    loadStoreOptions();
-  }
-  // initialize edit category state from product
-  editSelectedCategoryKeys.value = product.description_category_id ? [product.description_category_id] : [];
-  editCategorySearchPattern.value = '';
-  editCategoryPopoverShow.value = false;
+  expandedCategoryKeys.value = [];
   // load category tree if store_id is set
   if (product.store_id) {
     loadCategoryTree(product.store_id);
@@ -856,6 +844,7 @@ async function saveEdit() {
       depth_mm: d.depth_mm,
       store_id: d.store_id || null,
       description_category_id: d.description_category_id || null,
+      type_id: d.type_id || null,
     });
     message.success("保存成功");
     editProductSnapshot.value = JSON.parse(JSON.stringify(editProduct.value));
@@ -886,6 +875,8 @@ async function handleCreateDraft() {
       description: d.description || "",
       category_name: d.category || "",
       price_cny: d.price || 0,
+      description_category_id: d.description_category_id || 0,
+      type_id: d.type_id || 0,
       weight: d.weight_g || 500,
       height: d.height_mm || 100,
       depth: d.depth_mm || 100,
@@ -1531,28 +1522,24 @@ const expandedCategoryKeys = ref<any[]>([]);
 const categorySearchPattern = ref('');
 const categoryPopoverShow = ref(false);
 const categoryLoading = ref(false);
-const categoryTreeMap = ref<Map<number, any[]>>(new Map()); // parentId -> children[]
+const categoryTreeMap = ref<Map<any, any[]>>(new Map()); // node key -> children[]
+const categoryPathLabelMap = ref<Map<any, string>>(new Map()); // node key -> breadcrumb label
 
 const selectedCategoryLabel = computed(() => {
   if (!selectedCategoryKeys.value.length) return '';
   const key = selectedCategoryKeys.value[0];
-  for (const [, children] of categoryTreeMap.value) {
-    const found = children.find((c: any) => c.key === key);
-    if (found) return found.label;
-  }
-  function findLabel(nodes: any[]): string {
-    for (const n of nodes) {
-      if (n.key === key) return n.label;
-      if (n.children) { const f = findLabel(n.children); if (f) return f; }
-    }
-    return '';
-  }
-  return findLabel(categoryTreeNodes.value);
+  return getCategoryPathLabelByKey(key);
 });
 
 function clearCategorySelection() {
   editSelectedCategoryKeys.value = [];
-  if (editProduct.value) editProduct.value.description_category_id = null;
+  editSelectedCategoryPathLabel.value = '';
+  if (editProduct.value) {
+    editProduct.value.description_category_id = null;
+    editProduct.value.type_id = null;
+    editProduct.value.ozon_category_id = 0;
+    editProduct.value.ozon_type_id = 0;
+  }
 }
 
 // n-tree filter: match node label against search pattern
@@ -1562,26 +1549,88 @@ function filterCategoryTree(pattern: string, node: any): boolean {
   return label.includes(pattern.toLowerCase());
 }
 
+function getCategoryId(node: any) {
+  return node.description_category_id ?? node.category_id ?? node.id ?? null;
+}
+
+function getCategoryTypeId(node: any) {
+  return node.type_id ?? node.ozon_type_id ?? node.typeId ?? null;
+}
+
+function makeCategorySelectionKey(categoryId: any, typeId?: any) {
+  return typeId ? `type:${categoryId}:${typeId}` : `cat:${categoryId}`;
+}
+
+function getCategoryNodeKey(node: any) {
+  return makeCategorySelectionKey(getCategoryId(node), getCategoryTypeId(node));
+}
+
+function getCategoryNodeLabel(node: any) {
+  return node.type_name
+    ?? node.category_name
+    ?? node.title
+    ?? node.label
+    ?? node.name
+    ?? String(getCategoryId(node) ?? getCategoryTypeId(node) ?? '未知分类');
+}
+
+function getCategoryPathLabelByKey(key: any) {
+  const indexedPathLabel = categoryPathLabelMap.value.get(key);
+  if (indexedPathLabel) return indexedPathLabel;
+  const path = findCategoryTreeNodePathByKey(categoryTreeNodes.value, key);
+  return path.map((node: any) => node.label).filter(Boolean).join(' -> ');
+}
+
+function hasCategoryChildren(node: any) {
+  return Array.isArray(node?.children) && node.children.length > 0;
+}
+
+function toTreeNode(node: any): any {
+  const key = getCategoryNodeKey(node);
+  const children = Array.isArray(node?.children) ? node.children : [];
+  const treeNode: any = {
+    key,
+    label: getCategoryNodeLabel(node),
+    raw: node,
+    description_category_id: getCategoryId(node),
+    type_id: getCategoryTypeId(node),
+    // Naive UI will show a loading spinner for non-leaf nodes without children.
+    // Since the backend returns the whole category tree at once, build children eagerly
+    // and only mark nodes with actual children as expandable.
+    isLeaf: children.length === 0,
+  };
+  if (children.length > 0) {
+    treeNode.children = children.map(toTreeNode);
+  }
+  return treeNode;
+}
+
 function toTreeNodes(nodes: any[]): any[] {
-  return (nodes || []).map((n) => ({
-    key: n.description_category_id ?? n.category_id,
-    label: n.category_name ?? String(n.description_category_id ?? n.category_id),
-    isLeaf: n.is_leaf === true || !Array.isArray(n.children) || n.children.length === 0,
-  }));
+  return (nodes || []).map(toTreeNode);
 }
 
 // Flatten the entire category tree into categoryTreeMap (parentId -> children[])
 function flattenTree(nodes: any[]) {
-  for (const n of nodes) {
-    const id = n.description_category_id ?? n.category_id;
+  for (const n of nodes || []) {
+    const id = getCategoryNodeKey(n);
     const children = Array.isArray(n.children) ? n.children : [];
-    const childNodes = children.map((c: any) => ({
-      key: c.description_category_id ?? c.category_id,
-      label: c.category_name ?? String(c.description_category_id ?? c.category_id),
-      isLeaf: c.is_leaf === true || !Array.isArray(c.children) || c.children.length === 0,
-    }));
+    const childNodes = children.map(toTreeNode);
     categoryTreeMap.value.set(id, childNodes);
     if (children.length > 0) flattenTree(children);
+  }
+}
+
+function buildCategoryPathLabelMap(nodes: any[], parentLabels: string[] = []) {
+  for (const node of nodes || []) {
+    const key = getCategoryNodeKey(node);
+    const label = getCategoryNodeLabel(node);
+    const pathLabels = [...parentLabels, label].filter(Boolean);
+    categoryPathLabelMap.value.set(key, pathLabels.join(' -> '));
+
+    const children = Array.isArray(node.children) ? node.children : [];
+    if (children.length > 0) {
+      buildCategoryPathLabelMap(children, pathLabels);
+    }
   }
 }
 
@@ -1590,6 +1639,7 @@ async function loadCategoryTree(storeId?: number) {
   if (!storeId) {
     categoryTreeNodes.value = [];
     categoryTreeMap.value.clear();
+    categoryPathLabelMap.value.clear();
     return;
   }
   categoryLoading.value = true;
@@ -1600,8 +1650,14 @@ async function loadCategoryTree(storeId?: number) {
     const resp = await apiGet<any>(`/selection/ozon-categories?${params}`);
     const raw = Array.isArray(resp) ? resp : (resp?.categories || []);
     categoryTreeMap.value.clear();
+    categoryPathLabelMap.value.clear();
+    expandedCategoryKeys.value = [];
     flattenTree(raw);
+    buildCategoryPathLabelMap(raw);
     categoryTreeNodes.value = toTreeNodes(raw);
+    if (editSelectedCategoryKeys.value.length && !editSelectedCategoryPathLabel.value) {
+      editSelectedCategoryPathLabel.value = getCategoryPathLabelByKey(editSelectedCategoryKeys.value[0]);
+    }
   } catch (e) {
     console.error("loadCategoryTree failed:", e);
     message.error('加载分类失败');
@@ -1610,51 +1666,80 @@ async function loadCategoryTree(storeId?: number) {
   }
 }
 
-// When a node is expanded, inject children from local map (no API call)
+// Children are built eagerly from the full category tree, so expand only tracks state.
 function onCategoryTreeExpand(keys: any[]) {
   expandedCategoryKeys.value = keys;
-  function injectChildren(nodes: any[]): boolean {
-    let changed = false;
-    for (const n of nodes) {
-      if (keys.includes(n.key) && (!n.children || n.children.length === 0)) {
-        const localChildren = categoryTreeMap.value.get(n.key);
-        if (localChildren && localChildren.length > 0) {
-          n.children = localChildren.map((c: any) => ({ ...c }));
-          changed = true;
-        }
-      }
-      if (n.children && injectChildren(n.children)) changed = true;
-    }
-    return changed;
-  }
-  injectChildren(categoryTreeNodes.value);
 }
 
-// Only allow selecting leaf nodes (last level only)
+// Only allow selecting leaf nodes (last level only); clicking a parent expands it.
 function onCategoryTreeSelect(keys: any[]) {
   if (!keys || keys.length === 0) {
     editSelectedCategoryKeys.value = [];
-    if (editProduct.value) editProduct.value.description_category_id = null;
-    return;
-  }
-  const value = keys[keys.length - 1];
-  function findNode(nodes: any[]): any {
-    for (const n of nodes) {
-      if (n.key === value) return n;
-      if (n.children) { const f = findNode(n.children); if (f) return f; }
+    editSelectedCategoryPathLabel.value = '';
+    if (editProduct.value) {
+      editProduct.value.description_category_id = null;
+      editProduct.value.type_id = null;
+      editProduct.value.ozon_category_id = 0;
+      editProduct.value.ozon_type_id = 0;
     }
-    return null;
-  }
-  const node = findNode(categoryTreeNodes.value);
-  // Check local map for children too
-  const localChildren = categoryTreeMap.value.get(value);
-  if ((node && node.children && node.children.length > 0) || (localChildren && localChildren.length > 0)) {
-    message.warning('请展开选择最后一级分类');
-    editSelectedCategoryKeys.value = [];
     return;
   }
+
+  const value = keys[keys.length - 1];
+  const localChildren = categoryTreeMap.value.get(value) || [];
+
+  if (localChildren.length > 0) {
+    if (!expandedCategoryKeys.value.includes(value)) {
+      expandedCategoryKeys.value = [...expandedCategoryKeys.value, value];
+    }
+    // Parent categories are navigation nodes, not selectable Ozon leaf categories.
+    editSelectedCategoryKeys.value = [];
+    editSelectedCategoryPathLabel.value = '';
+    if (editProduct.value) {
+      editProduct.value.description_category_id = null;
+      editProduct.value.type_id = null;
+      editProduct.value.ozon_category_id = 0;
+      editProduct.value.ozon_type_id = 0;
+    }
+    return;
+  }
+
   editSelectedCategoryKeys.value = [value];
-  if (editProduct.value) editProduct.value.description_category_id = value;
+  editSelectedCategoryPathLabel.value = getCategoryPathLabelByKey(value);
+  if (editProduct.value) {
+    const selectedNode = findCategoryTreeNodeByKey(categoryTreeNodes.value, value);
+    const categoryId = selectedNode?.description_category_id ?? null;
+    const typeId = selectedNode?.type_id ?? null;
+    editProduct.value.description_category_id = categoryId;
+    editProduct.value.type_id = typeId;
+    editProduct.value.ozon_category_id = categoryId || 0;
+    editProduct.value.ozon_type_id = typeId || 0;
+  }
+  // Leaf selected: collapse the tree state and close the popover.
+  // The selected value remains visible in the input as a breadcrumb path.
+  expandedCategoryKeys.value = [];
+  nextTick(() => {
+    editCategoryPopoverShow.value = false;
+  });
+}
+
+function findCategoryTreeNodeByKey(nodes: any[], key: any): any | null {
+  for (const node of nodes || []) {
+    if (node.key === key) return node;
+    const found = findCategoryTreeNodeByKey(node.children || [], key);
+    if (found) return found;
+  }
+  return null;
+}
+
+function findCategoryTreeNodePathByKey(nodes: any[], key: any, parents: any[] = []): any[] {
+  for (const node of nodes || []) {
+    const currentPath = [...parents, node];
+    if (node.key === key) return currentPath;
+    const found = findCategoryTreeNodePathByKey(node.children || [], key, currentPath);
+    if (found.length) return found;
+  }
+  return [];
 }
 
 // Watch store_id change -> reload full category tree
@@ -1664,8 +1749,16 @@ watch(() => editProduct.value?.store_id, (newVal) => {
   } else {
     categoryTreeNodes.value = [];
     categoryTreeMap.value.clear();
+    categoryPathLabelMap.value.clear();
+    expandedCategoryKeys.value = [];
     editSelectedCategoryKeys.value = [];
-    if (editProduct.value) editProduct.value.description_category_id = null;
+    editSelectedCategoryPathLabel.value = '';
+    if (editProduct.value) {
+      editProduct.value.description_category_id = null;
+      editProduct.value.type_id = null;
+      editProduct.value.ozon_category_id = 0;
+      editProduct.value.ozon_type_id = 0;
+    }
   }
 });
 

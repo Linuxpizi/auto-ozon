@@ -41,6 +41,13 @@ class ProductUpdate(BaseModel):
     supplier_sku: Optional[str] = None
     barcode: Optional[str] = None
     video_url: Optional[str] = None
+    video_urls: Optional[List[str]] = None
+    sku_list: Optional[List[dict]] = None
+    spec_list: Optional[List[dict]] = None
+    description_category_id: Optional[int] = None
+    type_id: Optional[int] = None
+    ozon_category_id: Optional[int] = None
+    ozon_type_id: Optional[int] = None
 
 
 class UploadRequest(BaseModel):
@@ -317,6 +324,21 @@ def update_product(product_id: int, body: ProductUpdate, db: Session = Depends(g
         raise HTTPException(status_code=404, detail="商品不存在")
 
     update_data = body.model_dump(exclude_unset=True)
+    description_category_id = update_data.pop("description_category_id", None)
+    type_id = update_data.pop("type_id", None)
+    ozon_category_id = update_data.pop("ozon_category_id", None)
+    ozon_type_id = update_data.pop("ozon_type_id", None)
+
+    if description_category_id is not None:
+        record.ozon_category_id = int(description_category_id or 0)
+    elif ozon_category_id is not None:
+        record.ozon_category_id = int(ozon_category_id or 0)
+
+    if type_id is not None:
+        record.ozon_type_id = int(type_id or 0)
+    elif ozon_type_id is not None:
+        record.ozon_type_id = int(ozon_type_id or 0)
+
     for field, value in update_data.items():
         setattr(record, field, value)
     db.commit()

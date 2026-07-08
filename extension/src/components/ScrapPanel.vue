@@ -8,7 +8,7 @@ const emit = defineEmits<{ refresh: [] }>()
 // --- Page info ---
 interface PageInfo {
   isSupported: boolean
-  platform?: 'ozon' | 'wb' | '1688'
+  platform?: 'ozon' | 'wb' | '1688' | 'pdd'
   isProductPage?: boolean
   isListPage?: boolean
   pageType?: string
@@ -36,6 +36,76 @@ const platformConfig = ref<PlatformScrapingConfig | null>(null)
 const currentPlatform = computed(() => pageInfo.value.platform || 'ozon')
 
 const canScrape = computed(() => pageInfo.value.isProductPage || pageInfo.value.isListPage)
+
+const priorityAttributeNames = [
+  '产品类别', '类目', '类别', '分类', '品牌', '型号', '颜色', '色号', '尺码', '尺寸', '规格', '款式', '容量', '净含量', '重量', '毛重', '净重', '材质',
+  'бренд', 'brand', 'модель', 'model', 'цвет', 'color', 'размер', 'size',
+  'вес', 'масса', 'weight', 'длина', 'ширина', 'высота', 'глубина',
+  'габарит', 'материал', 'material', 'тип', 'type', 'назначение',
+]
+
+function formatWeight(grams?: number) {
+  if (!grams) return ''
+  return grams >= 1000 ? `${(grams / 1000).toFixed(grams % 1000 ? 2 : 0)} kg` : `${grams} g`
+}
+
+function formatDimensions(spec: any) {
+  const parts = [spec?.depth_mm, spec?.width_mm, spec?.height_mm].filter(Boolean)
+  return parts.length ? `${parts.join(' × ')} mm` : ''
+}
+
+const keyAttributes = computed(() => {
+  const attrs = result.value?.data?.attributes || []
+  const normalized = attrs.filter((attr: any) => attr?.name && attr?.value)
+  const score = (attr: any) => {
+    const name = String(attr.name).toLowerCase()
+    const index = priorityAttributeNames.findIndex((keyword) => name.includes(keyword))
+    return index === -1 ? 999 : index
+  }
+  return [...normalized].sort((a, b) => score(a) - score(b)).slice(0, 24)
+})
+
+const attributeGroups = computed(() => {
+  const groups: Record<string, any[]> = { physical: [], identity: [], other: [] }
+  for (const attr of keyAttributes.value) {
+    const name = String(attr.name || '').toLowerCase()
+    if (/(вес|масса|weight|длина|ширина|высота|глубина|габарит|размер|цвет|color|size|尺寸|尺码|规格|款式|重量|毛重|净重|颜色|容量)/.test(name)) {
+      groups.physical.push(attr)
+    } else if (/(бренд|brand|品牌|модель|model|型号|тип|type|类别|分类|类目|артикул|sku)/.test(name)) {
+      groups.identity.push(attr)
+    } else {
+      groups.other.push(attr)
+    }
+  }
+  return [
+    { key: 'physical', title: '物理 / 规格', color: 'violet', items: groups.physical },
+    { key: 'identity', title: '商品标识', color: 'blue', items: groups.identity },
+    { key: 'other', title: '其他属性', color: 'surface', items: groups.other },
+  ].filter((group) => group.items.length)
+})
+
+const physicalSpec = computed(() => {
+  const spec = result.value?.data?.specList?.[0]
+  if (!spec) return null
+  const display = {
+    weight: formatWeight(spec.weight_g),
+    size: formatDimensions(spec),
+    color: spec.color || '',
+    skuSize: spec.size || spec.capacity || spec.style || spec.weight || '',
+  }
+  return Object.values(display).some(Boolean) ? display : null
+})
+
+const specPreviewRows = computed(() => {
+  const list = result.value?.data?.specList || []
+  return list.slice(0, 8).map((spec: any, index: number) => ({
+    index: index + 1,
+    name: spec.capacity || spec.size || spec.color || spec.style || spec.weight || spec.sku || `规格 ${index + 1}`,
+    weight: formatWeight(spec.weight_g),
+    dimension: formatDimensions(spec),
+    color: spec.color || '',
+  }))
+})
 
 async function checkPage() {
   try {
@@ -89,7 +159,7 @@ async function doScrape() {
             }
           }
           // ★ 1688 done 消息带有 created/skipped → 设置 result 让模板显示结果
-          if (msg.done && msg.platform === '1688') {
+          if (msg.done && (msg.platform === '1688' || msg.platform === 'pdd')) {
             result.value = {
               success: true,
               count: msg.total || msg.current || 0,
@@ -162,7 +232,7 @@ onMounted(async () => {
         </svg>
       </div>
       <p class="text-surface-500 text-sm font-medium">当前页面不支持采集</p>
-      <p class="text-surface-400 text-xs mt-1.5">请打开 Ozon / WB / 1688 商品页或列表页</p>
+      <p class="text-surface-400 text-xs mt-1.5">请打开 Ozon / WB / 1688 / PDD 商品页或列表页</p>
     </div>
 
     <template v-else>
@@ -171,14 +241,14 @@ onMounted(async () => {
         <div class="flex items-center gap-3">
           <div
             class="w-10 h-10 rounded-xl flex items-center justify-center text-white font-bold text-sm"
-            :class="pageInfo.platform === 'ozon' ? 'bg-gradient-to-br from-ozon-500 to-ozon-600' : pageInfo.platform === '1688' ? 'bg-gradient-to-br from-orange-500 to-orange-600' : 'bg-gradient-to-br from-wb-500 to-wb-600'"
+            :class="pageInfo.platform === 'ozon' ? 'bg-gradient-to-br from-ozon-500 to-ozon-600' : pageInfo.platform === '1688' ? 'bg-gradient-to-br from-orange-500 to-orange-600' : pageInfo.platform === 'pdd' ? 'bg-gradient-to-br from-red-500 to-rose-600' : 'bg-gradient-to-br from-wb-500 to-wb-600'"
           >
-            {{ pageInfo.platform === 'ozon' ? 'O' : pageInfo.platform === '1688' ? 'A' : 'W' }}
+            {{ pageInfo.platform === 'ozon' ? 'O' : pageInfo.platform === '1688' ? 'A' : pageInfo.platform === 'pdd' ? 'P' : 'W' }}
           </div>
           <div class="flex-1 min-w-0">
             <div class="flex items-center gap-2">
               <span class="text-sm font-semibold text-surface-800">
-                {{ pageInfo.platform === 'ozon' ? 'Ozon' : pageInfo.platform === '1688' ? '1688(阿里巴巴)' : 'Wildberries' }}
+                {{ pageInfo.platform === 'ozon' ? 'Ozon' : pageInfo.platform === '1688' ? '1688(阿里巴巴)' : pageInfo.platform === 'pdd' ? 'PDD(拼多多)' : 'Wildberries' }}
               </span>
               <span v-if="pageInfo.isProductPage" class="badge-success">商品页</span>
               <span v-else-if="pageInfo.isListPage" class="badge-info">列表页</span>
@@ -305,6 +375,11 @@ onMounted(async () => {
             <p>• 商品页:自动提取标题、图片、价格、SKU 等</p>
             <p>• 列表页:可批量滚动采集,支持价格过滤</p>
             <p>• 价格单位为人民币 ¥,导入后可自动换算</p>
+          </template>
+          <template v-else-if="pageInfo.platform === 'pdd'">
+            <p>• 打开 <span class="text-surface-600 font-medium">拼多多 / PDD</span> 商品页,点击「一键采集商品」</p>
+            <p>• 重点提取类目、颜色/尺码/规格、重量、长宽高等上传必需参数</p>
+            <p>• 价格单位为人民币 ¥,规格属性会自动回填到物理规格卡片</p>
           </template>
         </div>
       </div>
@@ -441,10 +516,83 @@ onMounted(async () => {
               <p class="text-sm font-medium text-surface-800 line-clamp-2 leading-snug">{{ result.data.title }}</p>
               <div class="flex items-center gap-2 mt-1.5">
                 <span class="text-brand-600 font-bold text-sm">
-                  {{ result.data.price ? (result.data.platform === '1688' ? `¥${result.data.price.toLocaleString()}` : `₽${result.data.price.toLocaleString()}`) : '—' }}
+                  {{ result.data.price ? ((result.data.platform === '1688' || result.data.platform === 'pdd') ? `¥${result.data.price.toLocaleString()}` : `₽${result.data.price.toLocaleString()}`) : '—' }}
                 </span>
                 <span v-if="result.data.oldPrice && result.data.oldPrice > result.data.price"
-                  class="text-surface-400 text-xs line-through">{{ result.data.platform === '1688' ? '¥' : '₽' }}{{ result.data.oldPrice.toLocaleString() }}</span>
+                  class="text-surface-400 text-xs line-through">{{ (result.data.platform === '1688' || result.data.platform === 'pdd') ? '¥' : '₽' }}{{ result.data.oldPrice.toLocaleString() }}</span>
+              </div>
+              <div class="flex flex-wrap gap-1.5 mt-2">
+                <span v-if="result.data.category" class="px-2 py-0.5 rounded-full bg-blue-50 text-blue-700 text-[11px] font-medium">{{ result.data.category }}</span>
+                <span v-if="result.data.brand" class="px-2 py-0.5 rounded-full bg-surface-100 text-surface-600 text-[11px] font-medium">{{ result.data.brand }}</span>
+              </div>
+            </div>
+          </div>
+
+          <div v-if="physicalSpec" class="mt-4 grid grid-cols-2 gap-2">
+            <div v-if="physicalSpec.weight" class="rounded-xl bg-amber-50 px-3 py-2">
+              <p class="text-[10px] text-amber-600 font-semibold">重量</p>
+              <p class="text-xs text-amber-900 font-medium">{{ physicalSpec.weight }}</p>
+            </div>
+            <div v-if="physicalSpec.size" class="rounded-xl bg-violet-50 px-3 py-2">
+              <p class="text-[10px] text-violet-600 font-semibold">尺寸</p>
+              <p class="text-xs text-violet-900 font-medium">{{ physicalSpec.size }}</p>
+            </div>
+            <div v-if="physicalSpec.color" class="rounded-xl bg-rose-50 px-3 py-2">
+              <p class="text-[10px] text-rose-600 font-semibold">颜色</p>
+              <p class="text-xs text-rose-900 font-medium">{{ physicalSpec.color }}</p>
+            </div>
+            <div v-if="physicalSpec.skuSize" class="rounded-xl bg-emerald-50 px-3 py-2">
+              <p class="text-[10px] text-emerald-600 font-semibold">规格</p>
+              <p class="text-xs text-emerald-900 font-medium">{{ physicalSpec.skuSize }}</p>
+            </div>
+          </div>
+
+          <div v-if="specPreviewRows.length > 1" class="mt-4 rounded-2xl border border-emerald-100 bg-emerald-50/40 overflow-hidden">
+            <div class="px-3 py-2 flex items-center justify-between bg-white/70">
+              <div>
+                <span class="text-xs font-semibold text-emerald-700">SKU 规格明细</span>
+                <p class="text-[10px] text-emerald-600/70 mt-0.5">按规格选项回填重量、尺寸、颜色等物理参数</p>
+              </div>
+              <span class="px-2 py-0.5 rounded-full bg-emerald-100 text-[11px] text-emerald-700">{{ result.data.specList.length }} 组</span>
+            </div>
+            <div class="max-h-48 overflow-auto divide-y divide-emerald-100 bg-white">
+              <div v-for="row in specPreviewRows" :key="`${row.index}-${row.name}`" class="px-3 py-2">
+                <div class="flex items-start justify-between gap-2">
+                  <p class="text-[11px] font-semibold text-surface-800 break-words">{{ row.name }}</p>
+                  <span class="text-[10px] text-surface-400 flex-shrink-0">#{{ row.index }}</span>
+                </div>
+                <div class="mt-1 flex flex-wrap gap-1.5">
+                  <span v-if="row.weight" class="px-1.5 py-0.5 rounded-md bg-amber-50 text-[10px] text-amber-700">重量 {{ row.weight }}</span>
+                  <span v-if="row.dimension" class="px-1.5 py-0.5 rounded-md bg-violet-50 text-[10px] text-violet-700">尺寸 {{ row.dimension }}</span>
+                  <span v-if="row.color" class="px-1.5 py-0.5 rounded-md bg-rose-50 text-[10px] text-rose-700">颜色 {{ row.color }}</span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div v-if="keyAttributes.length" class="mt-4 rounded-2xl border border-surface-100 overflow-hidden bg-white">
+            <div class="px-3 py-2 bg-gradient-to-r from-surface-50 to-white flex items-center justify-between">
+              <div>
+                <span class="text-xs font-semibold text-surface-700">规格属性</span>
+                <p class="text-[10px] text-surface-400 mt-0.5">优先展示上传必需的物理规格、颜色、尺寸与商品标识</p>
+              </div>
+              <span class="px-2 py-0.5 rounded-full bg-surface-100 text-[11px] text-surface-500">{{ result.data.attributes.length }} 项</span>
+            </div>
+            <div class="max-h-72 overflow-auto p-2 space-y-2">
+              <div v-for="group in attributeGroups" :key="group.key" class="rounded-xl border border-surface-100 overflow-hidden">
+                <div class="px-2.5 py-1.5 bg-surface-50 flex items-center gap-1.5">
+                  <span
+                    class="w-1.5 h-1.5 rounded-full"
+                    :class="group.color === 'violet' ? 'bg-violet-500' : group.color === 'blue' ? 'bg-blue-500' : 'bg-surface-400'"
+                  ></span>
+                  <span class="text-[11px] font-semibold text-surface-600">{{ group.title }}</span>
+                </div>
+                <div class="divide-y divide-surface-100">
+                  <div v-for="attr in group.items" :key="`${group.key}-${attr.name}-${attr.value}`" class="px-2.5 py-2 grid grid-cols-[86px_1fr] gap-2 items-start">
+                    <span class="text-[11px] text-surface-500 truncate" :title="attr.name">{{ attr.name }}</span>
+                    <span class="text-[11px] text-surface-800 font-medium break-words leading-relaxed">{{ attr.value }}</span>
+                  </div>
+                </div>
               </div>
             </div>
           </div>

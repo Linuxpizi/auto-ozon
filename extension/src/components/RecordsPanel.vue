@@ -12,7 +12,9 @@ interface BackendProduct extends ScrapedProduct {
 const products = ref<BackendProduct[]>([])
 const loading = ref(false)
 const searchQuery = ref('')
-const filterPlatform = ref<'all' | 'ozon' | 'wb' | '1688'>('all')
+const filterPlatform = ref<'all' | 'ozon' | 'wb' | '1688' | 'pdd'>('all')
+
+const requiredAttributeKeywords = ['产品类别', '类目', '类别', '分类', '颜色', '色号', '尺码', '尺寸', '规格', '款式', '型号', '重量', '毛重', '净重', '容量', '材质']
 
 const filteredProducts = computed(() => {
   let list = products.value
@@ -55,6 +57,55 @@ async function refreshList() {
   emit('refresh')
 }
 
+function formatPrice(product: BackendProduct) {
+  if (!product.price) return '—'
+  const symbol = product.platform === '1688' || product.platform === 'pdd' ? '¥' : '₽'
+  return `${symbol}${product.price.toLocaleString()}`
+}
+
+function formatWeight(grams?: number) {
+  if (!grams) return ''
+  return grams >= 1000 ? `${(grams / 1000).toFixed(grams % 1000 ? 2 : 0)}kg` : `${grams}g`
+}
+
+function formatDimensions(spec: any) {
+  const parts = [spec?.depth_mm, spec?.width_mm, spec?.height_mm].filter(Boolean)
+  return parts.length ? `${parts.join('×')}mm` : ''
+}
+
+function getPriorityAttributes(product: BackendProduct) {
+  const attrs = (product.attributes || []).filter((attr) => attr?.name && attr?.value)
+  const score = (name: string) => {
+    const lower = name.toLowerCase()
+    const index = requiredAttributeKeywords.findIndex((keyword) => lower.includes(keyword.toLowerCase()))
+    return index === -1 ? 999 : index
+  }
+  return [...attrs].sort((a, b) => score(a.name) - score(b.name)).slice(0, 6)
+}
+
+function getSpecChips(product: BackendProduct) {
+  const spec = product.specList?.[0]
+  const chips: Array<{ label: string; value: string; color: string }> = []
+  if (product.category) chips.push({ label: '类别', value: product.category, color: 'blue' })
+  if (spec?.color) chips.push({ label: '颜色', value: String(spec.color), color: 'rose' })
+  if (spec?.size) chips.push({ label: '规格', value: String(spec.size), color: 'emerald' })
+  const weight = formatWeight(spec?.weight_g)
+  if (weight) chips.push({ label: '重量', value: weight, color: 'amber' })
+  const dimensions = formatDimensions(spec)
+  if (dimensions) chips.push({ label: '尺寸', value: dimensions, color: 'violet' })
+  return chips.slice(0, 5)
+}
+
+function getCompleteness(product: BackendProduct) {
+  const attrs = product.attributes || []
+  const spec = product.specList?.[0]
+  const hasCategory = Boolean(product.category || attrs.some((a) => /产品类别|类目|类别|分类/.test(a.name)))
+  const hasSkuSpec = Boolean(spec?.color || spec?.size || attrs.some((a) => /颜色|色号|尺码|尺寸|规格|款式|型号|容量/.test(a.name)))
+  const hasPhysical = Boolean(spec?.weight_g || spec?.depth_mm || spec?.width_mm || spec?.height_mm || attrs.some((a) => /重量|毛重|净重|长|宽|高|尺寸/.test(a.name)))
+  const count = [hasCategory, hasSkuSpec, hasPhysical].filter(Boolean).length
+  return { count, total: 3, ok: count === 3 }
+}
+
 onMounted(loadProducts)
 </script>
 
@@ -79,13 +130,13 @@ onMounted(loadProducts)
       <div class="flex items-center gap-2">
         <div class="flex bg-surface-50 rounded-lg p-0.5 flex-1">
           <button
-            v-for="f in (['all', 'ozon', 'wb', '1688'] as const)"
+            v-for="f in (['all', 'ozon', 'wb', '1688', 'pdd'] as const)"
             :key="f"
             @click="filterPlatform = f"
             class="flex-1 py-1.5 text-[11px] font-medium rounded-md transition-all duration-200"
             :class="filterPlatform === f ? 'bg-white text-surface-800 shadow-sm' : 'text-surface-400 hover:text-surface-600'"
           >
-            {{ f === 'all' ? '全部' : f === 'ozon' ? 'Ozon' : f === '1688' ? '1688' : 'WB' }}
+            {{ f === 'all' ? '全部' : f === 'ozon' ? 'Ozon' : f === '1688' ? '1688' : f === 'pdd' ? 'PDD' : 'WB' }}
           </button>
         </div>
         <button
@@ -150,13 +201,48 @@ onMounted(loadProducts)
               <div class="flex items-center gap-1.5 mt-1">
                 <span
                   class="text-[10px] font-semibold px-1.5 py-0.5 rounded"
-                  :class="product.platform === 'ozon' ? 'bg-ozon-50 text-ozon-600' : product.platform === '1688' ? 'bg-orange-50 text-orange-600' : 'bg-wb-50 text-wb-600'"
+                  :class="product.platform === 'ozon' ? 'bg-ozon-50 text-ozon-600' : product.platform === '1688' ? 'bg-orange-50 text-orange-600' : product.platform === 'pdd' ? 'bg-red-50 text-red-600' : 'bg-wb-50 text-wb-600'"
                 >
-                  {{ product.platform === 'ozon' ? 'Ozon' : product.platform === '1688' ? '1688' : 'WB' }}
+                  {{ product.platform === 'ozon' ? 'Ozon' : product.platform === '1688' ? '1688' : product.platform === 'pdd' ? 'PDD' : 'WB' }}
                 </span>
                 <span class="text-brand-600 text-xs font-bold">
-                  {{ product.price ? (product.platform === '1688' ? `¥${product.price.toLocaleString()}` : `₽${product.price.toLocaleString()}`) : '—' }}
+                  {{ formatPrice(product) }}
                 </span>
+                <span
+                  class="text-[10px] font-semibold px-1.5 py-0.5 rounded-full"
+                  :class="getCompleteness(product).ok ? 'bg-emerald-50 text-emerald-600' : 'bg-amber-50 text-amber-600'"
+                >
+                  必填 {{ getCompleteness(product).count }}/{{ getCompleteness(product).total }}
+                </span>
+              </div>
+
+              <div v-if="getSpecChips(product).length" class="flex flex-wrap gap-1 mt-2">
+                <span
+                  v-for="chip in getSpecChips(product)"
+                  :key="`${product.id}-${chip.label}-${chip.value}`"
+                  class="inline-flex items-center max-w-full px-1.5 py-0.5 rounded-md text-[10px] font-medium"
+                  :class="chip.color === 'blue' ? 'bg-blue-50 text-blue-700' : chip.color === 'rose' ? 'bg-rose-50 text-rose-700' : chip.color === 'emerald' ? 'bg-emerald-50 text-emerald-700' : chip.color === 'amber' ? 'bg-amber-50 text-amber-700' : 'bg-violet-50 text-violet-700'"
+                >
+                  <span class="opacity-70 mr-0.5">{{ chip.label }}</span>
+                  <span class="truncate max-w-[120px]">{{ chip.value }}</span>
+                </span>
+              </div>
+
+              <div v-if="getPriorityAttributes(product).length" class="mt-2 rounded-xl bg-surface-50/80 border border-surface-100 overflow-hidden">
+                <div class="px-2 py-1 flex items-center justify-between border-b border-surface-100">
+                  <span class="text-[10px] font-semibold text-surface-500">规格属性</span>
+                  <span class="text-[10px] text-surface-400">{{ product.attributes?.length || 0 }} 项</span>
+                </div>
+                <div class="p-2 grid grid-cols-1 gap-1">
+                  <div
+                    v-for="attr in getPriorityAttributes(product)"
+                    :key="`${product.id}-${attr.name}-${attr.value}`"
+                    class="grid grid-cols-[64px_1fr] gap-1.5 text-[10px] leading-relaxed"
+                  >
+                    <span class="text-surface-400 truncate" :title="attr.name">{{ attr.name }}</span>
+                    <span class="text-surface-700 font-medium break-words">{{ attr.value }}</span>
+                  </div>
+                </div>
               </div>
             </div>
 

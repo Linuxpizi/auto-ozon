@@ -1,5 +1,5 @@
 /** 平台类型 */
-export type Platform = 'ozon' | 'wb' | '1688'
+export type Platform = 'ozon' | 'wb' | '1688' | 'pdd'
 
 /** 采集的商品数据 */
 export interface ScrapedProduct {
@@ -92,6 +92,8 @@ export interface PluginSettings {
   wb: PlatformScrapingConfig
   /** 1688 采集条件 */
   '1688': PlatformScrapingConfig
+  /** 拼多多采集条件 */
+  pdd: PlatformScrapingConfig
 }
 
 /** 列表采集的商品摘要(非完整商品数据) */
@@ -126,4 +128,5 @@ export const DEFAULT_SETTINGS: PluginSettings = {
   ozon: { ...defaultPlatformConfig },
   wb: { ...defaultPlatformConfig },
   '1688': { ...defaultPlatformConfig },
+  pdd: { ...defaultPlatformConfig },
 }

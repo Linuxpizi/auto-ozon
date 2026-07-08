@@ -15,6 +15,10 @@ export default defineConfig({
       'https://detail.1688.com/*',
       'https://s.1688.com/*',
       'https://www.1688.com/*',
+      'https://yangkeduo.com/*',
+      'https://*.yangkeduo.com/*',
+      'https://pinduoduo.com/*',
+      'https://*.pinduoduo.com/*',
       'http://localhost:9000/*',
     ],
     action: {

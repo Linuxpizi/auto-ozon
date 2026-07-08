@@ -19,6 +19,196 @@ function parsePrice(text: string): number {
   return match ? parseFloat(match[1].replace(',', '.')) : 0
 }
 
+function normalizeText(value: any): string {
+  if (value === null || value === undefined) return ''
+  if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') {
+    return String(value).replace(/\s+/g, ' ').trim()
+  }
+  if (Array.isArray(value)) {
+    return value.map((v) => normalizeText(v)).filter(Boolean).join(', ')
+  }
+  if (typeof value === 'object') {
+    const candidates = [
+      value.content, value.text, value.value, value.title, value.name, value.label,
+      value.caption, value.displayName, value.textRs, value.values, value.propertyValues,
+    ]
+    for (const candidate of candidates) {
+      const text = normalizeText(candidate)
+      if (text) return text
+    }
+  }
+  return ''
+}
+
+function addProductAttribute(attrs: ProductAttribute[], name: any, value: any) {
+  const attrName = normalizeText(name).replace(/[:：]+$/, '').trim()
+  const attrValue = normalizeText(value)
+  if (!attrName || !attrValue || attrName === attrValue || attrName.length > 120 || attrValue.length > 500) return
+
+  const duplicate = attrs.some((a) => (
+    a.name.trim().toLowerCase() === attrName.toLowerCase()
+    && a.value.trim().toLowerCase() === attrValue.toLowerCase()
+  ))
+  if (!duplicate) attrs.push({ name: attrName, value: attrValue })
+}
+
+function mergeProductAttributes(...groups: Array<ProductAttribute[] | undefined>): ProductAttribute[] {
+  const merged: ProductAttribute[] = []
+  for (const group of groups) {
+    for (const attr of group || []) addProductAttribute(merged, attr.name, attr.value)
+  }
+  return merged
+}
+
+function isCategoryWidgetKey(key: string): boolean {
+  const normalized = key.toLowerCase().replace(/[-_]/g, '')
+  return normalized.includes('breadcrumb') || normalized.includes('breadcrumbs') || normalized.includes('breadcrum')
+}
+
+function mergePhysicalSpec(
+  base: ScrapedProduct['specList'][number] | undefined,
+  fallback: ScrapedProduct['specList'][number] | undefined,
+): ScrapedProduct['specList'][number] | undefined {
+  if (!base && !fallback) return undefined
+  const merged: ScrapedProduct['specList'][number] = {
+    weight_g: base?.weight_g || fallback?.weight_g || 0,
+    depth_mm: base?.depth_mm || fallback?.depth_mm || 0,
+    height_mm: base?.height_mm || fallback?.height_mm || 0,
+    width_mm: base?.width_mm || fallback?.width_mm || 0,
+  }
+
+  const extraKeys = new Set<string>([
+    ...Object.keys(fallback || {}),
+    ...Object.keys(base || {}),
+  ])
+  for (const key of extraKeys) {
+    if (key in merged) continue
+    const baseValue = base?.[key]
+    const fallbackValue = fallback?.[key]
+    merged[key] = baseValue || fallbackValue || ''
+  }
+  return merged
+}
+
+function parseUnitNumber(text: string): number {
+  const match = normalizeText(text).match(/([\d]+(?:[\s,.][\d]+)?)/)
+  return match ? parseFloat(match[1].replace(/\s/g, '').replace(',', '.')) : 0
+}
+
+function parseWeightToGrams(value: string, name = ''): number {
+  const text = `${name} ${value}`.toLowerCase()
+  const num = parseUnitNumber(value)
+  if (!num) return 0
+  if (/\bkg\b|кг|килограмм/.test(text)) return Math.round(num * 1000)
+  if (/\bmg\b|мг|миллиграм/.test(text)) return Math.round(num / 1000)
+  if (/\bг\b|гр|грамм|weight|вес|масса|重量/.test(text)) return Math.round(num)
+  return 0
+}
+
+function parseLengthToMm(value: string, name = ''): number {
+  const text = `${name} ${value}`.toLowerCase()
+  const num = parseUnitNumber(value)
+  if (!num) return 0
+  if (/\bcm\b|см|сантиметр/.test(text)) return Math.round(num * 10)
+  if (/\bm\b|метр/.test(text) && !/\bmm\b/.test(text)) return Math.round(num * 1000)
+  if (/\bmm\b|мм|миллиметр|длина|ширина|высота|глубина|length|width|height|depth|尺寸/.test(text)) return Math.round(num)
+  return 0
+}
+
+function extractPhysicalSpecFromAttributes(attrs: ProductAttribute[]): ScrapedProduct['specList'] {
+  const spec: ScrapedProduct['specList'][number] = { weight_g: 0, depth_mm: 0, height_mm: 0, width_mm: 0 }
+
+  for (const attr of attrs) {
+    const name = normalizeText(attr.name).toLowerCase()
+    const value = normalizeText(attr.value)
+    const combined = `${name} ${value}`.toLowerCase()
+
+    if (!spec.weight_g && /(вес|масса|weight|重量)/.test(name)) {
+      spec.weight_g = parseWeightToGrams(value, name)
+    }
+
+    const dimMatch = value.match(/(\d[\d\s,.]*)\s*(?:x|х|×|\*)\s*(\d[\d\s,.]*)\s*(?:x|х|×|\*)\s*(\d[\d\s,.]*)\s*(мм|mm|см|cm|м|m)?/i)
+    if (dimMatch && /(размер|габарит|dimension|size|длина|ширина|высота|尺寸)/.test(name)) {
+      const unit = dimMatch[4] || (/(см|cm)/i.test(combined) ? 'см' : /(м|m)/i.test(combined) ? 'м' : 'мм')
+      const toMm = (raw: string) => parseLengthToMm(`${raw} ${unit}`, name)
+      if (!spec.depth_mm) spec.depth_mm = toMm(dimMatch[1])
+      if (!spec.width_mm) spec.width_mm = toMm(dimMatch[2])
+      if (!spec.height_mm) spec.height_mm = toMm(dimMatch[3])
+    }
+
+    if (!spec.depth_mm && /(глубин|длин|depth|length|длина|长)/.test(name)) spec.depth_mm = parseLengthToMm(value, name)
+    if (!spec.height_mm && /(высот|height|высота|高)/.test(name)) spec.height_mm = parseLengthToMm(value, name)
+    if (!spec.width_mm && /(ширин|width|ширина|宽)/.test(name)) spec.width_mm = parseLengthToMm(value, name)
+
+    if (!spec.color && /(цвет|color|颜色)/.test(name) && value.length <= 80) spec.color = value
+    if (!spec.size && /(размер|size|尺码|规格)/.test(name) && value.length <= 120) spec.size = value
+  }
+
+  const hasSpec = spec.weight_g || spec.depth_mm || spec.height_mm || spec.width_mm || spec.color || spec.size
+  return hasSpec ? [spec] : []
+}
+
+function extractCategoryFromBreadcrumbItems(items: any[]): string {
+  const ignored = /^(ozon|главная|каталог|home|首页|главная страница)$/i
+  const cats = items
+    .map((item) => normalizeText(item?.title ?? item?.text ?? item?.label ?? item?.name ?? item?.content ?? item))
+    .filter((text) => text && !ignored.test(text) && !/ozon\.ru/i.test(text))
+  return cats.join(' > ')
+}
+
+function extractCategoryFromWidget(widget: any): string {
+  const candidates = [
+    widget?.options?.items, widget?.items, widget?.links, widget?.breadcrumbs, widget?.breadCrumbs,
+    widget?.options?.breadcrumbs, widget?.options?.breadCrumbs, widget?.categoryPath, widget?.categories,
+    widget?.path, widget?.items?.items, widget?.content?.items, widget?.content?.breadcrumbs,
+  ]
+  for (const candidate of candidates) {
+    if (Array.isArray(candidate)) {
+      const category = extractCategoryFromBreadcrumbItems(candidate)
+      if (category) return category
+    }
+  }
+  return normalizeText(widget?.category?.title ?? widget?.category?.name ?? widget?.categoryName)
+}
+
+function extractAttributePairsFromObject(node: any, attrs: ProductAttribute[], depth = 0) {
+  if (!node || depth > 5) return
+  if (Array.isArray(node)) {
+    node.forEach((item) => extractAttributePairsFromObject(item, attrs, depth + 1))
+    return
+  }
+  if (typeof node !== 'object') return
+
+  const name = normalizeText(node.name ?? node.propertyName ?? node.title ?? node.label ?? node.caption ?? node.key)
+  const value = normalizeText(node.value ?? node.text ?? node.propertyValue ?? node.propertyValues ?? node.values ?? node.content)
+  addProductAttribute(attrs, name, value)
+
+  for (const key of ['characteristics', 'properties', 'attributes', 'params', 'items', 'rows', 'sections', 'groups']) {
+    if (Array.isArray(node[key])) extractAttributePairsFromObject(node[key], attrs, depth + 1)
+    if (Array.isArray(node.options?.[key])) extractAttributePairsFromObject(node.options[key], attrs, depth + 1)
+  }
+}
+
+function extractOzonIdsFromObject(node: any, result: Partial<ScrapedProduct>, depth = 0) {
+  if (!node || depth > 6 || typeof node !== 'object') return
+  if (Array.isArray(node)) {
+    node.forEach((item) => extractOzonIdsFromObject(item, result, depth + 1))
+    return
+  }
+  for (const [key, value] of Object.entries(node)) {
+    const normalizedKey = key.toLowerCase().replace(/[-_]/g, '')
+    if (!result.ozonCategoryId && /^(descriptioncategoryid|categoryid)$/.test(normalizedKey)) {
+      const id = Number(value)
+      if (Number.isFinite(id) && id > 0) result.ozonCategoryId = id
+    }
+    if (!result.ozonTypeId && normalizedKey === 'typeid') {
+      const id = Number(value)
+      if (Number.isFinite(id) && id > 0) result.ozonTypeId = id
+    }
+    if (typeof value === 'object') extractOzonIdsFromObject(value, result, depth + 1)
+  }
+}
+
 // ─── 页面类型检测 ────────────────────────────────────────────
 
 function detectPageType(): 'product' | 'list' | 'unknown' {
@@ -111,9 +301,36 @@ function extractDetailBrand(): string {
 }
 
 function extractDetailCategory(): string {
-  const breadcrumbs = Array.from(document.querySelectorAll('[data-widget="webBreadcrumb"] a'))
-  const cats = breadcrumbs.map((a) => a.textContent?.trim() || '').filter(Boolean)
-  return cats.length > 1 ? cats.slice(1).join(' > ') : cats.join(' > ')
+  // 只从 Ozon 明确的面包屑/结构化 meta 中取类目，避免 nav 或随机 category 链接污染类目路径。
+  const breadcrumbSelector = [
+    '[data-widget="webBreadcrumb"] a',
+    '[data-widget="breadCrumbs"] a',
+    '[data-widget="webBreadcrumbs"] a',
+    '[data-widget*="Breadcrumb"] a',
+    '[data-widget*="breadCrumb"] a',
+    '[data-widget*="breadcrumb"] a',
+    'nav[aria-label*="breadcrumb" i] a',
+  ].join(', ')
+
+  const breadcrumbs = Array.from(document.querySelectorAll<HTMLAnchorElement>(breadcrumbSelector))
+  const category = extractCategoryFromBreadcrumbItems(breadcrumbs.map((a) => a.textContent?.trim() || ''))
+  if (category) return category
+
+  for (const script of Array.from(document.querySelectorAll<HTMLScriptElement>('script[type="application/ld+json"]'))) {
+    try {
+      const json = JSON.parse(script.textContent || '{}')
+      const list = Array.isArray(json) ? json : [json]
+      for (const item of list) {
+        if (item?.['@type'] === 'BreadcrumbList' && Array.isArray(item.itemListElement)) {
+          const fromLd = extractCategoryFromBreadcrumbItems(item.itemListElement.map((x: any) => x?.item?.name || x?.name || ''))
+          if (fromLd) return fromLd
+        }
+      }
+    } catch { /* ignore invalid JSON-LD */ }
+  }
+
+  const metaCategory = document.querySelector('meta[property="product:category"], meta[name="category"]')?.getAttribute('content') || ''
+  return normalizeText(metaCategory)
 }
 
 function extractDetailSellerName(): string {
@@ -143,48 +360,28 @@ async function extractDetailAttributes(): Promise<ProductAttribute[]> {
     }
   }
 
-  // 策略 2: 从 <dl><dt><dd> 解析属性(Ozon 标准格式:webCharacteristics 内含多个 dl)
-  const charWidget = document.querySelector('[data-widget="webCharacteristics"], [class*="characteristic"]')
-  if (charWidget) {
+  // 策略 2: 从所有明确 characteristics widget 解析属性。
+  // Ozon 常同时渲染 webShortCharacteristics / webCharacteristics / webFullCharacteristics，必须全部合并。
+  const charWidgets = Array.from(document.querySelectorAll('[data-widget*="Characteristics"], [data-widget*="characteristics"], [data-widget*="Properties"], [data-widget*="Specifications"]'))
+  for (const charWidget of charWidgets) {
     for (const dl of Array.from(charWidget.querySelectorAll('dl'))) {
-      for (const dt of Array.from(dl.querySelectorAll('dt'))) {
+      const terms = Array.from(dl.querySelectorAll('dt'))
+      for (const dt of terms) {
         const name = dt.textContent?.trim() || ''
         const dd = dt.nextElementSibling
         const value = dd?.textContent?.trim() || ''
-        if (name && value && name.length < 100 && value.length < 200 && name !== value) {
-          if (!attrs.some((a) => a.name === name)) attrs.push({ name, value })
-        }
+        addProductAttribute(attrs, name, value)
       }
     }
-  }
 
-  // 策略 3: 回退 — 全局 dt/dd 或 div 名值对
-  if (attrs.length === 0) {
-    // dt/dd 方式
-    document.querySelectorAll('dt').forEach((el) => {
-      const name = el.textContent?.trim() || ''
-      const valueEl = el.nextElementSibling
-      const value = valueEl?.textContent?.trim() || ''
-      if (name && value && name.length < 100 && value.length < 200) {
-        attrs.push({ name, value })
+    charWidget.querySelectorAll('tr, li, [class*="row"], [class*="item"]').forEach((row) => {
+      const children = Array.from(row.children).filter((child) => normalizeText(child.textContent))
+      if (children.length >= 2) {
+        const name = children[0]?.textContent?.trim() || ''
+        const value = children.slice(1).map((child) => child.textContent?.trim() || '').filter(Boolean).join(', ')
+        addProductAttribute(attrs, name, value)
       }
     })
-    // div 名值对兜底
-    if (attrs.length === 0) {
-      const container = charWidget || document.querySelector('[class*="specification"]')
-      if (container) {
-        container.querySelectorAll('div > div, tr, li').forEach((row) => {
-          const children = Array.from(row.children)
-          if (children.length >= 2) {
-            const name = children[0]?.textContent?.trim() || ''
-            const value = children[1]?.textContent?.trim() || ''
-            if (name && value && name.length < 100 && value.length < 200 && name !== value) {
-              attrs.push({ name, value })
-            }
-          }
-        })
-      }
-    }
   }
 
   return attrs
@@ -309,16 +506,17 @@ async function scrapeOzonProduct(): Promise<ScrapedProduct | null> {
     if (url && url.startsWith('http') && !domVideos.includes(url)) domVideos.push(url)
   })
 
-  // ── 从 DOM 提取标签 (促销/分类/品牌标签) ──
+  // ── 从 DOM 提取真实促销标签；不把分类/品牌/任意 class=tag 文本混入 tags。
   const domTags: string[] = []
-  // Ozon 商品页常见标签区域
-  document.querySelectorAll('[data-widget="webPromoLabel"] span, [class*="promo"] span, [class*="tag"] span, [class*="badge"] span').forEach((el) => {
+  document.querySelectorAll('[data-widget="webPromoLabel"] span, [data-widget="webProductDiscount"] span').forEach((el) => {
     const t = el.textContent?.trim() || ''
     if (t && t.length < 50 && !domTags.includes(t)) domTags.push(t)
   })
-  // 面包屑最后一级作为分类标签
-  const catLabel = domData.category?.split(' > ').pop()?.trim()
-  if (catLabel && !domTags.includes(catLabel)) domTags.push(catLabel)
+
+  const mergedAttributes = mergeProductAttributes(apiData?.attributes, domData.attributes)
+  const inferredSpecList = extractPhysicalSpecFromAttributes(mergedAttributes)
+  const mergedSpec = mergePhysicalSpec(apiData?.specList?.[0], inferredSpecList[0])
+  const mergedSpecList = mergedSpec ? [mergedSpec] : []
 
   // ── 合并: API 数据优先 (更准确), DOM 数据补充缺失字段 ──
   const merged: ScrapedProduct = {
@@ -335,13 +533,13 @@ async function scrapeOzonProduct(): Promise<ScrapedProduct | null> {
     category: apiData?.category || domData.category,
     sellerName: apiData?.sellerName || domData.sellerName,
     sellerUrl: apiData?.sellerUrl || '',
-    attributes: (apiData?.attributes?.length ? apiData.attributes : domData.attributes),
+    attributes: mergedAttributes,
     description: (apiData?.description && apiData.description.length > 10 ? apiData.description : domData.description),
     sourceUrl: location.href,
     scrapedAt: new Date().toISOString(),
     videoUrls: (apiData?.videoUrls?.length ? apiData.videoUrls : domVideos),
     skuList: apiData?.skuList || [],
-    specList: apiData?.specList || [],
+    specList: mergedSpecList,
     tags: (apiData?.tags?.length ? apiData.tags : domTags),
     ozonCategoryId: apiData?.ozonCategoryId || 0,
     ozonTypeId: apiData?.ozonTypeId || 0,
@@ -712,7 +910,7 @@ async function scrollAndCollect(
     const currentCards = scanListCards()
     const oldFirstId = currentCards.length > 0 ? currentCards[0].sourceId : ''
 
-    const clicked = findAndClickNextPage()
+    const clicked = await findAndClickNextPage()
     if (!clicked) {
       console.log(`[鲸智 AI] No more pages. Collected ${allCards.size} products total.`)
       break
@@ -826,9 +1024,9 @@ async function fetchProductDetailFromHtml(sourceId: string, sourceUrl?: string):
     }
     // 分类面包屑
     if (!result.category) {
-      const crumbs = doc.querySelectorAll('[data-widget="webBreadcrumb"] a')
+      const crumbs = doc.querySelectorAll('[data-widget="webBreadcrumb"] a, [data-widget="breadCrumbs"] a, [data-widget="webBreadcrumbs"] a, [data-widget*="Breadcrumb"] a, [data-widget*="breadCrumb"] a, [data-widget*="breadcrumb"] a')
       if (crumbs.length > 0) {
-        result.category = Array.from(crumbs).map(a => a.textContent?.trim()).filter(Boolean).join(' > ')
+        result.category = extractCategoryFromBreadcrumbItems(Array.from(crumbs).map(a => a.textContent?.trim() || ''))
       }
     }
     // 描述
@@ -838,15 +1036,15 @@ async function fetchProductDetailFromHtml(sourceId: string, sourceUrl?: string):
     }
     // 属性
     if (!result.attributes!.length) {
-      const attrsContainer = doc.querySelector('[data-widget="webCharacteristics"]')
-      if (attrsContainer) {
-        const rows = attrsContainer.querySelectorAll('tr, [class*="row"], dl > div')
+      const attrsContainers = doc.querySelectorAll('[data-widget*="Characteristics"], [data-widget*="characteristics"], [data-widget*="Properties"], [data-widget*="Specifications"]')
+      for (const attrsContainer of Array.from(attrsContainers)) {
+        const rows = attrsContainer.querySelectorAll('tr, li, [class*="row"], dl > div')
         for (const row of Array.from(rows)) {
           const cells = row.querySelectorAll('td, span, dt, dd')
           if (cells.length >= 2) {
             const name = cells[0]?.textContent?.trim()
-            const value = cells[1]?.textContent?.trim()
-            if (name && value && name !== value) result.attributes!.push({ name, value })
+            const value = Array.from(cells).slice(1).map((cell) => cell.textContent?.trim() || '').filter(Boolean).join(', ')
+            addProductAttribute(result.attributes!, name, value)
           }
         }
       }
@@ -864,6 +1062,9 @@ async function fetchProductDetailFromHtml(sourceId: string, sourceUrl?: string):
         if (src) result.images = [src]
       }
     }
+
+    result.attributes = mergeProductAttributes(result.attributes)
+    result.specList = extractPhysicalSpecFromAttributes(result.attributes || [])
 
     console.log(`[鲸智 AI] HTML 降级 ${sourceId}: brand=${result.brand}, title=${result.title?.substring(0, 50)}, attrs=${result.attributes!.length}`)
     // 至少有标题或品牌才算成功
@@ -932,6 +1133,13 @@ function parseInternalApiResponse(data: any, sourceId: string): Partial<ScrapedP
     let widget: any
     try { widget = JSON.parse(val as string) } catch { continue }
 
+    extractOzonIdsFromObject(widget, result)
+    const normalizedWidgetKey = key.toLowerCase()
+    // 类目只从明确 breadcrumb widget 解析；不从任意 Category/category key 猜测，避免误采内部推荐分类。
+    if (normalizedWidgetKey.includes('haract') || normalizedWidgetKey.includes('roper') || normalizedWidgetKey.includes('pecif') || normalizedWidgetKey.includes('webfull')) {
+      extractAttributePairsFromObject(widget, result.attributes!)
+    }
+
     // --- 标题: webProductHeading ---
     if (!result.title && key.includes('webProductHeading')) {
       const t = widget.title || widget.options?.title || widget.text || ''
@@ -983,12 +1191,9 @@ function parseInternalApiResponse(data: any, sourceId: string): Partial<ScrapedP
     }
 
     // --- 分类面包屑: webBreadcrumb ---
-    if (!result.category && key.includes('webBreadcrumb')) {
-      const crumbs = widget.options?.items || widget.items || widget.links || []
-      if (Array.isArray(crumbs) && crumbs.length > 1) {
-        const cats = crumbs.map((c: any) => c.title || c.text || c.label || c.name || '').filter(Boolean)
-        if (cats.length > 1) result.category = cats.slice(1).join(' > ')
-      }
+    if (!result.category && isCategoryWidgetKey(key)) {
+      const category = extractCategoryFromWidget(widget)
+      if (category) result.category = category
     }
 
     // --- 描述: webDescription ---
@@ -1048,7 +1253,7 @@ function parseInternalApiResponse(data: any, sourceId: string): Partial<ScrapedP
           if (!value) value = ch.value || ch.text || ''
 
           if (name && String(name).length > 1) {
-            result.attributes!.push({ name: String(name), value: String(value) })
+            addProductAttribute(result.attributes!, name, value)
             if (!result.brand && /^бренд$/i.test(String(name).trim())) {
               result.brand = String(value).trim()
             }
@@ -1074,7 +1279,7 @@ function parseInternalApiResponse(data: any, sourceId: string): Partial<ScrapedP
                 for (const v of prop.values) { if (v?.text) { pValue = v.text; break } }
               }
               if (pName && String(pName).length > 1) {
-                result.attributes!.push({ name: String(pName), value: String(pValue) })
+                addProductAttribute(result.attributes!, pName, pValue)
                 if (!result.brand && /^бренд$/i.test(String(pName).trim())) {
                   result.brand = String(pValue).trim()
                 }
@@ -1105,7 +1310,7 @@ function parseInternalApiResponse(data: any, sourceId: string): Partial<ScrapedP
               for (const v of prop.values) { if (v?.text) { pValue = v.text; break } }
             }
             if (pName && String(pName).length > 1) {
-              result.attributes!.push({ name: String(pName), value: String(pValue) })
+              addProductAttribute(result.attributes!, pName, pValue)
               if (!result.brand && /^бренд$/i.test(String(pName).trim())) {
                 result.brand = String(pValue).trim()
               }
@@ -1132,7 +1337,7 @@ function parseInternalApiResponse(data: any, sourceId: string): Partial<ScrapedP
               for (const v of prop.values) { if (v?.text) { pValue = v.text; break } }
             }
             if (pName && String(pName).length > 1) {
-              result.attributes!.push({ name: String(pName), value: String(pValue) })
+              addProductAttribute(result.attributes!, pName, pValue)
             }
           }
         }
@@ -1158,36 +1363,12 @@ function parseInternalApiResponse(data: any, sourceId: string): Partial<ScrapedP
     }
   }
 
-  // ── Step 2: 品牌 fallback — 从标题中提取 ──
-  if (!result.brand && result.title) {
-    const firstWord = result.title.split(/[\s,]/)[0]
-    if (firstWord && firstWord.length > 1 && firstWord.length < 40 && /^[A-Za-zА-Яа-я]/.test(firstWord)) {
-      result.brand = firstWord
-    }
-  }
+  // 不从标题或面包屑猜测品牌。品牌必须来自 webBrand/brand 链接/JSON-LD/属性中的「Бренд」。
 
-  // ── Step 3: 品牌 fallback — 从 breadcrumbs 中提取 ──
-  if (!result.brand) {
-    for (const [key, val] of Object.entries(states)) {
-      if (typeof val !== 'string' || !key.includes('Breadcrumb')) continue
-      try {
-        const w = JSON.parse(val as string)
-        const crumbs = w.options?.items || w.items || w.links || []
-        if (Array.isArray(crumbs) && crumbs.length >= 2) {
-          for (let i = crumbs.length - 2; i >= 0; i--) {
-            const name = crumbs[i].title || crumbs[i].text || ''
-            if (name && name.length > 1 && name.length < 60 && !name.includes('ozon.ru')) {
-              result.brand = name
-              break
-            }
-          }
-        }
-      } catch {}
-    }
-  }
+  result.attributes = mergeProductAttributes(result.attributes)
 
   // ── Step 4: 从属性中提取物理规格、标识符、折扣、库存 → JSON arrays ──
-  const specAccum: { weight_g: number; depth_mm: number; height_mm: number; width_mm: number } = { weight_g: 0, depth_mm: 0, height_mm: 0, width_mm: 0 }
+  const specAccum: ScrapedProduct['specList'][number] = { weight_g: 0, depth_mm: 0, height_mm: 0, width_mm: 0 }
   if (result.attributes && result.attributes.length > 0) {
     for (const attr of result.attributes) {
       const name = (attr.name || '').toLowerCase().trim()
@@ -1203,39 +1384,25 @@ function parseInternalApiResponse(data: any, sourceId: string): Partial<ScrapedP
         result.stock = val
       }
 
-      // 重量
-      if (!specAccum.weight_g && (name.includes('вес') || name === 'масса' || name === 'weight')) {
-        const m = val.match(/([\d.,]+)\s*(г|грамм|kg|кг)/i)
-        if (m) {
-          let num = parseFloat(m[1].replace(',', '.'))
-          if (/kg|кг/i.test(m[2])) num *= 1000
-          if (num > 0) specAccum.weight_g = Math.round(num)
-        }
+      // 重量 / 尺寸：统一走单位解析，支持 мм/см/м 和 г/кг。
+      if (!specAccum.weight_g && /(вес|масса|weight|重量)/.test(name)) {
+        specAccum.weight_g = parseWeightToGrams(val, name)
       }
 
-      // Combined dimensions: "200 x 150 x 50 мм"
-      if (name.includes('размер') || name.includes('габарит')) {
-        const m = val.match(/(\d[\d.,]*)\s*[x×\*]\s*(\d[\d.,]*)\s*[x×\*]\s*(\d[\d.,]*)\s*мм/i)
-        if (m && !specAccum.depth_mm) {
-          specAccum.depth_mm = Math.round(parseFloat(m[1].replace(',', '.')))
-          specAccum.width_mm = Math.round(parseFloat(m[2].replace(',', '.')))
-          specAccum.height_mm = Math.round(parseFloat(m[3].replace(',', '.')))
-        }
+      const dimMatch = val.match(/(\d[\d\s,.]*)\s*(?:x|х|×|\*)\s*(\d[\d\s,.]*)\s*(?:x|х|×|\*)\s*(\d[\d\s,.]*)\s*(мм|mm|см|cm|м|m)?/i)
+      if (dimMatch && /(размер|габарит|dimension|size|длина|ширина|высота|尺寸)/.test(name)) {
+        const unit = dimMatch[4] || (/(см|cm)/i.test(`${name} ${val}`) ? 'см' : /(м|m)/i.test(`${name} ${val}`) ? 'м' : 'мм')
+        const toMm = (raw: string) => parseLengthToMm(`${raw} ${unit}`, name)
+        if (!specAccum.depth_mm) specAccum.depth_mm = toMm(dimMatch[1])
+        if (!specAccum.width_mm) specAccum.width_mm = toMm(dimMatch[2])
+        if (!specAccum.height_mm) specAccum.height_mm = toMm(dimMatch[3])
       }
 
-      // Individual dimensions
-      if (!specAccum.depth_mm && (name.includes('глубин') || name.includes('длин') || name === 'depth')) {
-        const m = val.match(/([\d.,]+)\s*мм/i)
-        if (m) specAccum.depth_mm = Math.round(parseFloat(m[1].replace(',', '.')))
-      }
-      if (!specAccum.height_mm && (name.includes('высот') || name === 'height')) {
-        const m = val.match(/([\d.,]+)\s*мм/i)
-        if (m) specAccum.height_mm = Math.round(parseFloat(m[1].replace(',', '.')))
-      }
-      if (!specAccum.width_mm && (name.includes('ширин') || name === 'width')) {
-        const m = val.match(/([\d.,]+)\s*мм/i)
-        if (m) specAccum.width_mm = Math.round(parseFloat(m[1].replace(',', '.')))
-      }
+      if (!specAccum.depth_mm && /(глубин|длин|depth|length|длина|长)/.test(name)) specAccum.depth_mm = parseLengthToMm(val, name)
+      if (!specAccum.height_mm && /(высот|height|высота|高)/.test(name)) specAccum.height_mm = parseLengthToMm(val, name)
+      if (!specAccum.width_mm && /(ширин|width|ширина|宽)/.test(name)) specAccum.width_mm = parseLengthToMm(val, name)
+      if (!specAccum.color && /(цвет|color|颜色)/.test(name) && val.length <= 80) specAccum.color = val
+      if (!specAccum.size && /(размер|size|尺码|规格)/.test(name) && val.length <= 120) specAccum.size = val
 
       // 条形码
       if (name.includes('штрихкод') || name.includes('barcode') || name === 'ean' || name === 'gtin') {
@@ -1256,9 +1423,12 @@ function parseInternalApiResponse(data: any, sourceId: string): Partial<ScrapedP
     }
   }
   // Flush spec accumulator → specList
-  if (specAccum.weight_g || specAccum.depth_mm || specAccum.height_mm || specAccum.width_mm) {
+  if (specAccum.weight_g || specAccum.depth_mm || specAccum.height_mm || specAccum.width_mm || specAccum.color || specAccum.size) {
     result.specList!.push(specAccum)
   }
+  const inferredSpecList = extractPhysicalSpecFromAttributes(result.attributes || [])
+  const mergedSpec = mergePhysicalSpec(result.specList?.[0], inferredSpecList[0])
+  result.specList = mergedSpec ? [mergedSpec] : []
 
   // ── Step 5: 从 widget 中直接提取折扣 ──
   if (!result.discount) {
@@ -1518,7 +1688,20 @@ export default defineContentScript({
                   sellerName: detail.sellerName || p.sellerName,
                   description: detail.description || p.description,
                   images: (detail.images && detail.images.length > 0) ? detail.images : p.images,
-                  attributes: (detail.attributes && detail.attributes.length > 0) ? detail.attributes : p.attributes,
+                  attributes: mergeProductAttributes(detail.attributes, p.attributes),
+                  specList: (() => {
+                    const attrs = mergeProductAttributes(detail.attributes, p.attributes)
+                    const inferred = extractPhysicalSpecFromAttributes(attrs)
+                    const spec = mergePhysicalSpec(detail.specList?.[0], inferred[0])
+                    return spec ? [spec] : []
+                  })(),
+                  skuList: detail.skuList || p.skuList,
+                  videoUrls: detail.videoUrls || p.videoUrls,
+                  tags: detail.tags || p.tags,
+                  ozonCategoryId: detail.ozonCategoryId || p.ozonCategoryId,
+                  ozonTypeId: detail.ozonTypeId || p.ozonTypeId,
+                  discount: detail.discount || p.discount,
+                  stock: detail.stock || p.stock,
                   price: detail.price || p.price,
                   oldPrice: detail.oldPrice || p.oldPrice,
                   rating: detail.rating || p.rating,

@@ -117,10 +117,11 @@ export default defineBackground(() => {
     const isOzon = /ozon\.ru/.test(url) && /\/\d+\/?$/.test(url)
     const isWB = /wildberries\.ru/.test(url) && /\/\d+\/?$/.test(url)
     const is1688 = /detail\.1688\.com\/offer\//.test(url) || /s\.1688\.com\/selloffer/.test(url) || /s\.1688\.com\/offer_search/.test(url)
+    const isPdd = /(yangkeduo|pinduoduo)\.com/.test(url) && (/goods\.html/i.test(url) || /[?&](goods_id|goodsId)=\d+/.test(url))
 
-    if (isOzon || isWB || is1688) {
+    if (isOzon || isWB || is1688 || isPdd) {
       try {
-        const file = is1688 ? 'content-scripts/ali1688.js' : isOzon ? 'content-scripts/ozon.js' : 'content-scripts/wb.js'
+        const file = isPdd ? 'content-scripts/pdd.js' : is1688 ? 'content-scripts/ali1688.js' : isOzon ? 'content-scripts/ozon.js' : 'content-scripts/wb.js'
         await browser.scripting.executeScript({
           target: { tabId },
           files: [file],
@@ -150,6 +151,7 @@ async function handleProductScraped(product: ScrapedProduct) {
 /** 根据 URL 判断平台并返回对应的 content script 文件 */
 function getContentScriptFile(url: string): string | null {
   if (/detail\.1688\.com\/offer\//.test(url) || /s\.1688\.com\/selloffer/.test(url) || /s\.1688\.com\/offer_search/.test(url)) return 'content-scripts/ali1688.js'
+  if (/(yangkeduo|pinduoduo)\.com/.test(url)) return 'content-scripts/pdd.js'
   if (/ozon\.ru/.test(url)) return 'content-scripts/ozon.js'
   if (/wildberries\.ru/.test(url)) return 'content-scripts/wb.js'
   return null
@@ -263,10 +265,11 @@ async function checkCurrentPage() {
     const isOzon = /ozon\.ru/.test(url)
     const isWB = /wildberries\.ru/.test(url)
     const is1688 = /1688\.com/.test(url)
+    const isPdd = /(yangkeduo|pinduoduo)\.com/.test(url)
 
-    if (!isOzon && !isWB && !is1688) return { isSupported: false }
+    if (!isOzon && !isWB && !is1688 && !isPdd) return { isSupported: false }
 
-    const platform = isOzon ? 'ozon' : isWB ? 'wb' : '1688'
+    const platform = isOzon ? 'ozon' : isWB ? 'wb' : is1688 ? '1688' : 'pdd'
 
     // ★ 关键修复:确保 content script 已注入再检测,避免偶尔返回空
     await ensureContentScript(tab.id!, url)
@@ -277,7 +280,7 @@ async function checkCurrentPage() {
       return {
         isSupported: true,
         platform: pageCheck.platform || platform,
-        isProductPage: pageCheck.isProductPage ?? (is1688 ? /detail\.1688\.com\/offer\//.test(url) : /\/product\//i.test(url) || /\/\d+\/?$/.test(url) || /\-\d+\/?$/.test(new URL(url).pathname)),
+        isProductPage: pageCheck.isProductPage ?? (is1688 ? /detail\.1688\.com\/offer\//.test(url) : isPdd ? (/goods\.html/i.test(url) || /[?&](goods_id|goodsId)=\d+/.test(url)) : /\/product\//i.test(url) || /\/\d+\/?$/.test(url) || /\-\d+\/?$/.test(new URL(url).pathname)),
         isListPage: pageCheck.isListPage ?? false,
         pageType: pageCheck.pageType || 'unknown',
         tabId: tab.id,
@@ -285,9 +288,11 @@ async function checkCurrentPage() {
       }
     } catch {
       // content script 未加载,用 URL 猜测
-      const isProductPage = is1688 ? /detail\.1688\.com\/offer\//.test(url) : /\/product\//i.test(url) || /\/\d+\/?$/.test(url) || /\-\d+\/?$/.test(new URL(url).pathname)
+      const isProductPage = is1688 ? /detail\.1688\.com\/offer\//.test(url) : isPdd ? (/goods\.html/i.test(url) || /[?&](goods_id|goodsId)=\d+/.test(url)) : /\/product\//i.test(url) || /\/\d+\/?$/.test(url) || /\-\d+\/?$/.test(new URL(url).pathname)
       const isListPage = is1688
         ? /s\.1688\.com\/(selloffer|offer_search|company)/.test(url)
+        : isPdd
+          ? /(search|mall|category|list|index)/i.test(url) && !isProductPage
         : /\/(category|brand|search|seller|collection)\//i.test(url)
       return {
         isSupported: true,

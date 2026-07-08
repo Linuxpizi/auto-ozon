@@ -26,21 +26,27 @@
         <tr v-for="order in orders" :key="order.id">
           <td>
             <div style="display: flex; align-items: center; gap: 6px;">
-              <img v-if="order.image_url" :src="order.image_url"
-                style="width: 64px; height: 64px; object-fit: cover; border-radius: 6px; flex-shrink: 0; cursor: pointer;" alt=""
-                @mouseenter="showHoverImage($event, order.image_url)"
-                @mouseleave="hideHoverImage" />
               <a v-if="getProductUrl(order)"
                 :href="getProductUrl(order)!"
                 target="_blank" rel="noopener noreferrer"
-                style="min-width: 0; color: var(--accent, #1677ff); text-decoration: none; display: block;"
+                style="min-width: 0; color: var(--accent, #1677ff); text-decoration: none; display: flex; align-items: center; gap: 6px;"
                 @mouseenter="$event.currentTarget.style.textDecoration='underline'"
                 @mouseleave="$event.currentTarget.style.textDecoration='none'">
-                <div style="font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: underline; text-underline-offset: 2px;">{{
-                  order.shipment_number }}</div>
-                <div style="font-size: 12px; color: var(--accent, #1677ff); text-decoration: inherit;">{{ order.offer_id || order.sku }}</div>
+                <img v-if="order.image_url" :src="order.image_url"
+                  style="width: 64px; height: 64px; object-fit: cover; border-radius: 6px; flex-shrink: 0; cursor: pointer;" alt=""
+                  @mouseenter="showHoverImage($event, order.image_url)"
+                  @mouseleave="hideHoverImage" />
+                <div style="min-width: 0;">
+                  <div style="font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-underline-offset: 2px;">{{
+                    order.shipment_number }}</div>
+                  <div style="font-size: 12px; color: var(--accent, #1677ff); text-decoration: inherit;">{{ order.offer_id || order.sku }}</div>
+                </div>
               </a>
               <div v-else style="min-width: 0;">
+                <img v-if="order.image_url" :src="order.image_url"
+                  style="width: 64px; height: 64px; object-fit: cover; border-radius: 6px; flex-shrink: 0; cursor: pointer; float: left; margin-right: 6px;" alt=""
+                  @mouseenter="showHoverImage($event, order.image_url)"
+                  @mouseleave="hideHoverImage" />
                 <div style="font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">{{
                   order.shipment_number }}</div>
                 <div style="font-size: 12px; color: var(--text-secondary);">{{ order.offer_id || order.sku }}</div>
@@ -131,29 +137,33 @@ function isInspectionOrder(orderNumber: string): boolean {
 }
 
 function getProductUrl(order: OrderItem): string | null {
-  // Ozon consumer-facing product page
-  // https://www.ozon.ru/product/{product_id}/
+  // Ozon consumer-facing product page uses the public SKU number, not the
+  // seller API product_id. Using product_id often redirects to Ozon search
+  // (e.g. /search/?deny_category_prediction=true) instead of the product page.
+  // https://www.ozon.ru/product/{sku}/
   const OZON_PRODUCT_BASE = "https://www.ozon.ru/product";
 
-  // Try order.product_id first
-  if (order.product_id) {
-    return `${OZON_PRODUCT_BASE}/${order.product_id}/`;
+  const sku = normalizeOzonSku(order.sku);
+  if (sku) {
+    return `${OZON_PRODUCT_BASE}/${sku}/`;
   }
-  // Fallback: order.sku IS the Ozon product_id
-  if (order.sku && /^\d+$/.test(order.sku)) {
-    return `${OZON_PRODUCT_BASE}/${order.sku}/`;
-  }
-  // Fallback: extract from products_json
+
+  // Fallback: extract public SKU from products_json for multi-product orders.
   try {
     const products = JSON.parse(order.products_json || "[]");
     if (products.length > 0) {
-      const pid = products[0].product_id || products[0].sku;
-      if (pid && /^\d+$/.test(String(pid))) {
-        return `${OZON_PRODUCT_BASE}/${pid}/`;
+      const productSku = normalizeOzonSku(products[0]?.sku);
+      if (productSku) {
+        return `${OZON_PRODUCT_BASE}/${productSku}/`;
       }
     }
   } catch {}
   return null;
+}
+
+function normalizeOzonSku(value: unknown): string {
+  const sku = String(value ?? "").trim();
+  return /^\d+$/.test(sku) ? sku : "";
 }
 
 

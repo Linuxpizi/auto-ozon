@@ -102,6 +102,11 @@ class OzonWarehouse:
     name: str
     is_rfbs: bool
     status: str
+    is_express: bool = False
+    warehouse_type: str = ""
+    address: str = ""
+    phone: str = ""
+    raw: Dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
@@ -268,19 +273,92 @@ class OzonClient:
         POST /v2/warehouse/list
         https://docs.ozon.ru/api/seller/zh/#tag/WarehouseAPI
         """
-        data = self._request("POST", "/v2/warehouse/list", json_body={})
+        return self.list_warehouses()
+
+    @_cached(ttl=600)
+    def list_warehouses(
+        self,
+        cursor: str = "",
+        limit: int = 100,
+        warehouse_ids: Optional[list[int]] = None,
+    ) -> list[OzonWarehouse]:
+        """List FBS/rFBS warehouses according to WarehouseAPI.
+
+        POST /v2/warehouse/list
+        Body fields: cursor, limit, warehouse_ids.
+        """
+        payload: dict[str, Any] = {"limit": limit}
+        if cursor:
+            payload["cursor"] = cursor
+        if warehouse_ids:
+            payload["warehouse_ids"] = warehouse_ids
+        data = self._request("POST", "/v2/warehouse/list", json_body=payload)
         result = data.get("warehouses", data.get("result", []))
         warehouses = []
         for item in result:
+            address_info = item.get("address_info") or {}
             warehouses.append(
                 OzonWarehouse(
                     warehouse_id=item.get("warehouse_id", 0),
                     name=item.get("name", ""),
                     is_rfbs=item.get("is_rfbs", False),
                     status=item.get("status", ""),
+                    is_express=item.get("is_express", False),
+                    warehouse_type=item.get("warehouse_type", ""),
+                    address=address_info.get("address", ""),
+                    phone=item.get("phone", ""),
+                    raw=item,
                 )
             )
         return warehouses
+
+    def list_delivery_methods(
+        self,
+        cursor: str = "",
+        limit: int = 100,
+        warehouse_ids: Optional[list[int]] = None,
+        delivery_method_ids: Optional[list[int]] = None,
+        statuses: Optional[list[str]] = None,
+        sort_dir: str = "ASC",
+    ) -> dict[str, Any]:
+        """List realFBS delivery methods.
+
+        POST /v2/delivery-method/list
+        Official body: cursor, filter.delivery_method_ids, filter.statuses,
+        filter.warehouse_ids, limit, sort_dir.
+        """
+        payload: dict[str, Any] = {
+            "filter": {},
+            "limit": limit,
+            "sort_dir": sort_dir,
+        }
+        if cursor:
+            payload["cursor"] = cursor
+        if warehouse_ids:
+            payload["filter"]["warehouse_ids"] = warehouse_ids
+        if delivery_method_ids:
+            payload["filter"]["delivery_method_ids"] = delivery_method_ids
+        if statuses:
+            payload["filter"]["statuses"] = statuses
+        return self._request("POST", "/v2/delivery-method/list", json_body=payload)
+
+    def archive_warehouse(self, warehouse_id: int) -> dict[str, Any]:
+        """Archive a warehouse.
+
+        POST /v1/warehouse/archive
+        """
+        return self._request(
+            "POST", "/v1/warehouse/archive", json_body={"warehouse_id": warehouse_id}
+        )
+
+    def unarchive_warehouse(self, warehouse_id: int) -> dict[str, Any]:
+        """Unarchive a warehouse.
+
+        POST /v1/warehouse/unarchive
+        """
+        return self._request(
+            "POST", "/v1/warehouse/unarchive", json_body={"warehouse_id": warehouse_id}
+        )
 
     def get_fbs_postings(
         self,

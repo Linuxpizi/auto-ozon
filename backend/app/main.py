@@ -6,7 +6,7 @@ from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
-from app.api.routers import dashboard, order, store, monitor, listing, finance, task_config, precision_listing, intelligence, browser_sync, selection, upload
+from app.api.routers import dashboard, order, store, monitor, listing, finance, task_config, precision_listing, intelligence, browser_sync, selection, upload, logistics
 from app.api.routers import prompt_template, title_optimize, product_optimize, image_prompt, ai_text, ai_image
 from app.api.routers import exchange_rate
 from app.api.routers import return_order, feishu_config, powerpaint
@@ -112,6 +112,7 @@ app.include_router(intelligence.router, prefix="/api/intelligence", tags=["intel
 app.include_router(browser_sync.router, prefix="/api/browser-sync", tags=["browser-sync"])
 app.include_router(selection.router, prefix="/api/selection", tags=["selection"])
 app.include_router(upload.router, prefix="/api/upload", tags=["upload"])
+app.include_router(logistics.router, prefix="/api/logistics", tags=["logistics"])
 
 # ── Prompt Engine routes ──────────────────────────────────────────────
 app.include_router(title_optimize.router, prefix="/api/v1/title", tags=["prompt-engine"])

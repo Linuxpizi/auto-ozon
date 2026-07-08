@@ -58,6 +58,7 @@ const menuOptions: MenuOption[] = [
   { type: "divider", key: "d1" },
   { label: "选品中心", key: "ProductSelection", icon: renderIcon("🔍") },
   { label: "上架管理", key: "UploadManagement", icon: renderIcon("📦") },
+  { label: "物流", key: "Logistics", icon: renderIcon("🚚") },
   { type: "divider", key: "d2" },
   { label: "定时任务", key: "TaskConfig", icon: renderIcon("⚙️") },
   { label: "飞书配置", key: "FeishuConfig", icon: renderIcon("🔔") },

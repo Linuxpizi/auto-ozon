@@ -1082,26 +1082,39 @@ async function fetchProductDetailFromHtml(sourceId: string, sourceUrl?: string):
  */
 async function fetchProductDetailFromApi(sourceId: string, sourceUrl?: string): Promise<Partial<ScrapedProduct> | null> {
   // 内容脚本直接 fetch（同源请求，携带 cookie）
+  const candidatePaths: string[] = []
   try {
-    await randomDelay(200, 600)
-    const apiUrl = `${OZON_INTERNAL_API}?url=/product/${sourceId}/`
-    const resp = await fetch(apiUrl, {
-      headers: {
-        'accept': 'application/json',
-        'x-requested-with': 'XMLHttpRequest',
-      },
-      credentials: 'include',
-    })
-    console.log(`[鲸智 AI] fetchProductDetailFromApi ${sourceId}: status=${resp.status}`)
-    if (resp.ok) {
-      const data = await resp.json()
-      const result = parseInternalApiResponse(data, sourceId)
-      if (result) return result
-    } else {
-      console.warn(`[鲸智 AI] API ${sourceId} returned ${resp.status}`)
+    const u = new URL(sourceUrl || location.href, location.origin)
+    // Ozon 内部 API 对真实 slug path 更友好，例如 /product/name-1425179442/
+    // 仅保留 pathname，避免列表页跟踪参数影响返回的 widgetStates。
+    if (u.pathname.includes('/product/')) {
+      candidatePaths.push(u.pathname.endsWith('/') ? u.pathname : `${u.pathname}/`)
     }
-  } catch (e) {
-    console.warn(`[鲸智 AI] JSON API ${sourceId} 请求失败:`, e)
+  } catch { /* ignore invalid sourceUrl */ }
+  candidatePaths.push(`/product/${sourceId}/`)
+
+  for (const productPath of Array.from(new Set(candidatePaths))) {
+    try {
+      await randomDelay(200, 600)
+      const apiUrl = `${OZON_INTERNAL_API}?url=${encodeURIComponent(productPath)}`
+      const resp = await fetch(apiUrl, {
+        headers: {
+          'accept': 'application/json',
+          'x-requested-with': 'XMLHttpRequest',
+        },
+        credentials: 'include',
+      })
+      console.log(`[鲸智 AI] fetchProductDetailFromApi ${sourceId}: path=${productPath} status=${resp.status}`)
+      if (resp.ok) {
+        const data = await resp.json()
+        const result = parseInternalApiResponse(data, sourceId)
+        if (result) return result
+      } else {
+        console.warn(`[鲸智 AI] API ${sourceId} path=${productPath} returned ${resp.status}`)
+      }
+    } catch (e) {
+      console.warn(`[鲸智 AI] JSON API ${sourceId} path=${productPath} 请求失败:`, e)
+    }
   }
 
   // HTML 页面降级 (用真实 URL)

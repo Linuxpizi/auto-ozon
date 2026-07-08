@@ -1189,12 +1189,13 @@ async function handleAiOptimize(target: "title" | "description") {
   aiTextLoading.value = true;
   try {
     const res = await optimizeDescription({
-      title: target === "title" ? undefined : editProduct.value.title,
+      title: editProduct.value.title || "",
       description: target === "description" ? text : undefined,
       attributes: (editProduct.value.attributes || []).reduce((acc: any, a: any) => {
         if (a.name) acc[a.name] = a.value;
         return acc;
       }, {}),
+      field_type: target,
       context: editProduct.value.category || "",
     });
     if (res.description) {
@@ -1260,6 +1261,7 @@ async function handleOneClickAiOptimize() {
             if (a.name) acc[a.name] = a.value;
             return acc;
           }, {}),
+          field_type: "title",
           context: editProduct.value.category || "",
         });
         if (titleRes.description) {
@@ -1273,7 +1275,13 @@ async function handleOneClickAiOptimize() {
     if (editProduct.value.description) {
       try {
         const descRes = await optimizeDescription({
+          title: editProduct.value.title || "",
           description: editProduct.value.description,
+          attributes: (editProduct.value.attributes || []).reduce((acc: any, a: any) => {
+            if (a.name) acc[a.name] = a.value;
+            return acc;
+          }, {}),
+          field_type: "description",
           context: editProduct.value.category || "",
         });
         if (descRes.description) {

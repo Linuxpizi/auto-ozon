@@ -152,6 +152,76 @@ def _parse_review_count(reviews_str: str) -> int:
         return 0
 
 
+def _positive_int(value) -> int:
+    """安全转换为正整数；空值、0、非法值都视为缺失。"""
+    try:
+        parsed = int(float(value))
+        return parsed if parsed > 0 else 0
+    except (TypeError, ValueError):
+        return 0
+
+
+def _first_spec(record) -> dict:
+    """读取采集规格 spec_list[0]，兼容数据库 JSON 被序列化成字符串的情况。"""
+    spec_list = getattr(record, "spec_list", None) or []
+    if isinstance(spec_list, str):
+        try:
+            spec_list = json.loads(spec_list)
+        except Exception:
+            spec_list = []
+    if isinstance(spec_list, list) and spec_list and isinstance(spec_list[0], dict):
+        return spec_list[0]
+    return {}
+
+
+def _resolve_upload_dimensions(record, *, weight_g=None, height_mm=None, depth_mm=None, width_mm=None) -> tuple[int, int, int, int, dict]:
+    """上传尺寸/重量优先级：用户输入 > 采集 spec_list > 安全默认值。
+
+    返回：(weight, height, depth, width, meta)。meta 用于日志/响应，方便定位哪些字段仍在使用默认值。
+    """
+    spec = _first_spec(record)
+    requested = {
+        "weight": _positive_int(weight_g),
+        "height": _positive_int(height_mm),
+        "depth": _positive_int(depth_mm),
+        "width": _positive_int(width_mm),
+    }
+    scraped = {
+        "weight": _positive_int(spec.get("weight_g")),
+        "height": _positive_int(spec.get("height_mm")),
+        "depth": _positive_int(spec.get("depth_mm")),
+        "width": _positive_int(spec.get("width_mm")),
+    }
+    defaults = {"weight": 500, "height": 100, "depth": 100, "width": 100}
+
+    values = {}
+    sources = {}
+    for key in ("weight", "height", "depth", "width"):
+        if requested[key]:
+            values[key] = requested[key]
+            sources[key] = "request"
+        elif scraped[key]:
+            values[key] = scraped[key]
+            sources[key] = "spec_list"
+        else:
+            values[key] = defaults[key]
+            sources[key] = "default"
+
+    missing = [key for key, source in sources.items() if source == "default"]
+    if missing:
+        logger.warning(
+            "Product %s missing upload dimensions %s, using safe defaults",
+            getattr(record, "id", None),
+            missing,
+        )
+
+    return values["weight"], values["height"], values["depth"], values["width"], {
+        "sources": sources,
+        "missing": missing,
+        "scraped_spec": spec,
+    }
+
+
 # ── 端点 ──────────────────────────────────────────────────────────────
 @router.post("/import")
 def import_products(body: ImportRequest, db: Session = Depends(get_db)):
@@ -392,11 +462,14 @@ def upload_to_store(product_id: int, body: UploadRequest, db: Session = Depends(
     # 构建 Ozon import payload
     offer_id = body.offer_id or f"AUTO-{record.source_id}"
 
-    # 尺寸数据: 优先使用请求中的值, 其次用默认值
-    weight = body.weight_g or 500
-    height = body.height_mm or 100
-    depth = body.depth_mm or 100
-    width = body.width_mm or 100
+    # 尺寸数据: 优先使用请求中的值，其次使用采集 spec_list，最后才使用安全默认值
+    weight, height, depth, width, dimensions_meta = _resolve_upload_dimensions(
+        record,
+        weight_g=body.weight_g,
+        height_mm=body.height_mm,
+        depth_mm=body.depth_mm,
+        width_mm=body.width_mm,
+    )
 
     # 价格处理
     price_kopecks = str(int(body.price_rub * 100)) if body.price_rub else (
@@ -478,6 +551,13 @@ def upload_to_store(product_id: int, body: UploadRequest, db: Session = Depends(
             "result": result,
             "task_id": task_id,
             "offer_id": offer_id,
+            "dimensions": {
+                "weight_g": weight,
+                "height_mm": height,
+                "depth_mm": depth,
+                "width_mm": width,
+                **dimensions_meta,
+            },
         }
     except Exception as e:
         logger.error("Upload failed for product %d: %s", product_id, str(e))
@@ -516,6 +596,19 @@ def batch_upload_products(body: BatchUploadRequest, db: Session = Depends(get_db
                 results["errors"].append({"product_id": record.id, "error": "缺少图片"})
                 continue
 
+            weight, height, depth, width, dimensions_meta = _resolve_upload_dimensions(
+                record,
+                weight_g=body.weight_g,
+                height_mm=body.height_mm,
+                depth_mm=body.depth_mm,
+                width_mm=body.width_mm,
+            )
+            if dimensions_meta["missing"]:
+                results["errors"].append({
+                    "product_id": record.id,
+                    "warning": f"缺少 {', '.join(dimensions_meta['missing'])}，已使用安全默认值",
+                })
+
             price_kopecks = str(int(body.price_rub * 100)) if body.price_rub else (
                 str(int(record.price * 100)) if record.price else "0"
             )
@@ -534,10 +627,10 @@ def batch_upload_products(body: BatchUploadRequest, db: Session = Depends(get_db
                 "barcode": "",
                 "dimension_unit": "mm",
                 "weight_unit": "g",
-                "height": body.height_mm or 100,
-                "depth": body.depth_mm or 100,
-                "width": body.width_mm or 100,
-                "weight": body.weight_g or 500,
+                "height": height,
+                "depth": depth,
+                "width": width,
+                "weight": weight,
                 "primary_image": images[0] if images else "",
                 "images": images[:10],
                 "price": price_kopecks,

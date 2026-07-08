@@ -25,14 +25,24 @@ export async function translateText(params: {
 
 /** 批量文本翻译 */
 export async function translateBatch(params: {
-  items: { key: string; value: string }[];
+  items: { key: string; text?: string; value?: string; field_type?: string }[];
+  source_lang?: string;
+  target_lang?: string;
   context?: string;
   field_type?: string;
 }) {
+  const payload = {
+    ...params,
+    items: params.items.map((item) => ({
+      key: item.key,
+      text: item.text ?? item.value ?? "",
+      field_type: item.field_type ?? params.field_type ?? "attribute",
+    })),
+  };
   return apiPost<{
     items: { key: string; original: string; translated: string }[];
     raw_output?: string;
-  }>(`${AI_PREFIX}/translate-batch`, params);
+  }>(`${AI_PREFIX}/translate-batch`, payload);
 }
 
 /** 描述优化 */
@@ -40,6 +50,7 @@ export async function optimizeDescription(params: {
   title?: string;
   description?: string;
   attributes?: Record<string, string>;
+  field_type?: "title" | "description" | "attribute" | string;
   platform?: string;
   language?: string;
   context?: string;

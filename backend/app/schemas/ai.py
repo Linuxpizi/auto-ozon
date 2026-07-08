@@ -51,13 +51,14 @@ class AIOptimizeDescriptionRequest(BaseModel):
     title: str = Field(default="", description="商品标题")
     description: str = Field(default="", description="商品描述")
     attributes: Optional[Dict[str, str]] = Field(None, description="商品属性")
+    field_type: str = Field(default="description", description="优化目标: title / description / attribute")
     platform: str = Field(default="OZON", description="目标平台")
     language: str = Field(default="ru", description="目标语言")
     context: Optional[str] = Field(None, description="额外优化要求")
 
 
 class AIOptimizeDescriptionResponse(BaseModel):
-    description: str
+    description: str = ""
     selling_points: List[str] = []
     keywords: List[str] = []
     raw_output: Optional[str] = None

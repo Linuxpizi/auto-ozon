@@ -68,17 +68,11 @@ class ScrapedProductBase(BaseModel):
                 result.pop("barcode", None)
                 result.setdefault("sku_list", [])
         # weight_g + dims → spec_list
-        has_dims = any(result.pop(f, 0) for f in ("weight_g", "depth_mm", "height_mm", "width_mm"))
-        if has_dims and "spec_list" not in result:
-            result["spec_list"] = [{
-                "weight_g": result.pop("weight_g", 0),
-                "depth_mm": result.pop("depth_mm", 0),
-                "height_mm": result.pop("height_mm", 0),
-                "width_mm": result.pop("width_mm", 0),
-            }]
+        # 注意：先集中 pop 保存值，避免 any(result.pop(...)) 把真实值消费掉后又变成 0。
+        dims = {f: result.pop(f, 0) for f in ("weight_g", "depth_mm", "height_mm", "width_mm")}
+        if any(dims.values()) and "spec_list" not in result:
+            result["spec_list"] = [dims]
         else:
-            for f in ("weight_g", "depth_mm", "height_mm", "width_mm"):
-                result.pop(f, None)
             result.setdefault("spec_list", [])
 
         # scraped_at 字符串 → datetime

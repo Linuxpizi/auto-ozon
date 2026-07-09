@@ -81,6 +81,7 @@ def create_draft(body: CreateDraftRequest, db: Session = Depends(get_db)):
             source_product_id=body.source_product_id,
             description_category_id=body.description_category_id,
             type_id=body.type_id,
+            category_name=body.category_name,
             offer_id=body.offer_id,
             name=body.name,
             price_rub=body.price_rub,

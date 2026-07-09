@@ -38,6 +38,7 @@ class CreateDraftRequest(BaseModel):
     source_product_id: int
     description_category_id: int = 0
     type_id: int = 0
+    category_name: str = ""
     offer_id: str = ""
     name: str = ""
     price_rub: float = 0.0

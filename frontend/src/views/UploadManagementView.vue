@@ -66,7 +66,7 @@
               <n-tag size="small">{{ editingDraft.store_id }}</n-tag>
             </n-form-item>
             <n-form-item label="分类">
-              <n-tag size="small">{{ editingDraft.category_name || editingDraft.description_category_id }}</n-tag>
+              <n-tag size="small">{{ formatCategoryPath(editingDraft) }}</n-tag>
             </n-form-item>
             <n-form-item label="商品名">
               <n-input v-model:value="editingDraft.name" />
@@ -189,10 +189,10 @@ const columns: DataTableColumns<any> = [
   {
     title: "分类",
     key: "category_name",
-    width: 120,
+    minWidth: 220,
     ellipsis: { tooltip: true },
     render(row: any) {
-      return row.category_name || String(row.description_category_id || "-");
+      return formatCategoryPath(row);
     },
   },
   {
@@ -283,6 +283,18 @@ const columns: DataTableColumns<any> = [
     },
   },
 ];
+
+function formatCategoryPath(row: any): string {
+  const raw = row?.category_name ? String(row.category_name) : "";
+  const normalized = raw
+    .split(/\s*(?:->|>|＞|\/|»|›)\s*/)
+    .map((part) => part.trim())
+    .filter(Boolean)
+    .join(" > ");
+
+  if (normalized) return normalized;
+  return String(row?.description_category_id || "-");
+}
 
 // ── 加载店铺列表 ──
 async function loadStores() {

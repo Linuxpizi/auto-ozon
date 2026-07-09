@@ -328,6 +328,23 @@
                           size="small"
                         />
                       </div>
+                      <div class="category-selected-card" :class="{ 'is-empty': !editSelectedCategoryLabel }">
+                        <template v-if="editSelectedCategoryLabel">
+                          <div class="category-selected-card__head">✅ 当前已选分类</div>
+                          <div class="category-selected-card__path">{{ editSelectedCategoryLabel }}</div>
+                          <div class="category-selected-card__meta">
+                            <n-tag size="tiny" type="success" :bordered="false">
+                              Category ID: {{ editProduct.description_category_id || '—' }}
+                            </n-tag>
+                            <n-tag size="tiny" type="info" :bordered="false">
+                              Type ID: {{ editProduct.type_id || '—' }}
+                            </n-tag>
+                          </div>
+                        </template>
+                        <template v-else>
+                          点击下方分类节点后，这里会显示当前已选分类
+                        </template>
+                      </div>
                       <div style="height: 360px; overflow-y: auto; padding: 4px 0;">
                         <n-tree
                           :data="categoryTreeNodes"
@@ -342,6 +359,19 @@
                       </div>
                     </div>
                   </n-popover>
+                  <div v-if="editSelectedCategoryLabel" class="category-selection-summary">
+                    <span class="category-selection-summary__label">已选</span>
+                    <span class="category-selection-summary__path">{{ editSelectedCategoryLabel }}</span>
+                    <n-tag size="tiny" type="success" :bordered="false">
+                      Category ID: {{ editProduct.description_category_id || '—' }}
+                    </n-tag>
+                    <n-tag size="tiny" type="info" :bordered="false">
+                      Type ID: {{ editProduct.type_id || '—' }}
+                    </n-tag>
+                  </div>
+                  <div v-else class="category-selection-hint">
+                    未选择分类，点击输入框后在分类树中选择
+                  </div>
                 </n-gi>
               </n-grid>
             </div>
@@ -751,6 +781,7 @@ const editCategoryPopoverShow = ref(false);
 const editSelectedCategoryKeys = ref<any[]>([]);
 const editSelectedCategoryPathLabel = ref('');
 const editCategorySearchPattern = ref('');
+const suppressEditStoreWatch = ref(false);
 
 const editSelectedCategoryLabel = computed(() => {
   if (editSelectedCategoryPathLabel.value) return editSelectedCategoryPathLabel.value;
@@ -759,28 +790,30 @@ const editSelectedCategoryLabel = computed(() => {
   return getCategoryPathLabelByKey(key);
 });
 
-function onEditStoreChange(val: number | null) {
+function resetEditCategorySelection() {
+  editSelectedCategoryKeys.value = [];
+  editSelectedCategoryPathLabel.value = '';
+  if (!editProduct.value) return;
   editProduct.value.description_category_id = null;
   editProduct.value.type_id = null;
   editProduct.value.ozon_category_id = 0;
   editProduct.value.ozon_type_id = 0;
-  editSelectedCategoryKeys.value = [];
-  editSelectedCategoryPathLabel.value = '';
+}
+
+function onEditStoreChange(val: number | null) {
+  resetEditCategorySelection();
+  expandedCategoryKeys.value = [];
   if (val) {
     loadCategoryTree(val);
   } else {
     categoryTreeNodes.value = [];
     categoryTreeMap.value.clear();
+    categoryPathLabelMap.value.clear();
   }
 }
 
 function clearEditCategorySelection() {
-  editSelectedCategoryKeys.value = [];
-  editSelectedCategoryPathLabel.value = '';
-  editProduct.value.description_category_id = null;
-  editProduct.value.type_id = null;
-  editProduct.value.ozon_category_id = 0;
-  editProduct.value.ozon_type_id = 0;
+  resetEditCategorySelection();
 }
 
 const hasChanges = computed(() => {
@@ -789,6 +822,7 @@ const hasChanges = computed(() => {
 });
 
 function openDrawer(product: any) {
+  suppressEditStoreWatch.value = true;
   const normalizedProduct = {
     ...JSON.parse(JSON.stringify(product)),
     description_category_id: product.description_category_id || product.ozon_category_id || null,
@@ -816,6 +850,9 @@ function openDrawer(product: any) {
   if (!ppDeviceInfo.value && !ppDeviceLoading.value) {
     loadPpDeviceInfo();
   }
+  nextTick(() => {
+    suppressEditStoreWatch.value = false;
+  });
 }
 
 async function saveEdit() {
@@ -873,7 +910,7 @@ async function handleCreateDraft() {
       source_product_id: d.id,
       name: d.title || "",
       description: d.description || "",
-      category_name: d.category || "",
+      category_name: editSelectedCategoryLabel.value || d.category || "",
       price_cny: d.price || 0,
       description_category_id: d.description_category_id || 0,
       type_id: d.type_id || 0,
@@ -1591,11 +1628,36 @@ function getCategoryPathLabelByKey(key: any) {
   const indexedPathLabel = categoryPathLabelMap.value.get(key);
   if (indexedPathLabel) return indexedPathLabel;
   const path = findCategoryTreeNodePathByKey(categoryTreeNodes.value, key);
-  return path.map((node: any) => node.label).filter(Boolean).join(' -> ');
+  return path.map((node: any) => node.label).filter(Boolean).join(' > ');
 }
 
 function hasCategoryChildren(node: any) {
   return Array.isArray(node?.children) && node.children.length > 0;
+}
+
+function isSelectableCategoryNode(node: any) {
+  if (!node) return false;
+  return node.description_category_id !== null
+    && node.description_category_id !== undefined
+    && String(node.description_category_id) !== '';
+}
+
+function applyEditCategorySelection(key: any, node: any) {
+  if (!isSelectableCategoryNode(node)) {
+    resetEditCategorySelection();
+    return;
+  }
+  const categoryId = node.description_category_id;
+  const typeId = node.type_id ?? null;
+
+  editSelectedCategoryKeys.value = [key];
+  editSelectedCategoryPathLabel.value = getCategoryPathLabelByKey(key);
+  if (editProduct.value) {
+    editProduct.value.description_category_id = categoryId;
+    editProduct.value.type_id = typeId;
+    editProduct.value.ozon_category_id = categoryId || 0;
+    editProduct.value.ozon_type_id = typeId || 0;
+  }
 }
 
 function toTreeNode(node: any, parentCategoryId: any = null): any {
@@ -1648,7 +1710,7 @@ function buildCategoryPathLabelMap(nodes: any[], parentLabels: string[] = [], pa
     const key = getCategoryNodeKey(node, parentCategoryId);
     const label = getCategoryNodeLabel(node);
     const pathLabels = [...parentLabels, label].filter(Boolean);
-    categoryPathLabelMap.value.set(key, pathLabels.join(' -> '));
+    categoryPathLabelMap.value.set(key, pathLabels.join(' > '));
 
     const children = Array.isArray(node.children) ? node.children : [];
     if (children.length > 0) {
@@ -1694,50 +1756,29 @@ function onCategoryTreeExpand(keys: any[]) {
   expandedCategoryKeys.value = keys;
 }
 
-// Only allow selecting leaf nodes (last level only); clicking a parent expands it.
+// Select the clicked category node. Parent nodes are also selectable because Ozon's
+// category tree may expose valid description_category_id values at intermediate
+// levels; if a node has children we keep the popover open and expand it so users
+// can continue drilling down to a more specific type/category if needed.
 function onCategoryTreeSelect(keys: any[]) {
   if (!keys || keys.length === 0) {
-    editSelectedCategoryKeys.value = [];
-    editSelectedCategoryPathLabel.value = '';
-    if (editProduct.value) {
-      editProduct.value.description_category_id = null;
-      editProduct.value.type_id = null;
-      editProduct.value.ozon_category_id = 0;
-      editProduct.value.ozon_type_id = 0;
-    }
+    resetEditCategorySelection();
     return;
   }
 
   const value = keys[keys.length - 1];
   const localChildren = categoryTreeMap.value.get(value) || [];
+  const selectedNode = findCategoryTreeNodeByKey(categoryTreeNodes.value, value);
+
+  applyEditCategorySelection(value, selectedNode);
 
   if (localChildren.length > 0) {
     if (!expandedCategoryKeys.value.includes(value)) {
       expandedCategoryKeys.value = [...expandedCategoryKeys.value, value];
     }
-    // Parent categories are navigation nodes, not selectable Ozon leaf categories.
-    editSelectedCategoryKeys.value = [];
-    editSelectedCategoryPathLabel.value = '';
-    if (editProduct.value) {
-      editProduct.value.description_category_id = null;
-      editProduct.value.type_id = null;
-      editProduct.value.ozon_category_id = 0;
-      editProduct.value.ozon_type_id = 0;
-    }
     return;
   }
 
-  editSelectedCategoryKeys.value = [value];
-  editSelectedCategoryPathLabel.value = getCategoryPathLabelByKey(value);
-  if (editProduct.value) {
-    const selectedNode = findCategoryTreeNodeByKey(categoryTreeNodes.value, value);
-    const categoryId = selectedNode?.description_category_id ?? null;
-    const typeId = selectedNode?.type_id ?? null;
-    editProduct.value.description_category_id = categoryId;
-    editProduct.value.type_id = typeId;
-    editProduct.value.ozon_category_id = categoryId || 0;
-    editProduct.value.ozon_type_id = typeId || 0;
-  }
   // Leaf selected: collapse the tree state and close the popover.
   // The selected value remains visible in the input as a breadcrumb path.
   expandedCategoryKeys.value = [];
@@ -1767,6 +1808,7 @@ function findCategoryTreeNodePathByKey(nodes: any[], key: any, parents: any[] = 
 
 // Watch store_id change -> reload full category tree
 watch(() => editProduct.value?.store_id, (newVal) => {
+  if (suppressEditStoreWatch.value) return;
   if (newVal) {
     loadCategoryTree(newVal);
   } else {
@@ -2009,6 +2051,72 @@ onMounted(() => {
   font-size: 12px;
   color: var(--text-muted);
   margin-bottom: 4px;
+}
+
+/* ── Ozon 分类选择反馈 ── */
+.category-selected-card {
+  padding: 8px 12px;
+  background: rgba(24, 160, 88, 0.08);
+  border-bottom: 1px solid rgba(24, 160, 88, 0.16);
+  font-size: 12px;
+  color: var(--text-secondary, #333);
+}
+
+.category-selected-card.is-empty {
+  background: var(--bg-elevated, #f8f9fa);
+  color: var(--text-muted, #999);
+}
+
+.category-selected-card__head {
+  font-weight: 600;
+  color: #18a058;
+  margin-bottom: 4px;
+}
+
+.category-selected-card__path {
+  line-height: 1.5;
+  word-break: break-all;
+}
+
+.category-selected-card__meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 6px;
+}
+
+.category-selection-summary {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin-top: 6px;
+  padding: 7px 8px;
+  border-radius: 6px;
+  background: rgba(24, 160, 88, 0.08);
+  border: 1px solid rgba(24, 160, 88, 0.16);
+}
+
+.category-selection-summary__label {
+  flex-shrink: 0;
+  font-size: 12px;
+  font-weight: 600;
+  color: #18a058;
+}
+
+.category-selection-summary__path {
+  min-width: 0;
+  flex: 1 1 100%;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--text-secondary, #333);
+  word-break: break-all;
+}
+
+.category-selection-hint {
+  margin-top: 6px;
+  font-size: 12px;
+  color: var(--text-muted, #999);
 }
 
 /* ── 图片画廊 ── */

@@ -31,7 +31,7 @@
         />
         <n-input
           v-model:value="keyword"
-          placeholder="搜索 Product ID / Offer ID"
+          placeholder="搜索 SKU / Offer ID / Product ID"
           clearable
           style="width: 220px;"
           size="small"

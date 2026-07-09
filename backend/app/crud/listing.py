@@ -21,6 +21,7 @@ def get_listings(
     if keyword:
         query = query.filter(
             Listing.offer_id.ilike(f"%{keyword}%")
+            | Listing.sku.ilike(f"%{keyword}%")
             | Listing.product_id.ilike(f"%{keyword}%")
         )
     return query.order_by(Listing.updated_at.desc()).offset(skip).limit(limit).all()
@@ -40,6 +41,7 @@ def count_listings(
     if keyword:
         query = query.filter(
             Listing.offer_id.ilike(f"%{keyword}%")
+            | Listing.sku.ilike(f"%{keyword}%")
             | Listing.product_id.ilike(f"%{keyword}%")
         )
     return query.count()

@@ -52,6 +52,79 @@ def clear_cache() -> None:
     _CACHE.clear()
 
 
+def _product_info_items(data: dict) -> list[dict]:
+    """Return product-info items from both documented and wrapped shapes.
+
+    Ozon endpoints are not fully consistent in this project/docs: some callers
+    receive ``{"items": [...]}``, while others receive
+    ``{"result": {"items": [...]}}``. Centralising this prevents empty detail
+    enrichment, which in turn caused wrong/blank SKU and image values.
+    """
+    if isinstance(data.get("items"), list):
+        return data.get("items", [])
+    result = data.get("result", {})
+    if isinstance(result, dict) and isinstance(result.get("items"), list):
+        return result.get("items", [])
+    if isinstance(result, list):
+        return result
+    return []
+
+
+def _clean_identifier(value: Any) -> str:
+    text = str(value or "").strip()
+    return "" if text in {"", "0", "None", "null"} else text
+
+
+def _primary_image_from_product_info(item: dict) -> str:
+    image = item.get("primary_image", "")
+    if isinstance(image, list):
+        return str(image[0] or "") if image else ""
+    if image:
+        return str(image)
+    images = item.get("images", [])
+    if isinstance(images, list) and images:
+        return str(images[0] or "")
+    return ""
+
+
+def _sku_from_product_info(item: dict) -> str:
+    """Extract the public Ozon SKU, preferring FBS SKU for this FBS app.
+
+    Product details may expose SKU as top-level ``sku`` in some API versions,
+    or as ``fbs_sku``/``fbo_sku``/``sources[].sku`` in newer responses.
+    Prefer FBS/rFBS values so 商品管理 and orders match FBS postings.
+    """
+    for key in ("fbs_sku", "rfbs_sku"):
+        sku = _clean_identifier(item.get(key))
+        if sku:
+            return sku
+
+    sources = item.get("sources", [])
+    if isinstance(sources, list):
+        # Prefer FBS/rFBS source rows when present.
+        for source in sources:
+            if not isinstance(source, dict):
+                continue
+            source_name = str(
+                source.get("source") or source.get("shipment_type") or ""
+            ).lower()
+            if "fbs" in source_name:
+                sku = _clean_identifier(source.get("sku"))
+                if sku:
+                    return sku
+        for source in sources:
+            if isinstance(source, dict):
+                sku = _clean_identifier(source.get("sku"))
+                if sku:
+                    return sku
+
+    for key in ("sku", "fbo_sku"):
+        sku = _clean_identifier(item.get(key))
+        if sku:
+            return sku
+    return ""
+
+
 import httpx
 
 
@@ -786,7 +859,7 @@ class OzonClient:
                 "/v3/product/info/list",
                 json_body={"product_id": batch},
             )
-            result.extend(data.get("items", []))
+            result.extend(_product_info_items(data))
         return result
 
     def get_images_by_offer_ids(self, offer_ids: list[str]) -> dict[str, str]:
@@ -802,9 +875,9 @@ class OzonClient:
                 "/v3/product/info/list",
                 json_body={"offer_id": batch},
             )
-            for item in data.get("result", {}).get("items", []):
+            for item in _product_info_items(data):
                 oid = item.get("offer_id", "")
-                img = item.get("primary_image", "")
+                img = _primary_image_from_product_info(item)
                 if oid and img:
                     result[oid] = img
         return result
@@ -861,9 +934,9 @@ class OzonClient:
                 "/v3/product/info/list",
                 json_body={"product_id": batch},
             )
-            for item in data.get("result", {}).get("items", []):
+            for item in _product_info_items(data):
                 pid = item.get("id", 0)
-                img = item.get("primary_image", "")
+                img = _primary_image_from_product_info(item)
                 if pid and img:
                     result[pid] = img
         return result

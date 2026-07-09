@@ -12,7 +12,12 @@ from typing import Optional
 
 from sqlalchemy.orm import Session
 
-from app.services.ozon_client import OzonClient, clear_cache
+from app.services.ozon_client import (
+    OzonClient,
+    clear_cache,
+    _primary_image_from_product_info,
+    _sku_from_product_info,
+)
 from app.models.store import Store
 from app.models.listing import Listing
 from app.crud import order as order_crud
@@ -767,19 +772,9 @@ def sync_products_for_store(db: Session, store: Store) -> int:
             info = info_map.get(listing.product_id)
             if not info:
                 continue
-            listing.sku = str(info.get("sku", "") or "")
-            if not listing.sku:
-                sources = info.get("sources", [])
-                if sources and isinstance(sources, list):
-                    listing.sku = str(sources[0].get("sku", ""))
+            listing.sku = _sku_from_product_info(info)
             listing.name = info.get("name", "")
-            # primary_image may be a list or string
-            images_raw = info.get("primary_image", [])
-            listing.primary_image = (
-                images_raw[0]
-                if isinstance(images_raw, list) and images_raw
-                else str(images_raw) if images_raw else ""
-            )
+            listing.primary_image = _primary_image_from_product_info(info)
             listing.price = str(info.get("price", ""))
             listing.old_price = str(info.get("old_price", ""))
             listing.vat = str(info.get("vat", ""))

@@ -39,7 +39,7 @@
                 <div style="min-width: 0;">
                   <div style="font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-underline-offset: 2px;">{{
                     order.shipment_number }}</div>
-                  <div style="font-size: 12px; color: var(--accent, #1677ff); text-decoration: inherit;">{{ order.offer_id || order.sku }}</div>
+                  <div style="font-size: 12px; color: var(--accent, #1677ff); text-decoration: inherit;" :title="order.offer_id ? `Offer ID: ${order.offer_id}` : ''">{{ order.sku || '—' }}</div>
                 </div>
               </a>
               <div v-else style="min-width: 0;">
@@ -49,7 +49,7 @@
                   @mouseleave="hideHoverImage" />
                 <div style="font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">{{
                   order.shipment_number }}</div>
-                <div style="font-size: 12px; color: var(--text-secondary);">{{ order.offer_id || order.sku }}</div>
+                <div style="font-size: 12px; color: var(--text-secondary);" :title="order.offer_id ? `Offer ID: ${order.offer_id}` : ''">{{ order.sku || '—' }}</div>
               </div>
             </div>
           </td>

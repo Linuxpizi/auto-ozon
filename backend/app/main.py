@@ -31,11 +31,66 @@ Base.metadata.create_all(bind=engine)
 
 # ── Auto-migration: ensure columns added after model updates ────────────
 def _ensure_scraped_product_columns():
-    """Add any columns missing from scraped_product_records (SQLite ALTER TABLE)."""
+    """Add model columns missing from scraped_product_records (SQLite ALTER TABLE)."""
     import sqlite3 as _sqlite3
+
     from app.core.config import DATABASE_URL
+
+    def _quote_default(value):
+        if value is None:
+            return ""
+        if isinstance(value, bool):
+            return f" DEFAULT {1 if value else 0}"
+        if isinstance(value, (int, float)):
+            return f" DEFAULT {value}"
+        if isinstance(value, str):
+            escaped = value.replace("'", "''")
+            return f" DEFAULT '{escaped}'"
+        return ""
+
+    def _column_type(column):
+        from sqlalchemy import Boolean, DateTime, Float, Integer, JSON, String, Text
+
+        col_type = column.type
+        if isinstance(col_type, Integer):
+            return "INTEGER"
+        if isinstance(col_type, Float):
+            return "FLOAT"
+        if isinstance(col_type, Boolean):
+            return "BOOLEAN"
+        if isinstance(col_type, DateTime):
+            return "DATETIME"
+        if isinstance(col_type, JSON):
+            return "TEXT"
+        if isinstance(col_type, Text):
+            return "TEXT"
+        if isinstance(col_type, String):
+            length = getattr(col_type, "length", None)
+            return f"VARCHAR({length})" if length else "VARCHAR"
+        return col_type.compile(dialect=engine.dialect)
+
+    def _column_default(column):
+        if column.name in {"id", "created_at", "updated_at"}:
+            return ""
+        default = column.default
+        if default is not None:
+            value = default.arg
+            if value is list:
+                return " DEFAULT '[]'"
+            if value is dict:
+                return " DEFAULT '{}'"
+            if getattr(default, "is_scalar", False):
+                return _quote_default(value)
+        if column.nullable:
+            return ""
+        if _column_type(column) == "BOOLEAN":
+            return " DEFAULT 0"
+        return ""
+
     db_path = DATABASE_URL.replace("sqlite:///", "")
     try:
+        from app.models.scraped_product import ScrapedProductRecord
+
         conn = _sqlite3.connect(db_path)
         cur = conn.cursor()
         cur.execute("PRAGMA table_info(scraped_product_records)")
@@ -43,17 +98,18 @@ def _ensure_scraped_product_columns():
         if not existing:
             conn.close()
             return
-        needed = {
-            "price_ranges": 'TEXT DEFAULT "[]"',
-            "min_order_qty": "INTEGER DEFAULT 0",
-            "supplier_url": 'VARCHAR(512) DEFAULT ""',
-            "trade_quantity": "INTEGER DEFAULT 0",
-            "currency": 'VARCHAR(8) DEFAULT ""',
-        }
-        for col, typedef in needed.items():
-            if col not in existing:
-                cur.execute(f"ALTER TABLE scraped_product_records ADD COLUMN {col} {typedef}")
-                logger.info("DB migration: added column %s", col)
+        for column in ScrapedProductRecord.__table__.columns:
+            if column.name in existing:
+                continue
+            typedef = f"{_column_type(column)}{_column_default(column)}"
+            cur.execute(f'ALTER TABLE scraped_product_records ADD COLUMN "{column.name}" {typedef}')
+            logger.info("DB migration: added column %s %s", column.name, typedef)
+        list_json_columns = ["images", "attributes", "video_urls", "sku_list", "spec_list", "price_ranges", "matched_suppliers"]
+        for column_name in list_json_columns:
+            if column_name in existing or column_name in {c.name for c in ScrapedProductRecord.__table__.columns}:
+                cur.execute(f"UPDATE scraped_product_records SET {column_name} = '[]' WHERE {column_name} IS NULL")
+        if "ozon_metrics" in existing or "ozon_metrics" in {c.name for c in ScrapedProductRecord.__table__.columns}:
+            cur.execute("UPDATE scraped_product_records SET ozon_metrics = '{}' WHERE ozon_metrics IS NULL")
         conn.commit()
         conn.close()
     except Exception as e:

@@ -36,6 +36,7 @@ class ScrapedProductRecord(Base):
     # ── Ozon 内部分类 ──
     ozon_category_id = Column(Integer, default=0, comment="Ozon description_category_id")
     ozon_type_id = Column(Integer, default=0, comment="Ozon type_id")
+    ozon_metrics = Column(JSON, default=dict, comment="Ozon 强制采集指标 docs/采集强制要求.md")
     ozon_product_id = Column(Integer, default=0, comment="Ozon product_id (上架后获得)")
 
     # ── 上架状态 ──

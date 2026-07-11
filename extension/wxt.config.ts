@@ -6,7 +6,7 @@ export default defineConfig({
   manifest: {
     name: '鲸智 AI',
     description: '鲸智 AI — 跨境电商智能采集与管理工具',
-    permissions: ['storage', 'activeTab', 'tabs', 'scripting'],
+    permissions: ['storage', 'activeTab', 'tabs', 'scripting', 'downloads'],
     host_permissions: [
       'https://www.ozon.ru/*',
       'https://ozon.ru/*',

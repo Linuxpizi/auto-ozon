@@ -23,5 +23,5 @@ declare module '#imports' {
   export { injectFloatingButton, ButtonState } from '../src/utils/floating-button';
   export { randomDelay, normalDelay, microPause, readingPause, occasionalLongPause, humanScroll, humanScrollTo, humanScrollToTop, humanScrollToBottom, simulateHover, simulateMouseLeave, humanClick, humanLinkClick, humanFetch, transitionPause, batchTransitionPause, enrichDelay, scrollPause } from '../src/utils/humanize';
   export { getSettings, saveSettings } from '../src/utils/storage';
-  export { DEFAULT_SETTINGS, Platform, ScrapedProduct, ProductAttribute, PlatformScrapingConfig, PluginSettings, ListProductSummary } from '../src/utils/types';
+  export { DEFAULT_SETTINGS, Platform, ScrapedProduct, ProductAttribute, OzonMetrics, PlatformScrapingConfig, PluginSettings, ListProductSummary } from '../src/utils/types';
 }

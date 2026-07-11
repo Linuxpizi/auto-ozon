@@ -28,7 +28,23 @@ export interface ScrapedProduct {
   /** SKU + 条形码列表 [{sku, barcode}] */
   skuList: Array<{ sku: string; barcode: string }>
   /** 规格列表 [{weight_g, depth_mm, height_mm, width_mm, color, size, ...}] */
-  specList: Array<{ weight_g: number; depth_mm: number; height_mm: number; width_mm: number; [key: string]: any }>
+  specList: Array<{
+    weight_g: number
+    depth_mm: number
+    height_mm: number
+    width_mm: number
+    /** 包装重量，按 docs/采集强制要求.md: 非 SKU 重量 */
+    package_weight_g?: number
+    /** 包装长/深，物流包装规格 */
+    package_depth_mm?: number
+    /** 包装宽，物流包装规格 */
+    package_width_mm?: number
+    /** 包装高，物流包装规格 */
+    package_height_mm?: number
+    /** 体积 cm³，优先包装尺寸，否则商品尺寸 */
+    volume_cm3?: number
+    [key: string]: any
+  }>
   /** 商品标签 (品牌、分类、促销标签等) */
   tags: string[]
 
@@ -37,6 +53,17 @@ export interface ScrapedProduct {
   ozonCategoryId: number
   /** Ozon type_id */
   ozonTypeId: number
+
+  /** Ozon 强制采集指标，按 docs/采集强制要求.md 固定输出 */
+  ozonMetrics?: OzonMetrics
+
+  // ── Ozon 物流采集字段 (docs/采集强制要求.md 推荐模型) ──
+  warehouse?: string
+  warehouseId?: string
+  logisticsType?: string
+  deliveryMethod?: string
+  deliveryRegion?: string
+  deliveryDays?: number
 
   /** 折扣文本 (如 -52%) */
   discount: string
@@ -57,6 +84,57 @@ export interface ScrapedProduct {
 export interface ProductAttribute {
   name: string
   value: string
+  /** 原始采集路径/来源，用于排查 API 语义采集是否来自可信业务字段，避免 UI 布局字段误入规格 */
+  sourcePath?: string
+}
+
+export interface OzonMetrics {
+  /** SKU */
+  sku: string
+  /** 货号 / Артикул */
+  articleNumber: string
+  brand: string
+  category: string
+  /** 促销活动 */
+  promotions: string[]
+  /** 付费推广 */
+  paidPromotion: string
+  /** 月销售额，RUB */
+  monthlyRevenue: number
+  /** 月销量 */
+  monthlySales: number
+  /** 周转动态 */
+  turnoverDynamics: string
+  /** 被跟数量 */
+  followersCount: number
+  minPrice: number
+  maxPrice: number
+  rfbsCommission: number
+  fbpCommission: number
+  /** 成交率，百分比数值 */
+  conversionRate: number
+  /** 体积，cm³ */
+  volumeCm3: number
+  lengthMm: number
+  widthMm: number
+  heightMm: number
+  weightG: number
+  /** 包装重量与包装长宽高，区别于 SKU 规格 */
+  packageWeightG: number
+  packageLengthMm: number
+  packageWidthMm: number
+  packageHeightMm: number
+  /** 仓库/配送/物流模式 */
+  warehouse: string
+  warehouseId: string
+  logisticsType: string
+  deliveryMethod: string
+  deliveryRegion: string
+  deliveryDays: number
+  /** 上架时间 */
+  listedAt: string
+  /** 当前页面/API 未能可靠命中的强制字段，便于后续补采排查 */
+  missingFields: string[]
 }
 
 /** 单个平台的采集条件 */

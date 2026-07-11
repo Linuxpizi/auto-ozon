@@ -41,6 +41,14 @@ export default defineBackground(() => {
       return true
     }
 
+    // Content script 导出 Ozon 买家端内部接口原始响应,便于人工分析 widgetStates。
+    if (message.action === 'downloadOzonApiCapture') {
+      downloadOzonApiCapture(message.payload, message.filename).then((result) => {
+        sendResponse(result)
+      })
+      return true
+    }
+
     // Popup 请求触发单个商品采集
     if (message.action === 'triggerScrape') {
       triggerScrapeInTab(message.tabId).then((result) => {
@@ -214,6 +222,32 @@ async function handleBatchSync(products: ScrapedProduct[]) {
     return { success: true, created: result.created, skipped: result.skipped }
   } catch (e) {
     console.error('[鲸智 AI] 批量同步到后端失败:', e)
+    return { success: false, error: String(e) }
+  }
+}
+
+function sanitizeDownloadFilename(value: string) {
+  return value
+    .replace(/[\\/:*?"<>|]+/g, '_')
+    .replace(/\s+/g, '_')
+    .replace(/^_+|_+$/g, '')
+    .slice(0, 180) || 'ozon-api-capture.json'
+}
+
+async function downloadOzonApiCapture(payload: any, filename?: string) {
+  try {
+    const content = JSON.stringify(payload, null, 2)
+    const dataUrl = `data:application/json;charset=utf-8,${encodeURIComponent(content)}`
+    const safeFilename = sanitizeDownloadFilename(filename || 'ozon-api-capture.json')
+    const downloadId = await browser.downloads.download({
+      url: dataUrl,
+      filename: `jingzhi-ozon-api/${safeFilename}`,
+      saveAs: false,
+      conflictAction: 'uniquify',
+    })
+    return { success: true, downloadId, filename: safeFilename }
+  } catch (e) {
+    console.warn('[鲸智 AI] Ozon API 原始响应导出失败:', e)
     return { success: false, error: String(e) }
   }
 }

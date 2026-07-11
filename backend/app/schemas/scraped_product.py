@@ -1,7 +1,8 @@
 from typing import Optional, List, Any
 from datetime import datetime, timezone
+import json
 import re
-from pydantic import BaseModel, ConfigDict, model_validator
+from pydantic import BaseModel, ConfigDict, field_validator, model_validator
 
 
 def _camel_to_snake(name: str) -> str:
@@ -37,12 +38,39 @@ class ScrapedProductBase(BaseModel):
     # ── Ozon 内部分类 ──
     ozon_category_id: int = 0
     ozon_type_id: int = 0
+    ozon_metrics: dict = {}
 
     # ── 1688 专用字段 ──
     price_ranges: List[dict] = []       # [{"minQty": 1, "maxQty": 49, "price": 12.5}]
     min_order_qty: int = 0
     supplier_url: str = ""
     trade_quantity: int = 0
+
+    @field_validator("images", "attributes", "video_urls", "sku_list", "spec_list", "price_ranges", mode="before")
+    @classmethod
+    def normalize_list_fields(cls, value):
+        if value is None or value == "":
+            return []
+        if isinstance(value, str):
+            try:
+                parsed = json.loads(value)
+            except Exception:
+                return []
+            return parsed if isinstance(parsed, list) else []
+        return value
+
+    @field_validator("ozon_metrics", mode="before")
+    @classmethod
+    def normalize_dict_fields(cls, value):
+        if value is None or value == "":
+            return {}
+        if isinstance(value, str):
+            try:
+                parsed = json.loads(value)
+            except Exception:
+                return {}
+            return parsed if isinstance(parsed, dict) else {}
+        return value
 
     @model_validator(mode='before')
     @classmethod
@@ -103,6 +131,19 @@ class ScrapedProductRead(ScrapedProductBase):
     offer_id: str = ""
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
+
+    @field_validator("matched_suppliers", mode="before")
+    @classmethod
+    def normalize_matched_suppliers(cls, value):
+        if value is None or value == "":
+            return []
+        if isinstance(value, str):
+            try:
+                parsed = json.loads(value)
+            except Exception:
+                return []
+            return parsed if isinstance(parsed, list) else []
+        return value
 
     model_config = ConfigDict(from_attributes=True)
 

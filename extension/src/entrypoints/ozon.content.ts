@@ -1,4 +1,4 @@
-import type { ProductAttribute, ScrapedProduct } from '@/utils/types'
+import type { OzonMetrics, ProductAttribute, ScrapedProduct } from '@/utils/types'
 import { injectFloatingButton } from '@/utils/floating-button'
 import {
   randomDelay, normalDelay, microPause, readingPause, occasionalLongPause,
@@ -40,22 +40,307 @@ function normalizeText(value: any): string {
   return ''
 }
 
-function addProductAttribute(attrs: ProductAttribute[], name: any, value: any) {
+function decodeOzonState(value: any): any {
+  if (typeof value !== 'string') return value
+  const text = value.trim()
+  if (!text || !/^[{[]/.test(text)) return value
+  try { return JSON.parse(text) } catch { return value }
+}
+
+function decodedOzonStateEntries(states: any): Array<[string, any]> {
+  return Object.entries(states || {})
+    .map(([key, value]) => [key, decodeOzonState(value)] as [string, any])
+    .filter(([, value]) => value && typeof value === 'object')
+}
+
+function pushUniqueText(list: string[] | undefined, value: any, maxLength = 120): string[] {
+  const target = list || []
+  const text = normalizeText(value)
+  if (!text || text.length > maxLength) return target
+  if (!target.some((item) => item.toLowerCase() === text.toLowerCase())) target.push(text)
+  return target
+}
+
+function addPriceRange(result: Partial<ScrapedProduct>, price: number, minQty = 0, maxQty = 0) {
+  if (!Number.isFinite(price) || price <= 0) return
+  result.priceRanges = result.priceRanges || []
+  const exists = result.priceRanges.some((item) => Number(item.price) === price && Number(item.minQty || 0) === minQty)
+  if (!exists) result.priceRanges.push({ minQty, maxQty, price })
+}
+
+function buildOzonApiCaptureSummary(
+  data: any,
+  parsed: Partial<ScrapedProduct> | null,
+  sourceId: string,
+  productPath: string,
+  apiUrl: string,
+  status: number,
+) {
+  const states = data?.widgetStates || data || {}
+  const widgetKeys = Object.keys(states)
+  const attrs = parsed?.attributes || []
+  const metrics = parsed?.ozonMetrics || (parsed ? buildOzonMetrics(parsed) : undefined)
+  return {
+    sourceId,
+    productPath,
+    apiUrl,
+    status,
+    capturedAt: new Date().toISOString(),
+    widgetStateCount: widgetKeys.length,
+    widgetKeys,
+    collectedFields: {
+      title: parsed?.title || '',
+      brand: parsed?.brand || '',
+      category: parsed?.category || '',
+      sellerName: parsed?.sellerName || '',
+      sellerUrl: parsed?.sellerUrl || '',
+      price: parsed?.price || 0,
+      oldPrice: parsed?.oldPrice || 0,
+      rating: parsed?.rating || 0,
+      reviewCount: parsed?.reviewCount || 0,
+      discount: parsed?.discount || '',
+      stock: parsed?.stock || '',
+      imagesCount: parsed?.images?.length || 0,
+      videoUrlsCount: parsed?.videoUrls?.length || 0,
+      attributesCount: attrs.length,
+      attributeNames: attrs.map((attr) => attr.name).filter(Boolean),
+      attributeSources: attrs
+        .map((attr) => ({ name: attr.name, value: attr.value, sourcePath: (attr as any).sourcePath || '' }))
+        .filter((attr) => attr.sourcePath),
+      skuList: parsed?.skuList || [],
+      specList: parsed?.specList || [],
+      logistics: {
+        warehouse: parsed?.warehouse || '',
+        warehouseId: parsed?.warehouseId || '',
+        logisticsType: parsed?.logisticsType || '',
+        deliveryMethod: parsed?.deliveryMethod || '',
+        deliveryRegion: parsed?.deliveryRegion || '',
+        deliveryDays: parsed?.deliveryDays || 0,
+      },
+      ozonMetrics: metrics,
+    },
+  }
+}
+
+function sanitizeOzonCapturePart(value: string) {
+  return normalizeText(value).replace(/[^a-zA-Z0-9._-]+/g, '_').replace(/^_+|_+$/g, '').slice(0, 80)
+}
+
+function exportOzonApiCapture(data: any, parsed: Partial<ScrapedProduct> | null, sourceId: string, productPath: string, apiUrl: string, status: number) {
+  const timestamp = new Date().toISOString().replace(/[:.]/g, '-')
+  const filename = `ozon-api-${sanitizeOzonCapturePart(sourceId) || 'unknown'}-${timestamp}.json`
+  const payload = {
+    captureSummary: buildOzonApiCaptureSummary(data, parsed, sourceId, productPath, apiUrl, status),
+    parsedProduct: parsed,
+    rawApiResponse: data,
+  }
+  browser.runtime.sendMessage({ action: 'downloadOzonApiCapture', filename, payload })
+    .then((resp) => {
+      if (!resp?.success) console.warn('[鲸智 AI] Ozon API 原始响应未能保存:', resp?.error)
+    })
+    .catch((e) => console.warn('[鲸智 AI] Ozon API 原始响应保存消息失败:', e))
+}
+
+function humanizeOzonKey(key: string): string {
+  return key
+    .replace(/([a-z\d])([A-Z])/g, '$1 $2')
+    .replace(/[_-]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+}
+
+function hasOzonPhysicalUnitOrCompound(value: any): boolean {
+  const text = normalizeText(value)
+  if (!text) return false
+  return /\d\s*(?:мм|mm|см|cm|м\b|kg\b|кг|g\b|гр\b|г\b|грамм|литр|л\b)/i.test(text)
+    || /\d[\d\s,.]*\s*(?:x|х|×|\*)\s*\d[\d\s,.]*(?:\s*(?:x|х|×|\*)\s*\d[\d\s,.]*)?/i.test(text)
+}
+
+function isTrustedOzonPhysicalPath(path: string): boolean {
+  const normalized = path.toLowerCase()
+  return /(characteristic|properties|property|specification|specifications|params|attributes|dimension|dimensions|package|packaging|logistic|shipment|delivery|sku|offer|webfull|webshortcharacteristics|webcharacteristics|webproductproperties|webaspects|webdescription)/i.test(normalized)
+}
+
+function isOzonLayoutPhysicalPath(path: string): boolean {
+  const normalized = path.toLowerCase()
+  return /(gallery|image|images|picture|photo|preview|thumbnail|media|video|icon|logo|banner|layout|style|css|view|viewport|screen|component|widgetstyle|grid|carousel|slider|button|modal|popup|font|offset|position|ratio|aspect|placeholder)/i.test(normalized)
+}
+
+function shouldCollectSemanticPhysicalAttribute(path: string, value: any): boolean {
+  const hasPhysicalKey = /(weight|вес|масса|depth|height|width|length|dimension|габарит|размер|volume|объем|объём|package|упаков)/i.test(path)
+  if (!hasPhysicalKey) return false
+
+  const trustedPath = isTrustedOzonPhysicalPath(path)
+  const layoutPath = isOzonLayoutPhysicalPath(path)
+  const hasUnit = hasOzonPhysicalUnitOrCompound(value)
+
+  // API 中大量 gallery/image/style 字段也叫 width/height，这些是 UI 像素，不是商品规格。
+  // 只有来自明确商品特征/规格/包装/物流路径，或值本身带 mm/cm/g/kg 等物理单位时才采集。
+  if (layoutPath && !trustedPath) return false
+  return trustedPath || hasUnit
+}
+
+function isTrustedPhysicalAttribute(attr: ProductAttribute): boolean {
+  const sourcePath = normalizeText((attr as any).sourcePath)
+  if (!sourcePath) return true
+  if (isOzonLayoutPhysicalPath(sourcePath) && !isTrustedOzonPhysicalPath(sourcePath)) return false
+  return isTrustedOzonPhysicalPath(sourcePath) || hasOzonPhysicalUnitOrCompound(attr.value)
+}
+
+function looksLikeImageUrl(text: string): boolean {
+  return /^https?:\/\//i.test(text) && /(?:\.jpg|\.jpeg|\.png|\.webp|\/wc\d+\/|multimedia|ozonru)/i.test(text) && !/video/i.test(text)
+}
+
+function looksLikeVideoUrl(text: string): boolean {
+  return /^https?:\/\//i.test(text) && /(?:\.mp4|\.m3u8|video|videohost|rutube|youtube)/i.test(text)
+}
+
+function normalizeOzonMediaUrl(url: string): string {
+  const text = normalizeText(url)
+  if (!text) return ''
+  const withProtocol = text.startsWith('//') ? `https:${text}` : text
+  return withProtocol.replace(/\/wc\d+\//, '/wc1000/')
+}
+
+function collectOzonValueSignals(node: any, result: Partial<ScrapedProduct>, path: string[] = [], depth = 0) {
+  if (!node || depth > 8) return
+  if (Array.isArray(node)) {
+    node.forEach((item, index) => collectOzonValueSignals(item, result, [...path, String(index)], depth + 1))
+    return
+  }
+  if (typeof node !== 'object') return
+
+  const objectText = normalizeText(node)
+  if (objectText) applySemanticOzonField(result, path.join('.'), objectText, node)
+
+  for (const [key, rawValue] of Object.entries(node)) {
+    const currentPath = [...path, key]
+    const pathText = currentPath.join('.')
+    if (typeof rawValue === 'string' || typeof rawValue === 'number' || typeof rawValue === 'boolean') {
+      applySemanticOzonField(result, pathText, rawValue, node)
+      continue
+    }
+    if (Array.isArray(rawValue)) {
+      if (rawValue.every((item) => typeof item === 'string')) {
+        applySemanticOzonField(result, pathText, rawValue.join(', '), node)
+      }
+      collectOzonValueSignals(rawValue, result, currentPath, depth + 1)
+      continue
+    }
+    collectOzonValueSignals(rawValue, result, currentPath, depth + 1)
+  }
+}
+
+function applySemanticOzonField(result: Partial<ScrapedProduct>, path: string, value: any, parent?: any) {
+  const key = path.toLowerCase().replace(/[-_\s]/g, '')
+  const text = normalizeText(value)
+  if (!text) return
+
+  if (/url|src|link|image|video|cover|preview|file/.test(key)) {
+    const url = normalizeOzonMediaUrl(text)
+    if (looksLikeVideoUrl(url)) result.videoUrls = pushUniqueText(result.videoUrls, url, 500)
+    else if (looksLikeImageUrl(url)) result.images = pushUniqueText(result.images, url, 500)
+  }
+
+  if (!result.title && /(productheading|producttitle|goodstitle|itemtitle|^title$|name$)/.test(key) && text.length > 8 && text.length < 300) {
+    result.title = text
+  }
+  if (!result.description && /(description|annotation|richcontent|fulltext)/.test(key) && text.length > 30) {
+    result.description = text.slice(0, 2000)
+  }
+  if (!result.brand && /(brandname|brand\.name|brandtitle|manufacturer)/.test(path.toLowerCase()) && text.length < 120) {
+    result.brand = text
+  }
+  if (!result.sellerName && /(merchantname|sellername|shopname|companyname|storetitle|seller\.title)/.test(key) && text.length < 160) {
+    result.sellerName = text
+  }
+  if (!result.sellerUrl && /(sellerurl|merchanturl|shopurl|storeurl)/.test(key) && /^https?:\/\//i.test(text)) {
+    result.sellerUrl = text
+  }
+
+  if (/(actionprice|finalprice|cardprice|pricewithcard|currentprice|price)/.test(key) && !/(old|base|original|before|cross|strike|discount|commission)/.test(key)) {
+    const p = parsePrice(text)
+    if (p > 0 && (!result.price || p < result.price || /action|final|current/.test(key))) result.price = p
+    if (p > 0) addPriceRange(result, p)
+  }
+  if (/(oldprice|baseprice|originalprice|pricebefore|crossedprice|strikeprice)/.test(key)) {
+    const p = parsePrice(text)
+    if (p > 0) result.oldPrice = p
+  }
+  if (!result.discount && /(discount|sale|badge|benefit|скидк|акци)/i.test(`${path} ${text}`) && text.length <= 80) {
+    result.discount = text
+    result.tags = pushUniqueText(result.tags, text, 80)
+  }
+  if (/(promotion|promo|badge|label|action|акци|скидк|coupon|купон)/i.test(path) && text.length <= 100 && !/^https?:\/\//i.test(text)) {
+    result.tags = pushUniqueText(result.tags, text, 100)
+  }
+  if (/(paidpromotion|advert|ads|sponsored|реклам|продвиж)/i.test(`${path} ${text}`) && text.length <= 140) {
+    addProductAttribute(result.attributes!, '付费推广', text, path)
+  }
+
+  if (!result.rating && /(rating|score|totalscore)/.test(key)) {
+    const r = parseFloat(text.replace(',', '.'))
+    if (r > 0 && r <= 5) result.rating = r
+  }
+  if (!result.reviewCount && /(reviewscount|reviewcount|commentscount|feedbackscount|opinionscount)/.test(key)) {
+    const c = parseMetricNumber(text)
+    if (c > 0) result.reviewCount = c
+  }
+  if (!result.stock && /(stock|available|quantity|remain|остат|налич)/i.test(`${path} ${text}`) && text.length < 160) {
+    result.stock = text
+  }
+
+  if (/(sku|offerid|productid|article|артикул|barcode|gtin|ean)/i.test(path) && text.length < 80) {
+    const isBarcode = /(barcode|gtin|ean|штрихкод)/i.test(path)
+    const item = isBarcode ? { sku: '', barcode: text.replace(/\D/g, '') || text } : { sku: text, barcode: '' }
+    if ((item.sku || item.barcode) && !result.skuList!.some((s) => s.sku === item.sku && s.barcode === item.barcode)) result.skuList!.push(item)
+  }
+  if (/(monthlysales|salesmonth|soldmonth|ordersmonth|продаж.*месяц)/i.test(key)) addProductAttribute(result.attributes!, '月销量', text, path)
+  if (/(monthlyrevenue|revenuemonth|turnovermonth|gmv|выручк.*месяц)/i.test(key)) addProductAttribute(result.attributes!, '月销售额', text, path)
+  if (/(turnover|turnoverdynamics|оборачиваем|динамик)/i.test(key)) addProductAttribute(result.attributes!, '周转动态', text, path)
+  if (/(followers|subscribers|favorite|wish|followcount|подпис|избран)/i.test(key)) addProductAttribute(result.attributes!, '被跟数量', text, path)
+  if (/(conversion|cr|конверси)/i.test(key) && /\d/.test(text)) addProductAttribute(result.attributes!, '成交率', text, path)
+  if (/(rfbs.*commission|commission.*rfbs)/i.test(key)) addProductAttribute(result.attributes!, 'rFBS佣金', text, path)
+  if (/(fbp.*commission|fbo.*commission|commission.*fbp|commission.*fbo)/i.test(key)) addProductAttribute(result.attributes!, 'FBP佣金', text, path)
+  if (/(createdat|publishedat|listedat|datecreate|datepublish|размещ|создан)/i.test(key) && text.length < 80) addProductAttribute(result.attributes!, '上架时间', text, path)
+
+  if (shouldCollectSemanticPhysicalAttribute(path, text)) {
+    addProductAttribute(result.attributes!, humanizeOzonKey(path.split('.').slice(-2).join(' ')), text, path)
+  }
+  applyLogisticsCandidate(result, path, text)
+
+  const minQty = parseMetricNumber(parent?.minQuantity ?? parent?.minQty ?? parent?.from ?? parent?.quantityFrom)
+  const maxQty = parseMetricNumber(parent?.maxQuantity ?? parent?.maxQty ?? parent?.to ?? parent?.quantityTo)
+  if (/(price|amount)/.test(key) && /(range|tier|quantity|qty|bulk|wholesale)/i.test(JSON.stringify(parent || {}).slice(0, 500))) {
+    const p = parsePrice(text)
+    if (p > 0) addPriceRange(result, p, minQty, maxQty)
+  }
+}
+
+function addProductAttribute(attrs: ProductAttribute[], name: any, value: any, sourcePath?: string) {
   const attrName = normalizeText(name).replace(/[:：]+$/, '').trim()
   const attrValue = normalizeText(value)
   if (!attrName || !attrValue || attrName === attrValue || attrName.length > 120 || attrValue.length > 500) return
+  const attrSourcePath = normalizeText(sourcePath)
 
-  const duplicate = attrs.some((a) => (
+  const duplicate = attrs.find((a) => (
     a.name.trim().toLowerCase() === attrName.toLowerCase()
     && a.value.trim().toLowerCase() === attrValue.toLowerCase()
   ))
-  if (!duplicate) attrs.push({ name: attrName, value: attrValue })
+  if (duplicate) {
+    if (attrSourcePath && !(duplicate as any).sourcePath) duplicate.sourcePath = attrSourcePath
+    return
+  }
+
+  const attr: ProductAttribute = { name: attrName, value: attrValue }
+  if (attrSourcePath) attr.sourcePath = attrSourcePath
+  attrs.push(attr)
 }
 
 function mergeProductAttributes(...groups: Array<ProductAttribute[] | undefined>): ProductAttribute[] {
   const merged: ProductAttribute[] = []
   for (const group of groups) {
-    for (const attr of group || []) addProductAttribute(merged, attr.name, attr.value)
+    for (const attr of group || []) addProductAttribute(merged, attr.name, attr.value, (attr as any).sourcePath)
   }
   return merged
 }
@@ -75,6 +360,11 @@ function mergePhysicalSpec(
     depth_mm: base?.depth_mm || fallback?.depth_mm || 0,
     height_mm: base?.height_mm || fallback?.height_mm || 0,
     width_mm: base?.width_mm || fallback?.width_mm || 0,
+    package_weight_g: base?.package_weight_g || fallback?.package_weight_g || 0,
+    package_depth_mm: base?.package_depth_mm || fallback?.package_depth_mm || 0,
+    package_height_mm: base?.package_height_mm || fallback?.package_height_mm || 0,
+    package_width_mm: base?.package_width_mm || fallback?.package_width_mm || 0,
+    volume_cm3: base?.volume_cm3 || fallback?.volume_cm3 || 0,
   }
 
   const extraKeys = new Set<string>([
@@ -115,37 +405,265 @@ function parseLengthToMm(value: string, name = ''): number {
   return 0
 }
 
+function isPackagePhysicalField(text: string): boolean {
+  return /(упаков|package|packaging|boxed|с упаковкой|в упаковке|包装)/i.test(text)
+}
+
 function extractPhysicalSpecFromAttributes(attrs: ProductAttribute[]): ScrapedProduct['specList'] {
   const spec: ScrapedProduct['specList'][number] = { weight_g: 0, depth_mm: 0, height_mm: 0, width_mm: 0 }
 
   for (const attr of attrs) {
+    if (!isTrustedPhysicalAttribute(attr)) continue
+
     const name = normalizeText(attr.name).toLowerCase()
     const value = normalizeText(attr.value)
     const combined = `${name} ${value}`.toLowerCase()
+    const isPackage = isPackagePhysicalField(combined)
 
-    if (!spec.weight_g && /(вес|масса|weight|重量)/.test(name)) {
-      spec.weight_g = parseWeightToGrams(value, name)
+    if (/(вес|масса|weight|重量)/.test(name)) {
+      const weight = parseWeightToGrams(value, name)
+      if (weight && isPackage && !spec.package_weight_g) spec.package_weight_g = weight
+      if (weight && !isPackage && !spec.weight_g) spec.weight_g = weight
     }
 
     const dimMatch = value.match(/(\d[\d\s,.]*)\s*(?:x|х|×|\*)\s*(\d[\d\s,.]*)\s*(?:x|х|×|\*)\s*(\d[\d\s,.]*)\s*(мм|mm|см|cm|м|m)?/i)
     if (dimMatch && /(размер|габарит|dimension|size|длина|ширина|высота|尺寸)/.test(name)) {
       const unit = dimMatch[4] || (/(см|cm)/i.test(combined) ? 'см' : /(м|m)/i.test(combined) ? 'м' : 'мм')
       const toMm = (raw: string) => parseLengthToMm(`${raw} ${unit}`, name)
-      if (!spec.depth_mm) spec.depth_mm = toMm(dimMatch[1])
-      if (!spec.width_mm) spec.width_mm = toMm(dimMatch[2])
-      if (!spec.height_mm) spec.height_mm = toMm(dimMatch[3])
+      if (isPackage) {
+        if (!spec.package_depth_mm) spec.package_depth_mm = toMm(dimMatch[1])
+        if (!spec.package_width_mm) spec.package_width_mm = toMm(dimMatch[2])
+        if (!spec.package_height_mm) spec.package_height_mm = toMm(dimMatch[3])
+      } else {
+        if (!spec.depth_mm) spec.depth_mm = toMm(dimMatch[1])
+        if (!spec.width_mm) spec.width_mm = toMm(dimMatch[2])
+        if (!spec.height_mm) spec.height_mm = toMm(dimMatch[3])
+      }
     }
 
-    if (!spec.depth_mm && /(глубин|длин|depth|length|длина|长)/.test(name)) spec.depth_mm = parseLengthToMm(value, name)
-    if (!spec.height_mm && /(высот|height|высота|高)/.test(name)) spec.height_mm = parseLengthToMm(value, name)
-    if (!spec.width_mm && /(ширин|width|ширина|宽)/.test(name)) spec.width_mm = parseLengthToMm(value, name)
+    const length = /(глубин|длин|depth|length|длина|长)/.test(name) ? parseLengthToMm(value, name) : 0
+    const height = /(высот|height|высота|高)/.test(name) ? parseLengthToMm(value, name) : 0
+    const width = /(ширин|width|ширина|宽)/.test(name) ? parseLengthToMm(value, name) : 0
+    if (isPackage) {
+      if (!spec.package_depth_mm && length) spec.package_depth_mm = length
+      if (!spec.package_height_mm && height) spec.package_height_mm = height
+      if (!spec.package_width_mm && width) spec.package_width_mm = width
+    } else {
+      if (!spec.depth_mm && length) spec.depth_mm = length
+      if (!spec.height_mm && height) spec.height_mm = height
+      if (!spec.width_mm && width) spec.width_mm = width
+    }
 
     if (!spec.color && /(цвет|color|颜色)/.test(name) && value.length <= 80) spec.color = value
     if (!spec.size && /(размер|size|尺码|规格)/.test(name) && value.length <= 120) spec.size = value
   }
 
-  const hasSpec = spec.weight_g || spec.depth_mm || spec.height_mm || spec.width_mm || spec.color || spec.size
+  const volumeLength = spec.package_depth_mm || 0
+  const volumeWidth = spec.package_width_mm || 0
+  const volumeHeight = spec.package_height_mm || 0
+  if (volumeLength && volumeWidth && volumeHeight) spec.volume_cm3 = Math.round((volumeLength * volumeWidth * volumeHeight) / 1000)
+
+  const hasSpec = spec.weight_g || spec.depth_mm || spec.height_mm || spec.width_mm || spec.package_weight_g || spec.package_depth_mm || spec.package_height_mm || spec.package_width_mm || spec.color || spec.size
   return hasSpec ? [spec] : []
+}
+
+function firstAttributeValue(attrs: ProductAttribute[], patterns: RegExp[]): string {
+  for (const attr of attrs) {
+    const name = normalizeText(attr.name)
+    if (patterns.some((pattern) => pattern.test(name))) return normalizeText(attr.value)
+  }
+  return ''
+}
+
+function parseMetricNumber(value: any): number {
+  const text = normalizeText(value).replace(/\u00a0/g, ' ')
+  if (!text) return 0
+  const multiplier = /(?:млн|million|millions)/i.test(text) ? 1_000_000 : /(?:тыс|k\b|thousand)/i.test(text) ? 1_000 : 1
+  const match = text.match(/(\d[\d\s.,]*)/)
+  if (!match) return 0
+  const normalized = match[1].replace(/\s/g, '').replace(',', '.')
+  const parsed = parseFloat(normalized)
+  return Number.isFinite(parsed) ? Math.round(parsed * multiplier) : 0
+}
+
+function parseMetricPercent(value: any): number {
+  const parsed = parseFloat(normalizeText(value).replace(',', '.').replace(/[^\d.]/g, ''))
+  return Number.isFinite(parsed) ? parsed : 0
+}
+
+function uniqueStrings(values: Array<string | undefined>): string[] {
+  const seen = new Set<string>()
+  const result: string[] = []
+  for (const value of values) {
+    const text = normalizeText(value)
+    if (!text || seen.has(text.toLowerCase())) continue
+    seen.add(text.toLowerCase())
+    result.push(text)
+  }
+  return result
+}
+
+function parseDeliveryDays(value: any): number {
+  const text = normalizeText(value).toLowerCase()
+  if (!text) return 0
+  const range = text.match(/(\d+)\s*[-–—]\s*(\d+)\s*(?:дн|day|день|дня|дней|天)/i)
+  if (range) return parseInt(range[2]) || parseInt(range[1]) || 0
+  const single = text.match(/(\d+)\s*(?:дн|day|день|дня|дней|天|час|hour)/i)
+  if (!single) return 0
+  const n = parseInt(single[1]) || 0
+  return /час|hour/i.test(text) && n > 0 ? 1 : n
+}
+
+function inferLogisticsType(text: any): string {
+  const value = normalizeText(text)
+  if (/delivery\s*by\s*ozon|доставк[аи]\s+ozon|со склада ozon|fbo/i.test(value)) return 'FBO'
+  if (/delivery\s*by\s*seller|доставк[аи]\s+продавц|fbs/i.test(value)) return 'FBS'
+  if (/partner\s*delivery|real\s*fbs|rfbs|партн[её]р/i.test(value)) return 'realFBS'
+  return ''
+}
+
+function applyLogisticsCandidate(result: Partial<ScrapedProduct>, key: string, value: any) {
+  const normalizedKey = key.toLowerCase().replace(/[-_\s]/g, '')
+  const text = normalizeText(value)
+  if (!text || text.length > 180) return
+
+  const logisticsType = inferLogisticsType(`${key} ${text}`)
+  if (logisticsType && !result.logisticsType) result.logisticsType = logisticsType
+  if (!result.deliveryDays) result.deliveryDays = parseDeliveryDays(text)
+
+  if (!result.warehouse && /(warehouse|склад|warehousename|stockname)/i.test(key)) result.warehouse = text
+  if (!result.warehouseId && /(warehouseid|stockid|складid)/i.test(normalizedKey)) result.warehouseId = text
+  if (!result.deliveryMethod && /(deliverymethod|method|courier|pickup|способ|доставк)/i.test(key)) result.deliveryMethod = text
+  if (!result.deliveryRegion && /(region|address|city|location|регион|город|адрес)/i.test(key)) result.deliveryRegion = text
+}
+
+function extractLogisticsFromObject(node: any, result: Partial<ScrapedProduct>, depth = 0) {
+  if (!node || depth > 6) return
+  if (Array.isArray(node)) {
+    node.forEach((item) => extractLogisticsFromObject(item, result, depth + 1))
+    return
+  }
+  if (typeof node !== 'object') return
+
+  for (const [key, value] of Object.entries(node)) {
+    if (typeof value === 'string' || typeof value === 'number') applyLogisticsCandidate(result, key, value)
+    if (typeof value === 'object') extractLogisticsFromObject(value, result, depth + 1)
+  }
+}
+
+function extractLogisticsFromDocument(doc: Document): Partial<ScrapedProduct> {
+  const result: Partial<ScrapedProduct> = {}
+  const selectors = [
+    '[data-widget*="Delivery"]', '[data-widget*="delivery"]', '[data-widget*="Logistic"]',
+    '[data-widget*="Stock"]', '[data-widget*="Availability"]', '[data-widget*="Pickup"]',
+    '[data-widget*="webDelivery"]', '[data-widget*="webAddToCart"]',
+  ].join(', ')
+
+  Array.from(doc.querySelectorAll(selectors)).forEach((el) => {
+    const widget = el.getAttribute('data-widget') || ''
+    const text = normalizeText(el.textContent || '')
+    applyLogisticsCandidate(result, widget || 'delivery', text)
+  })
+
+  const bodyText = normalizeText(doc.body?.innerText || doc.body?.textContent || '')
+  if (!result.logisticsType) result.logisticsType = inferLogisticsType(bodyText)
+  if (!result.deliveryDays) result.deliveryDays = parseDeliveryDays(bodyText)
+  return result
+}
+
+function buildOzonMetrics(product: Partial<ScrapedProduct>): OzonMetrics {
+  const attrs = product.attributes || []
+  const spec = product.specList?.[0] || { weight_g: 0, depth_mm: 0, height_mm: 0, width_mm: 0 }
+  const skuFromList = product.skuList?.find((item) => normalizeText(item.sku))?.sku || ''
+  const articleNumber = firstAttributeValue(attrs, [
+    /^артикул$/i,
+    /артикул\s*(продавца|поставщика)?/i,
+    /vendor\s*code/i,
+    /article/i,
+    /货号/,
+  ])
+  const sku = skuFromList || firstAttributeValue(attrs, [/^sku$/i, /ozon\s*sku/i, /озон\s*sku/i]) || product.sourceId || ''
+  const monthlySales = parseMetricNumber(firstAttributeValue(attrs, [/月销量/, /monthly\s*sales/i, /продаж[иа]?\s*в\s*месяц/i]))
+  const monthlyRevenueAttr = parseMetricNumber(firstAttributeValue(attrs, [/月销售额/, /monthly\s*revenue/i, /выручк[аеи]?\s*за\s*месяц/i]))
+  const monthlyRevenue = monthlyRevenueAttr || (monthlySales && product.price ? Math.round(monthlySales * product.price) : 0)
+  const priceCandidates = [product.price || 0, product.oldPrice || 0, ...(product.priceRanges || []).map((range: any) => Number(range.price) || 0)].filter((value) => value > 0)
+  const packageLengthMm = spec.package_depth_mm || 0
+  const packageWidthMm = spec.package_width_mm || 0
+  const packageHeightMm = spec.package_height_mm || 0
+  const packageWeightG = spec.package_weight_g || 0
+  const volumeCm3 = spec.volume_cm3 || (packageLengthMm && packageWidthMm && packageHeightMm ? Math.round((packageLengthMm * packageWidthMm * packageHeightMm) / 1000) : 0)
+
+  const metrics: OzonMetrics = {
+    sku,
+    articleNumber,
+    brand: product.brand || firstAttributeValue(attrs, [/^бренд$/i, /^brand$/i, /品牌/]),
+    category: product.category || '',
+    promotions: uniqueStrings([...(product.tags || []), product.discount]),
+    paidPromotion: firstAttributeValue(attrs, [/付费推广/, /paid\s*promotion/i, /реклам/i, /продвиж/i]),
+    monthlyRevenue,
+    monthlySales,
+    turnoverDynamics: firstAttributeValue(attrs, [/周转动态/, /turnover/i, /оборачиваем/i, /динамик/i]),
+    followersCount: parseMetricNumber(firstAttributeValue(attrs, [/被跟数量/, /followers?/i, /подпис/i, /отслеж/i])),
+    minPrice: priceCandidates.length ? Math.min(...priceCandidates) : 0,
+    maxPrice: priceCandidates.length ? Math.max(...priceCandidates) : 0,
+    rfbsCommission: parseMetricPercent(firstAttributeValue(attrs, [/rFBS\s*佣金/i, /rfbs/i])),
+    fbpCommission: parseMetricPercent(firstAttributeValue(attrs, [/FBP\s*佣金/i, /fbp/i])),
+    conversionRate: parseMetricPercent(firstAttributeValue(attrs, [/成交率/, /conversion/i, /конверси/i])),
+    volumeCm3,
+    lengthMm: packageLengthMm,
+    widthMm: packageWidthMm,
+    heightMm: packageHeightMm,
+    weightG: packageWeightG,
+    packageWeightG,
+    packageLengthMm,
+    packageWidthMm,
+    packageHeightMm,
+    warehouse: product.warehouse || firstAttributeValue(attrs, [/warehouse/i, /склад/i, /仓库/]),
+    warehouseId: product.warehouseId || '',
+    logisticsType: product.logisticsType || inferLogisticsType(`${product.deliveryMethod || ''} ${product.warehouse || ''}`),
+    deliveryMethod: product.deliveryMethod || firstAttributeValue(attrs, [/delivery\s*method/i, /способ\s*достав/i, /配送方式/]),
+    deliveryRegion: product.deliveryRegion || firstAttributeValue(attrs, [/delivery\s*region/i, /регион/i, /配送区域/]),
+    deliveryDays: product.deliveryDays || parseDeliveryDays(firstAttributeValue(attrs, [/delivery/i, /достав/i, /配送时效/])),
+    listedAt: firstAttributeValue(attrs, [/上架时间/, /listed/i, /created/i, /размещ/i, /дата\s*(создания|публикации)/i]),
+    missingFields: [],
+  }
+
+  const requiredChecks: Array<[keyof OzonMetrics, string, (value: any) => boolean]> = [
+    ['sku', 'SKU', Boolean],
+    ['articleNumber', '货号', Boolean],
+    ['brand', '品牌', Boolean],
+    ['category', '类目', Boolean],
+    ['promotions', '促销活动', (value) => Array.isArray(value) && value.length > 0],
+    ['paidPromotion', '付费推广', Boolean],
+    ['monthlyRevenue', '月销售额', (value) => value > 0],
+    ['monthlySales', '月销量', (value) => value > 0],
+    ['turnoverDynamics', '周转动态', Boolean],
+    ['followersCount', '被跟数量', (value) => value > 0],
+    ['minPrice', '最低价', (value) => value > 0],
+    ['maxPrice', '最高价', (value) => value > 0],
+    ['rfbsCommission', 'rFBS佣金', (value) => value > 0],
+    ['fbpCommission', 'FBP佣金', (value) => value > 0],
+    ['conversionRate', '成交率', (value) => value > 0],
+    ['volumeCm3', '体积', (value) => value > 0],
+    ['lengthMm', '长', (value) => value > 0],
+    ['widthMm', '宽', (value) => value > 0],
+    ['heightMm', '高', (value) => value > 0],
+    ['weightG', '重量', (value) => value > 0],
+    ['warehouse', '仓库', Boolean],
+    ['logisticsType', '物流模式', Boolean],
+    ['deliveryMethod', '配送方式', Boolean],
+    ['deliveryRegion', '配送区域', Boolean],
+    ['deliveryDays', '配送时效', (value) => value > 0],
+    ['listedAt', '上架时间', Boolean],
+  ]
+  metrics.missingFields = requiredChecks
+    .filter(([key, _label, isPresent]) => !isPresent((metrics as any)[key]))
+    .map(([_key, label]) => label)
+  return metrics
+}
+
+function appendOzonMetrics(product: Partial<ScrapedProduct>): Partial<ScrapedProduct> {
+  return { ...product, ozonMetrics: buildOzonMetrics(product) }
 }
 
 function extractCategoryFromBreadcrumbItems(items: any[]): string {
@@ -517,9 +1035,10 @@ async function scrapeOzonProduct(): Promise<ScrapedProduct | null> {
   const inferredSpecList = extractPhysicalSpecFromAttributes(mergedAttributes)
   const mergedSpec = mergePhysicalSpec(apiData?.specList?.[0], inferredSpecList[0])
   const mergedSpecList = mergedSpec ? [mergedSpec] : []
+  const domLogistics = extractLogisticsFromDocument(document)
 
   // ── 合并: API 数据优先 (更准确), DOM 数据补充缺失字段 ──
-  const merged: ScrapedProduct = {
+  const merged = appendOzonMetrics({
     platform: 'ozon',
     sourceId,
     title: apiData?.title || domData.title,
@@ -543,13 +1062,19 @@ async function scrapeOzonProduct(): Promise<ScrapedProduct | null> {
     tags: (apiData?.tags?.length ? apiData.tags : domTags),
     ozonCategoryId: apiData?.ozonCategoryId || 0,
     ozonTypeId: apiData?.ozonTypeId || 0,
+    warehouse: apiData?.warehouse || domLogistics.warehouse || '',
+    warehouseId: apiData?.warehouseId || domLogistics.warehouseId || '',
+    logisticsType: apiData?.logisticsType || domLogistics.logisticsType || '',
+    deliveryMethod: apiData?.deliveryMethod || domLogistics.deliveryMethod || '',
+    deliveryRegion: apiData?.deliveryRegion || domLogistics.deliveryRegion || '',
+    deliveryDays: apiData?.deliveryDays || domLogistics.deliveryDays || 0,
     discount: apiData?.discount || '',
     stock: apiData?.stock || '',
     priceRanges: apiData?.priceRanges || [],
     minOrderQty: apiData?.minOrderQty || 0,
     supplierUrl: apiData?.supplierUrl || '',
     tradeQuantity: apiData?.tradeQuantity || 0,
-  }
+  }) as ScrapedProduct
 
   console.log('[鲸智 AI] scrapeOzonProduct merged:', {
     title: merged.title?.substring(0, 60),
@@ -1065,10 +1590,17 @@ async function fetchProductDetailFromHtml(sourceId: string, sourceUrl?: string):
 
     result.attributes = mergeProductAttributes(result.attributes)
     result.specList = extractPhysicalSpecFromAttributes(result.attributes || [])
+    const htmlLogistics = extractLogisticsFromDocument(doc)
+    result.warehouse = result.warehouse || htmlLogistics.warehouse || ''
+    result.warehouseId = result.warehouseId || htmlLogistics.warehouseId || ''
+    result.logisticsType = result.logisticsType || htmlLogistics.logisticsType || ''
+    result.deliveryMethod = result.deliveryMethod || htmlLogistics.deliveryMethod || ''
+    result.deliveryRegion = result.deliveryRegion || htmlLogistics.deliveryRegion || ''
+    result.deliveryDays = result.deliveryDays || htmlLogistics.deliveryDays || 0
 
     console.log(`[鲸智 AI] HTML 降级 ${sourceId}: brand=${result.brand}, title=${result.title?.substring(0, 50)}, attrs=${result.attributes!.length}`)
     // 至少有标题或品牌才算成功
-    return (result.title || result.brand) ? result : null
+    return (result.title || result.brand) ? appendOzonMetrics(result) : null
   } catch (e) {
     console.warn(`[鲸智 AI] HTML 降级 ${sourceId} 失败:`, e)
     return null
@@ -1108,6 +1640,7 @@ async function fetchProductDetailFromApi(sourceId: string, sourceUrl?: string): 
       if (resp.ok) {
         const data = await resp.json()
         const result = parseInternalApiResponse(data, sourceId)
+        exportOzonApiCapture(data, result, sourceId, productPath, apiUrl, resp.status)
         if (result) return result
       } else {
         console.warn(`[鲸智 AI] API ${sourceId} path=${productPath} returned ${resp.status}`)
@@ -1138,6 +1671,7 @@ function parseInternalApiResponse(data: any, sourceId: string): Partial<ScrapedP
 
   const states = data?.widgetStates || data || {}
   const allKeys = Object.keys(states)
+  const decodedWidgets = decodedOzonStateEntries(states)
 
   // ── Step 1: 按 widget key 匹配提取 ──
   // 数据结构参考: 后端 ozon_product_scraper.py 中的解析逻辑
@@ -1147,6 +1681,7 @@ function parseInternalApiResponse(data: any, sourceId: string): Partial<ScrapedP
     try { widget = JSON.parse(val as string) } catch { continue }
 
     extractOzonIdsFromObject(widget, result)
+    extractLogisticsFromObject(widget, result)
     const normalizedWidgetKey = key.toLowerCase()
     // 类目只从明确 breadcrumb widget 解析；不从任意 Category/category key 猜测，避免误采内部推荐分类。
     if (normalizedWidgetKey.includes('haract') || normalizedWidgetKey.includes('roper') || normalizedWidgetKey.includes('pecif') || normalizedWidgetKey.includes('webfull')) {
@@ -1376,6 +1911,14 @@ function parseInternalApiResponse(data: any, sourceId: string): Partial<ScrapedP
     }
   }
 
+  // ── Step 2: 通用递归扫描接口数据 ──
+  // Ozon 经常调整 widget key 和嵌套结构。固定 key 解析只能采到标题/价格等基础字段，
+  // 这里按语义路径补采促销、广告、销量、佣金、库存、媒体、SKU、包装规格和物流字段。
+  for (const [key, widget] of decodedWidgets) {
+    collectOzonValueSignals(widget, result, [key])
+  }
+  if (data && data !== states) collectOzonValueSignals(data, result, ['root'])
+
   // 不从标题或面包屑猜测品牌。品牌必须来自 webBrand/brand 链接/JSON-LD/属性中的「Бренд」。
 
   result.attributes = mergeProductAttributes(result.attributes)
@@ -1384,6 +1927,8 @@ function parseInternalApiResponse(data: any, sourceId: string): Partial<ScrapedP
   const specAccum: ScrapedProduct['specList'][number] = { weight_g: 0, depth_mm: 0, height_mm: 0, width_mm: 0 }
   if (result.attributes && result.attributes.length > 0) {
     for (const attr of result.attributes) {
+      if (!isTrustedPhysicalAttribute(attr)) continue
+
       const name = (attr.name || '').toLowerCase().trim()
       const val = attr.value || ''
 
@@ -1397,23 +1942,41 @@ function parseInternalApiResponse(data: any, sourceId: string): Partial<ScrapedP
         result.stock = val
       }
 
-      // 重量 / 尺寸：统一走单位解析，支持 мм/см/м 和 г/кг。
+      // 重量 / 尺寸：统一走单位解析，支持 мм/см/м 和 г/кг；包装字段只写入 package_*。
+      const isPackage = isPackagePhysicalField(`${name} ${val}`)
       if (!specAccum.weight_g && /(вес|масса|weight|重量)/.test(name)) {
-        specAccum.weight_g = parseWeightToGrams(val, name)
+        const weight = parseWeightToGrams(val, name)
+        if (weight && isPackage && !specAccum.package_weight_g) specAccum.package_weight_g = weight
+        if (weight && !isPackage && !specAccum.weight_g) specAccum.weight_g = weight
       }
 
       const dimMatch = val.match(/(\d[\d\s,.]*)\s*(?:x|х|×|\*)\s*(\d[\d\s,.]*)\s*(?:x|х|×|\*)\s*(\d[\d\s,.]*)\s*(мм|mm|см|cm|м|m)?/i)
       if (dimMatch && /(размер|габарит|dimension|size|длина|ширина|высота|尺寸)/.test(name)) {
         const unit = dimMatch[4] || (/(см|cm)/i.test(`${name} ${val}`) ? 'см' : /(м|m)/i.test(`${name} ${val}`) ? 'м' : 'мм')
         const toMm = (raw: string) => parseLengthToMm(`${raw} ${unit}`, name)
-        if (!specAccum.depth_mm) specAccum.depth_mm = toMm(dimMatch[1])
-        if (!specAccum.width_mm) specAccum.width_mm = toMm(dimMatch[2])
-        if (!specAccum.height_mm) specAccum.height_mm = toMm(dimMatch[3])
+        if (isPackage) {
+          if (!specAccum.package_depth_mm) specAccum.package_depth_mm = toMm(dimMatch[1])
+          if (!specAccum.package_width_mm) specAccum.package_width_mm = toMm(dimMatch[2])
+          if (!specAccum.package_height_mm) specAccum.package_height_mm = toMm(dimMatch[3])
+        } else {
+          if (!specAccum.depth_mm) specAccum.depth_mm = toMm(dimMatch[1])
+          if (!specAccum.width_mm) specAccum.width_mm = toMm(dimMatch[2])
+          if (!specAccum.height_mm) specAccum.height_mm = toMm(dimMatch[3])
+        }
       }
 
-      if (!specAccum.depth_mm && /(глубин|длин|depth|length|длина|长)/.test(name)) specAccum.depth_mm = parseLengthToMm(val, name)
-      if (!specAccum.height_mm && /(высот|height|высота|高)/.test(name)) specAccum.height_mm = parseLengthToMm(val, name)
-      if (!specAccum.width_mm && /(ширин|width|ширина|宽)/.test(name)) specAccum.width_mm = parseLengthToMm(val, name)
+      const length = /(глубин|длин|depth|length|длина|长)/.test(name) ? parseLengthToMm(val, name) : 0
+      const height = /(высот|height|высота|高)/.test(name) ? parseLengthToMm(val, name) : 0
+      const width = /(ширин|width|ширина|宽)/.test(name) ? parseLengthToMm(val, name) : 0
+      if (isPackage) {
+        if (!specAccum.package_depth_mm && length) specAccum.package_depth_mm = length
+        if (!specAccum.package_height_mm && height) specAccum.package_height_mm = height
+        if (!specAccum.package_width_mm && width) specAccum.package_width_mm = width
+      } else {
+        if (!specAccum.depth_mm && length) specAccum.depth_mm = length
+        if (!specAccum.height_mm && height) specAccum.height_mm = height
+        if (!specAccum.width_mm && width) specAccum.width_mm = width
+      }
       if (!specAccum.color && /(цвет|color|颜色)/.test(name) && val.length <= 80) specAccum.color = val
       if (!specAccum.size && /(размер|size|尺码|规格)/.test(name) && val.length <= 120) specAccum.size = val
 
@@ -1436,7 +1999,7 @@ function parseInternalApiResponse(data: any, sourceId: string): Partial<ScrapedP
     }
   }
   // Flush spec accumulator → specList
-  if (specAccum.weight_g || specAccum.depth_mm || specAccum.height_mm || specAccum.width_mm || specAccum.color || specAccum.size) {
+  if (specAccum.weight_g || specAccum.depth_mm || specAccum.height_mm || specAccum.width_mm || specAccum.package_weight_g || specAccum.package_depth_mm || specAccum.package_height_mm || specAccum.package_width_mm || specAccum.color || specAccum.size) {
     result.specList!.push(specAccum)
   }
   const inferredSpecList = extractPhysicalSpecFromAttributes(result.attributes || [])
@@ -1504,7 +2067,7 @@ function parseInternalApiResponse(data: any, sourceId: string): Partial<ScrapedP
     specList: result.specList!.length,
   })
 
-  return result.images!.length > 0 || result.title || result.attributes!.length > 0 ? result : null
+  return result.images!.length > 0 || result.title || result.attributes!.length > 0 ? appendOzonMetrics(result) : null
 }
 
 /**
@@ -1631,7 +2194,7 @@ export default defineContentScript({
         scrollAndCollect(maxItems, scrollDelay, (count) => {
           browser.runtime.sendMessage({ action: 'scrapingProgress', progress: { scraped: count, enriched: 0, synced: 0, total: count, phase: 'scroll' } })
         }, () => scrapeStopFlag).then(async (cards) => {
-          let products: ScrapedProduct[] = cards.map((c) => ({
+          let products: ScrapedProduct[] = cards.map((c) => appendOzonMetrics({
             platform: 'ozon' as const,
             sourceId: c.sourceId,
             title: c.title,
@@ -1661,7 +2224,7 @@ export default defineContentScript({
             minOrderQty: 0,
             supplierUrl: '',
             tradeQuantity: 0,
-          }))
+          }) as ScrapedProduct)
 
           // ★ 拟人化:滚动采集结束后,模拟用户停顿再开始逐个查看详情
           await transitionPause()
@@ -1719,7 +2282,15 @@ export default defineContentScript({
                   oldPrice: detail.oldPrice || p.oldPrice,
                   rating: detail.rating || p.rating,
                   reviewCount: detail.reviewCount || p.reviewCount,
+                  warehouse: detail.warehouse || p.warehouse,
+                  warehouseId: detail.warehouseId || p.warehouseId,
+                  logisticsType: detail.logisticsType || p.logisticsType,
+                  deliveryMethod: detail.deliveryMethod || p.deliveryMethod,
+                  deliveryRegion: detail.deliveryRegion || p.deliveryRegion,
+                  deliveryDays: detail.deliveryDays || p.deliveryDays,
                 }
+                batch[i].ozonMetrics = buildOzonMetrics(batch[i])
+                products[batchStart + i] = batch[i]
                 enriched++
                 console.log(`[鲸智 AI] scrapeList: enriched ${p.sourceId} — brand=${batch[i].brand}`)
               }

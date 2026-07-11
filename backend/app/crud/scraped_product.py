@@ -55,6 +55,7 @@ def create_scraped_product(db: Session, product: ScrapedProductCreate) -> Scrape
         spec_list=product.spec_list,
         ozon_category_id=product.ozon_category_id,
         ozon_type_id=product.ozon_type_id,
+        ozon_metrics=product.ozon_metrics,
         price_ranges=product.price_ranges,
         min_order_qty=product.min_order_qty,
         supplier_url=product.supplier_url,
@@ -125,6 +126,7 @@ def bulk_create_scraped_products(
                 spec_list=product.spec_list,
                 ozon_category_id=product.ozon_category_id,
                 ozon_type_id=product.ozon_type_id,
+                ozon_metrics=product.ozon_metrics,
                 synced=True,
             )
             db.add(record)
@@ -231,6 +233,23 @@ def bulk_create_scraped_products(
                         elif new_val and isinstance(new_val[0], dict):
                             setattr(record, field, new_val)
                             changed = True
+
+            if product.ozon_metrics:
+                old_metrics = record.ozon_metrics or {}
+                if isinstance(old_metrics, str):
+                    import json as _j
+                    try:
+                        old_metrics = _j.loads(old_metrics)
+                    except Exception:
+                        old_metrics = {}
+                merged_metrics = {**old_metrics, **product.ozon_metrics}
+                old_missing = set(old_metrics.get("missingFields") or [])
+                new_missing = set(product.ozon_metrics.get("missingFields") or [])
+                if new_missing or old_missing:
+                    merged_metrics["missingFields"] = sorted(new_missing if len(new_missing) <= len(old_missing) or not old_missing else old_missing)
+                if merged_metrics != old_metrics:
+                    record.ozon_metrics = merged_metrics
+                    changed = True
 
             # 数值字段: 新值 > 0 时更新
             for field in ('ozon_category_id', 'ozon_type_id'):

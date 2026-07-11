@@ -140,7 +140,7 @@ declare global {
   export type { ButtonState } from '/Users/user/job/auto-ozon/extension/src/utils/floating-button'
   import('/Users/user/job/auto-ozon/extension/src/utils/floating-button')
   // @ts-ignore
-  export type { Platform, ScrapedProduct, ProductAttribute, PlatformScrapingConfig, PluginSettings, ListProductSummary } from '/Users/user/job/auto-ozon/extension/src/utils/types'
+  export type { Platform, ScrapedProduct, ProductAttribute, OzonMetrics, PlatformScrapingConfig, PluginSettings, ListProductSummary } from '/Users/user/job/auto-ozon/extension/src/utils/types'
   import('/Users/user/job/auto-ozon/extension/src/utils/types')
 }
 // for vue template auto import

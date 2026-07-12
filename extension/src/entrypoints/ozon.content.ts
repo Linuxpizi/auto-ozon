@@ -345,6 +345,19 @@ function mergeProductAttributes(...groups: Array<ProductAttribute[] | undefined>
   return merged
 }
 
+function mergeSkuLists(...groups: Array<ScrapedProduct['skuList'] | undefined>): ScrapedProduct['skuList'] {
+  const merged: ScrapedProduct['skuList'] = []
+  for (const group of groups) {
+    for (const item of group || []) {
+      const sku = normalizeText(item?.sku)
+      const barcode = normalizeText(item?.barcode)
+      if (!sku && !barcode) continue
+      if (!merged.some((existing) => existing.sku === sku && existing.barcode === barcode)) merged.push({ sku, barcode })
+    }
+  }
+  return merged
+}
+
 function isCategoryWidgetKey(key: string): boolean {
   const normalized = key.toLowerCase().replace(/[-_]/g, '')
   return normalized.includes('breadcrumb') || normalized.includes('breadcrumbs') || normalized.includes('breadcrum')
@@ -2101,6 +2114,376 @@ async function enrichProductsFromApi(
 }
 
 // ═══════════════════════════════════════════════════════════════
+//  商品详情页 Network 监控: Fetch/XHR 响应采集 + 页面内 SKU 对齐展示
+// ═══════════════════════════════════════════════════════════════
+
+interface OzonNetworkCapture {
+  id: string
+  url: string
+  method: string
+  status: number
+  contentType: string
+  responseSize: number
+  capturedAt: string
+  sourceId: string
+  keywords: string[]
+  parsed?: Partial<ScrapedProduct>
+  raw?: any
+}
+
+const OZON_NETWORK_EVENT = '__JINGZHI_OZON_NETWORK_CAPTURE__'
+const OZON_NETWORK_MAX_ITEMS = 80
+const ozonNetworkCaptures: OzonNetworkCapture[] = []
+let ozonNetworkInstalled = false
+let ozonNetworkRenderTimer: number | undefined
+let ozonNetworkSourceId = ''
+let ozonNetworkBootstrapTimer: number | undefined
+const ozonNetworkBootstrappedSourceIds = new Set<string>()
+
+function emptyNetworkProduct(sourceId: string): Partial<ScrapedProduct> {
+  return {
+    platform: 'ozon',
+    sourceId,
+    currency: 'RUB',
+    attributes: [],
+    images: [],
+    videoUrls: [],
+    skuList: [],
+    specList: [],
+    tags: [],
+    priceRanges: [],
+  }
+}
+
+function mergeNetworkProductCapture(base: Partial<ScrapedProduct>, incoming?: Partial<ScrapedProduct>): Partial<ScrapedProduct> {
+  if (!incoming) return base
+  const attrs = mergeProductAttributes(base.attributes, incoming.attributes)
+  const inferred = extractPhysicalSpecFromAttributes(attrs)
+  const spec = mergePhysicalSpec(mergePhysicalSpec(base.specList?.[0], incoming.specList?.[0]), inferred[0])
+  return appendOzonMetrics({
+    ...base,
+    title: base.title || incoming.title || '',
+    brand: base.brand || incoming.brand || '',
+    category: base.category || incoming.category || '',
+    sellerName: base.sellerName || incoming.sellerName || '',
+    sellerUrl: base.sellerUrl || incoming.sellerUrl || '',
+    price: base.price || incoming.price || 0,
+    oldPrice: base.oldPrice || incoming.oldPrice || 0,
+    rating: base.rating || incoming.rating || 0,
+    reviewCount: base.reviewCount || incoming.reviewCount || 0,
+    description: base.description || incoming.description || '',
+    images: (base.images?.length ? base.images : incoming.images) || [],
+    videoUrls: uniqueStrings([...(base.videoUrls || []), ...(incoming.videoUrls || [])]),
+    skuList: mergeSkuLists(base.skuList, incoming.skuList),
+    attributes: attrs,
+    specList: spec ? [spec] : [],
+    tags: uniqueStrings([...(base.tags || []), ...(incoming.tags || [])]),
+    ozonCategoryId: base.ozonCategoryId || incoming.ozonCategoryId || 0,
+    ozonTypeId: base.ozonTypeId || incoming.ozonTypeId || 0,
+    warehouse: base.warehouse || incoming.warehouse || '',
+    warehouseId: base.warehouseId || incoming.warehouseId || '',
+    logisticsType: base.logisticsType || incoming.logisticsType || '',
+    deliveryMethod: base.deliveryMethod || incoming.deliveryMethod || '',
+    deliveryRegion: base.deliveryRegion || incoming.deliveryRegion || '',
+    deliveryDays: base.deliveryDays || incoming.deliveryDays || 0,
+    discount: base.discount || incoming.discount || '',
+    stock: base.stock || incoming.stock || '',
+    priceRanges: [...(base.priceRanges || []), ...(incoming.priceRanges || [])],
+  })
+}
+
+function parseOzonNetworkPayload(payload: any, sourceId: string): Partial<ScrapedProduct> | undefined {
+  if (!payload || typeof payload !== 'object') return undefined
+  const parsed = parseInternalApiResponse(payload, sourceId)
+  if (parsed) return parsed
+
+  const result = emptyNetworkProduct(sourceId)
+  extractOzonIdsFromObject(payload, result)
+  extractLogisticsFromObject(payload, result)
+  collectOzonValueSignals(payload, result, ['network'])
+  result.attributes = mergeProductAttributes(result.attributes)
+  result.specList = extractPhysicalSpecFromAttributes(result.attributes || [])
+  return (result.attributes?.length || result.skuList?.length || result.specList?.length || result.warehouse || result.deliveryMethod)
+    ? appendOzonMetrics(result)
+    : undefined
+}
+
+function networkAggregateProduct(): Partial<ScrapedProduct> {
+  const sourceId = extractDetailSourceId()
+  let aggregate = emptyNetworkProduct(sourceId)
+  for (const capture of ozonNetworkCaptures) aggregate = mergeNetworkProductCapture(aggregate, capture.parsed)
+  return appendOzonMetrics(aggregate)
+}
+
+function addOzonNetworkCapture(input: Omit<OzonNetworkCapture, 'id' | 'capturedAt' | 'sourceId'> & { sourceId?: string }) {
+  const sourceId = input.sourceId || extractDetailSourceId()
+  const capture: OzonNetworkCapture = {
+    id: `${Date.now()}-${Math.random().toString(36).slice(2)}`,
+    url: normalizeText(input.url),
+    method: normalizeText(input.method) || 'GET',
+    status: Number(input.status) || 0,
+    contentType: normalizeText(input.contentType),
+    responseSize: Number(input.responseSize) || 0,
+    capturedAt: new Date().toISOString(),
+    sourceId,
+    keywords: Array.isArray(input.keywords) ? input.keywords.map(normalizeText).filter(Boolean) : [],
+    parsed: input.parsed,
+    raw: input.raw,
+  }
+  ozonNetworkCaptures.push(capture)
+  while (ozonNetworkCaptures.length > OZON_NETWORK_MAX_ITEMS) ozonNetworkCaptures.shift()
+  console.log('[鲸智 AI] Ozon Network capture:', { url: capture.url, status: capture.status, keywords: capture.keywords, parsed: capture.parsed })
+  scheduleOzonNetworkPanelRender()
+}
+
+function buildCurrentDomNetworkProduct(sourceId: string): Partial<ScrapedProduct> {
+  const attributes: ProductAttribute[] = []
+  const sku = extractDetailSku()
+  if (sku) addProductAttribute(attributes, 'SKU', sku, 'dom.current')
+  const variants = extractDetailVariants()
+  if (variants) addProductAttribute(attributes, '变体选项', variants, 'dom.current')
+  const logistics = extractLogisticsFromDocument(document)
+  const product = appendOzonMetrics({
+    ...emptyNetworkProduct(sourceId),
+    title: getText('h1') || getText('[data-widget="webProductHeading"] span'),
+    price: extractDetailPrice(),
+    oldPrice: extractDetailOldPrice(),
+    images: extractDetailImages(),
+    rating: extractDetailRating(),
+    reviewCount: extractDetailReviewCount(),
+    brand: extractDetailBrand(),
+    category: extractDetailCategory(),
+    sellerName: extractDetailSellerName(),
+    attributes,
+    specList: extractPhysicalSpecFromAttributes(attributes),
+    description: extractDetailDescription(),
+    sourceUrl: location.href,
+    scrapedAt: new Date().toISOString(),
+    warehouse: logistics.warehouse || '',
+    warehouseId: logistics.warehouseId || '',
+    logisticsType: logistics.logisticsType || '',
+    deliveryMethod: logistics.deliveryMethod || '',
+    deliveryRegion: logistics.deliveryRegion || '',
+    deliveryDays: logistics.deliveryDays || 0,
+    discount: '',
+    stock: '',
+  })
+  return product
+}
+
+async function bootstrapOzonNetworkPanelForCurrentProduct() {
+  const sourceId = extractDetailSourceId()
+  if (!sourceId || ozonNetworkBootstrappedSourceIds.has(sourceId)) return
+  ozonNetworkBootstrappedSourceIds.add(sourceId)
+
+  const domProduct = buildCurrentDomNetworkProduct(sourceId)
+  if (domProduct.title || domProduct.brand || domProduct.category || domProduct.skuList?.length || domProduct.attributes?.length || domProduct.warehouse || domProduct.deliveryMethod) {
+    addOzonNetworkCapture({
+      url: location.href,
+      method: 'DOM',
+      status: 200,
+      contentType: 'text/html',
+      responseSize: 0,
+      keywords: ['dom', 'product', 'delivery', 'sku'],
+      parsed: domProduct,
+    })
+  }
+
+  try {
+    const apiProduct = await fetchProductDetailFromApi(sourceId, location.href)
+    if (apiProduct) {
+      addOzonNetworkCapture({
+        url: `${OZON_INTERNAL_API}?url=${encodeURIComponent(location.pathname.endsWith('/') ? location.pathname : `${location.pathname}/`)}`,
+        method: 'GET',
+        status: 200,
+        contentType: 'application/json',
+        responseSize: 0,
+        keywords: ['active-api', 'product', 'widget', 'characteristic', 'delivery', 'sku'],
+        parsed: apiProduct,
+      })
+    }
+  } catch (e) {
+    console.warn('[鲸智 AI] Ozon 网络面板主动补采失败:', e)
+  }
+}
+
+function formatMm(value?: number) {
+  return value ? `${value} mm` : '—'
+}
+
+function formatG(value?: number) {
+  return value ? `${value} g` : '—'
+}
+
+function ozonNetworkPanelHtml(product: Partial<ScrapedProduct>, captures: OzonNetworkCapture[]): string {
+  const metrics = product.ozonMetrics || buildOzonMetrics(product)
+  const spec = product.specList?.[0] || { weight_g: 0, depth_mm: 0, height_mm: 0, width_mm: 0 }
+  const sku = metrics.sku || product.sourceId || extractDetailSourceId() || 'unknown'
+  const productVolumeCm3 = spec.depth_mm && spec.width_mm && spec.height_mm
+    ? Math.round((spec.depth_mm * spec.width_mm * spec.height_mm) / 1000)
+    : 0
+  const attrs = (product.attributes || [])
+    .filter((attr) => /(упаков|package|packaging|вес|weight|длина|ширина|высота|габарит|dimension|delivery|warehouse|склад|配送|物流|包装)/i.test(`${attr.name} ${attr.value} ${(attr as any).sourcePath || ''}`))
+    .slice(0, 12)
+  const recent = captures.slice(-8).reverse()
+  return `
+    <div style="font-weight:700;font-size:14px;margin-bottom:8px;">鲸智 AI · Ozon 网络采集结果</div>
+    <div style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:6px 12px;font-size:12px;line-height:1.45;">
+      <div><b>SKU</b>: ${escapeHtml(sku)}</div>
+      <div><b>网络响应</b>: ${captures.length}</div>
+      <div><b>仓库</b>: ${escapeHtml(metrics.warehouse || '—')}</div>
+      <div><b>物流模式</b>: ${escapeHtml(metrics.logisticsType || '—')}</div>
+      <div><b>配送方式</b>: ${escapeHtml(metrics.deliveryMethod || '—')}</div>
+      <div><b>配送区域</b>: ${escapeHtml(metrics.deliveryRegion || '—')}</div>
+      <div><b>配送时效</b>: ${metrics.deliveryDays ? `${metrics.deliveryDays} 天` : '—'}</div>
+      <div><b>产品重量</b>: ${formatG(spec.weight_g)}</div>
+      <div><b>产品长×宽×高</b>: ${formatMm(spec.depth_mm)} × ${formatMm(spec.width_mm)} × ${formatMm(spec.height_mm)}</div>
+      <div><b>产品体积</b>: ${productVolumeCm3 ? `${productVolumeCm3} cm³` : '—'}</div>
+      <div><b>包装重量</b>: ${formatG(spec.package_weight_g)}</div>
+      <div><b>包装长×宽×高</b>: ${formatMm(spec.package_depth_mm)} × ${formatMm(spec.package_width_mm)} × ${formatMm(spec.package_height_mm)}</div>
+      <div><b>包装体积</b>: ${metrics.volumeCm3 ? `${metrics.volumeCm3} cm³` : '—'}</div>
+    </div>
+    ${attrs.length ? `<div style="margin-top:8px;font-size:12px;"><b>物流/规格命中字段</b><ul style="margin:4px 0 0 18px;padding:0;">${attrs.map((attr) => `<li>${escapeHtml(attr.name)}: ${escapeHtml(attr.value)}</li>`).join('')}</ul></div>` : ''}
+    <details style="margin-top:8px;font-size:12px;"><summary>最近网络请求</summary><ul style="margin:4px 0 0 18px;padding:0;">${recent.map((item) => `<li>${escapeHtml(item.method)} ${item.status} · ${escapeHtml(item.url.slice(0, 120))}</li>`).join('')}</ul></details>
+    ${metrics.missingFields?.length ? `<div style="margin-top:8px;color:#9a3412;font-size:12px;">缺失字段: ${escapeHtml(metrics.missingFields.join(', '))}</div>` : ''}
+  `
+}
+
+function escapeHtml(value: any): string {
+  return normalizeText(value)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#039;')
+}
+
+function findOzonProductCardAnchor(): Element {
+  return document.querySelector('[data-widget="webProductHeading"]')?.closest('[data-widget], div')
+    || document.querySelector('[data-widget="webPrice"]')
+    || document.querySelector('h1')
+    || document.body
+}
+
+function renderOzonNetworkPanel() {
+  if (detectPageType() !== 'product') return
+  let panel = document.getElementById('jingzhi-ozon-network-panel')
+  if (!panel) {
+    panel = document.createElement('div')
+    panel.id = 'jingzhi-ozon-network-panel'
+    panel.style.cssText = 'margin:12px 0;padding:12px;border:1px solid #7c3aed;border-radius:10px;background:#faf5ff;color:#1f2937;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;box-shadow:0 4px 14px rgba(124,58,237,.12);max-width:760px;'
+    const anchor = findOzonProductCardAnchor()
+    anchor.insertAdjacentElement(anchor === document.body ? 'afterbegin' : 'afterend', panel)
+  }
+  panel.innerHTML = ozonNetworkPanelHtml(networkAggregateProduct(), ozonNetworkCaptures)
+}
+
+function scheduleOzonNetworkPanelRender() {
+  if (ozonNetworkRenderTimer) window.clearTimeout(ozonNetworkRenderTimer)
+  ozonNetworkRenderTimer = window.setTimeout(renderOzonNetworkPanel, 300)
+}
+
+function resetOzonNetworkCapturesForCurrentProduct() {
+  const sourceId = extractDetailSourceId()
+  if (sourceId && sourceId !== ozonNetworkSourceId) {
+    ozonNetworkSourceId = sourceId
+    ozonNetworkCaptures.splice(0, ozonNetworkCaptures.length)
+  }
+}
+
+function removeOzonNetworkPanel() {
+  document.getElementById('jingzhi-ozon-network-panel')?.remove()
+}
+
+function activateOzonNetworkMonitorForProductPage() {
+  resetOzonNetworkCapturesForCurrentProduct()
+  installOzonNetworkMonitor()
+  scheduleOzonNetworkPanelRender()
+  if (ozonNetworkBootstrapTimer) window.clearTimeout(ozonNetworkBootstrapTimer)
+  ozonNetworkBootstrapTimer = window.setTimeout(() => {
+    bootstrapOzonNetworkPanelForCurrentProduct().catch((e) => console.warn('[鲸智 AI] Ozon 网络面板初始化失败:', e))
+  }, 800)
+}
+
+function installOzonNetworkMonitor() {
+  if (ozonNetworkInstalled) return
+  ozonNetworkInstalled = true
+  window.addEventListener('message', (event) => {
+    if (event.source !== window || event.data?.type !== OZON_NETWORK_EVENT) return
+    const sourceId = extractDetailSourceId()
+    if (sourceId && sourceId !== ozonNetworkSourceId) resetOzonNetworkCapturesForCurrentProduct()
+    const detail = event.data.detail || {}
+    const raw = detail.raw
+    const parsed = parseOzonNetworkPayload(raw, sourceId)
+    addOzonNetworkCapture({
+      url: detail.url,
+      method: detail.method,
+      status: detail.status,
+      contentType: detail.contentType,
+      responseSize: detail.responseSize,
+      keywords: detail.keywords,
+      parsed,
+      raw,
+      sourceId,
+    })
+  })
+
+  const script = document.createElement('script')
+  script.textContent = `(() => {
+    if (window.__JINGZHI_OZON_NETWORK_MONITOR__) return;
+    window.__JINGZHI_OZON_NETWORK_MONITOR__ = true;
+    const EVENT = '${OZON_NETWORK_EVENT}';
+    const KEYWORDS = ['graphql','product','widget','layout','state','delivery','logistic','warehouse','stock','availability','sku','offer','characteristic','dimensions','dimension','weight','package','упаков','достав','склад','габарит','размер','вес'];
+    const shouldCapture = (url, contentType, text) => {
+      const source = String(url || '') + ' ' + String(contentType || '') + ' ' + String(text || '').slice(0, 5000);
+      const lower = source.toLowerCase();
+      if (!/ozon\.ru|\/api\//i.test(String(url || location.href))) return false;
+      return KEYWORDS.some((k) => lower.includes(k));
+    };
+    const matchedKeywords = (url, text) => {
+      const lower = (String(url || '') + ' ' + String(text || '').slice(0, 5000)).toLowerCase();
+      return KEYWORDS.filter((k) => lower.includes(k)).slice(0, 12);
+    };
+    const emit = (detail) => window.postMessage({ type: EVENT, detail }, '*');
+    const handleText = (meta, text) => {
+      if (!shouldCapture(meta.url, meta.contentType, text)) return;
+      let raw = null;
+      try { raw = JSON.parse(text); } catch { raw = { text: String(text || '').slice(0, 20000) }; }
+      emit({ ...meta, responseSize: String(text || '').length, keywords: matchedKeywords(meta.url, text), raw });
+    };
+    const originalFetch = window.fetch;
+    window.fetch = async function(input, init) {
+      const response = await originalFetch.apply(this, arguments);
+      try {
+        const url = typeof input === 'string' ? input : (input && input.url) || '';
+        const method = (init && init.method) || (input && input.method) || 'GET';
+        const contentType = response.headers && response.headers.get('content-type') || '';
+        if (/json|text|javascript/i.test(contentType)) response.clone().text().then((text) => handleText({ url, method, status: response.status, contentType }, text)).catch(() => {});
+      } catch (_) {}
+      return response;
+    };
+    const OriginalXHR = window.XMLHttpRequest;
+    window.XMLHttpRequest = function() {
+      const xhr = new OriginalXHR();
+      let url = '', method = 'GET';
+      const open = xhr.open;
+      xhr.open = function(m, u) { method = m || 'GET'; url = String(u || ''); return open.apply(xhr, arguments); };
+      xhr.addEventListener('load', function() {
+        try {
+          const contentType = xhr.getResponseHeader('content-type') || '';
+          const text = typeof xhr.responseText === 'string' ? xhr.responseText : '';
+          if (/json|text|javascript/i.test(contentType) || text.trim().startsWith('{') || text.trim().startsWith('[')) handleText({ url, method, status: xhr.status, contentType }, text);
+        } catch (_) {}
+      });
+      return xhr;
+    };
+  })();`
+  document.documentElement.appendChild(script)
+  script.remove()
+  scheduleOzonNetworkPanelRender()
+}
+
+// ═══════════════════════════════════════════════════════════════
 //  Content Script 入口
 // ═══════════════════════════════════════════════════════════════
 
@@ -2114,6 +2497,7 @@ export default defineContentScript({
 
     // ── 注入悬浮采集按钮 (商品详情页) ──
     if (pageType === 'product') {
+      activateOzonNetworkMonitorForProductPage()
       injectFloatingButton(async () => {
         const product = await scrapeOzonProduct()
         if (!product) throw new Error('采集失败: 无法提取商品信息')
@@ -2129,6 +2513,10 @@ export default defineContentScript({
       if (newType !== pageType) {
         pageType = newType
         console.log('[鲸智 AI] Page type changed to:', pageType)
+        if (pageType === 'product') activateOzonNetworkMonitorForProductPage()
+        else removeOzonNetworkPanel()
+      } else if (pageType === 'product') {
+        activateOzonNetworkMonitorForProductPage()
       }
     }
     window.addEventListener('popstate', onNavigate)

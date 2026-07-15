@@ -404,7 +404,12 @@ function extractAttributes(initData: InitDataOffer | null): ProductAttribute[] {
 }
 
 function extractSpecList(attrs: ProductAttribute[]): Array<{ weight_g: number; depth_mm: number; height_mm: number; width_mm: number; [key: string]: any }> {
-  const spec: Record<string, any> = { weight_g: 0, depth_mm: 0, height_mm: 0, width_mm: 0 }
+  const spec: { weight_g: number; depth_mm: number; height_mm: number; width_mm: number; [key: string]: any } = {
+    weight_g: 0,
+    depth_mm: 0,
+    height_mm: 0,
+    width_mm: 0,
+  }
 
   for (const attr of attrs) {
     const name = attr.name.toLowerCase()

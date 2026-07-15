@@ -13,26 +13,26 @@ export interface ScrapedProduct {
   images: string[]
   rating: number
   reviewCount: number
-  brand: string
-  category: string
-  sellerName: string
-  sellerUrl: string
-  attributes: ProductAttribute[]
-  description: string
+  brand?: string
+  category?: string
+  sellerName?: string
+  sellerUrl?: string
+  attributes?: ProductAttribute[]
+  description?: string
   sourceUrl: string
   scrapedAt: string
 
   // ── 多值字段 (JSON arrays) ──
   /** 商品视频 URL 列表 */
-  videoUrls: string[]
+  videoUrls?: string[]
   /** SKU + 条形码列表 [{sku, barcode}] */
-  skuList: Array<{ sku: string; barcode: string }>
+  skuList?: Array<{ sku: string; barcode: string }>
   /** 规格列表 [{weight_g, depth_mm, height_mm, width_mm, color, size, ...}] */
   specList: Array<{
-    weight_g: number
-    depth_mm: number
-    height_mm: number
-    width_mm: number
+    weight_g?: number
+    depth_mm?: number
+    height_mm?: number
+    width_mm?: number
     /** 包装重量，按 docs/采集强制要求.md: 非 SKU 重量 */
     package_weight_g?: number
     /** 包装长/深，物流包装规格 */
@@ -46,13 +46,13 @@ export interface ScrapedProduct {
     [key: string]: any
   }>
   /** 商品标签 (品牌、分类、促销标签等) */
-  tags: string[]
+  tags?: string[]
 
   // ── 新增:Ozon 内部分类(从内部 API 获取) ──
   /** Ozon description_category_id */
-  ozonCategoryId: number
+  ozonCategoryId?: number
   /** Ozon type_id */
-  ozonTypeId: number
+  ozonTypeId?: number
 
   /** Ozon 强制采集指标，按 docs/采集强制要求.md 固定输出 */
   ozonMetrics?: OzonMetrics
@@ -66,19 +66,19 @@ export interface ScrapedProduct {
   deliveryDays?: number
 
   /** 折扣文本 (如 -52%) */
-  discount: string
+  discount?: string
   /** 库存文本 (如 Осталось 5 штук) */
-  stock: string
+  stock?: string
 
   // ── 1688 专有字段 ──
   /** 阶梯价格 [{minQty, maxQty, price}] */
-  priceRanges: Array<{ minQty: number; maxQty: number; price: number }>
+  priceRanges?: Array<{ minQty: number; maxQty: number; price: number }>
   /** 起订量 */
-  minOrderQty: number
+  minOrderQty?: number
   /** 供应商店铺 URL */
-  supplierUrl: string
+  supplierUrl?: string
   /** 成交量 */
-  tradeQuantity: number
+  tradeQuantity?: number
 }
 
 export interface ProductAttribute {

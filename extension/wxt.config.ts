@@ -1,12 +1,14 @@
 import { defineConfig } from 'wxt'
+import packageJson from './package.json'
+
+const extensionName = `${packageJson.name} v${packageJson.version}`
 
 export default defineConfig({
-  srcDir: 'src',
   modules: ['@wxt-dev/module-vue'],
   manifest: {
-    name: '鲸智 AI',
-    description: '鲸智 AI — 跨境电商智能采集与管理工具',
-    permissions: ['storage', 'activeTab', 'tabs', 'scripting', 'downloads'],
+    name: extensionName,
+    description: `${packageJson.name} — 跨境电商智能采集与管理工具`,
+    permissions: ['storage', 'activeTab', 'tabs', 'scripting'],
     host_permissions: [
       'https://www.ozon.ru/*',
       'https://ozon.ru/*',
@@ -22,7 +24,6 @@ export default defineConfig({
       'http://localhost:9000/*',
     ],
     action: {
-      default_popup: 'popup.html',
       default_icon: {
         '16': 'icon-16.png',
         '32': 'icon-32.png',

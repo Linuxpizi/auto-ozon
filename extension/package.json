@@ -1,27 +1,26 @@
 {
-  "name": "jingzhi-ai-plugin",
-  "displayName": "鲸智 AI",
+  "name": "auto-ozon",
+  "displayName": "auto-ozon v0.1.0",
   "version": "0.1.0",
-  "description": "鲸智 AI — Ozon/WB/1688/PDD 浏览器数据采集插件",
+  "description": "auto-ozon — Ozon/WB/1688/PDD 浏览器数据采集插件",
   "type": "module",
   "scripts": {
     "dev": "wxt",
     "build": "wxt build",
     "build:chrome": "wxt build -b chrome",
-    "zip": "wxt zip",
-    "zip:chrome": "wxt zip -b chrome"
+    "typecheck": "wxt prepare && vue-tsc --noEmit",
+    "prepare": "wxt prepare",
+    "zip": "wxt zip && node -e \"const fs=require('node:fs');const p=require('./package.json');const from='.output/'+p.name+'-'+p.version+'-chrome.zip';const to='.output/'+p.name+'-v'+p.version+'-chrome.zip';if(fs.existsSync(from))fs.renameSync(from,to)\"",
+    "zip:chrome": "npm run zip"
   },
   "dependencies": {
-    "webextension-polyfill": "^0.12.0"
+    "naive-ui": "^2.42.0",
+    "vue": "^3.5.16"
   },
   "devDependencies": {
-    "@vueuse/core": "^12.8.2",
     "@wxt-dev/module-vue": "^1.0.2",
-    "autoprefixer": "^10.4.21",
-    "postcss": "^8.5.4",
-    "tailwindcss": "^3.4.17",
     "typescript": "^5.8.3",
-    "vue": "^3.5.16",
+    "vue-tsc": "^2.2.10",
     "wxt": "^0.20.27"
   }
 }

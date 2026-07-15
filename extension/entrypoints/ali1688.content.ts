@@ -6,7 +6,7 @@ import {
   scrape1688Product,
   scan1688ListCards,
   type ListCard1688,
-} from './content/ali1688'
+} from '@/scrapers/platforms/ali1688'
 
 export default defineContentScript({
   matches: [
@@ -20,9 +20,6 @@ export default defineContentScript({
 
     if (!isDetail && !isList) return
 
-    console.log(
-      `[鲸智 AI] 1688 content script loaded (${isDetail ? 'detail' : 'list'} page)`,
-    )
 
     // ── 列表页: 检查是否有跨页采集状态需要恢复 ──
     if (isList) {
@@ -30,7 +27,6 @@ export default defineContentScript({
       if (raw) {
         try {
           const saved: PersistedScrapingState = JSON.parse(raw)
-          console.log(`[鲸智 AI] 1688 发现已保存的采集状态: 第${saved.pageCount}页, ${saved.seenIds.length}个已知ID, 已同步${saved.totalCreated}件`)
           localStorage.removeItem(STORAGE_KEY_1688) // 取出后立即清除
           // 等待页面稳定后恢复采集
           setTimeout(() => {
@@ -42,7 +38,6 @@ export default defineContentScript({
             })
           }, 2000)
         } catch (e) {
-          console.error('[鲸智 AI] 1688 恢复采集状态失败:', e)
           localStorage.removeItem(STORAGE_KEY_1688)
         }
       }
@@ -122,7 +117,7 @@ interface PersistedScrapingState {
   scrollDelay: number
   batchSize: number
   seenIds: string[]
-  allItemsData: Array<{ sourceId: string; title: string; price: string; sourceUrl: string }>
+  allItemsData?: Array<{ sourceId: string; title: string; price: number; sourceUrl: string }>
   pageCount: number
   totalCreated: number
   totalSkipped: number
@@ -146,7 +141,6 @@ function navigateToNextPage1688(): boolean {
   } else {
     newUrl = href + (href.includes('?') ? '&' : '?') + `beginPage=${nextPage}`
   }
-  console.log(`[鲸智 AI] 1688 翻页: 第${currentPage}页 → 第${nextPage}页`)
   window.location.href = newUrl
   return true
 }
@@ -176,7 +170,6 @@ async function runListScraping(
   let noNewDataCount = 0
   const maxNoNewData = 3 // 连续3次扫描无新数据则停止
 
-  console.log(`[鲸智 AI] 1688 列表采集开始 (maxItems=${maxItems}, 恢复自第${pageCount}页, 已有${seen.size}个已知ID)`)
 
   while (seen.size < maxItems && !stopListScraping && scrollCount < maxScrolls) {
     // 采集当前可见商品
@@ -193,7 +186,6 @@ async function runListScraping(
     // 空扫计数器: 连续无新数据则停止
     if (newCount === 0) {
       noNewDataCount++
-      console.log(`[鲸智 AI] 1688 无新数据 (${noNewDataCount}/${maxNoNewData})`)
     } else {
       noNewDataCount = 0
     }
@@ -228,7 +220,6 @@ async function runListScraping(
     const newHeight = document.documentElement.scrollHeight
     if (newHeight === lastHeight) {
       staleCount++
-      console.log(`[鲸智 AI] 1688 无新内容 (${staleCount}/${maxStale})`)
     } else {
       staleCount = 0
       lastHeight = newHeight
@@ -284,7 +275,6 @@ async function runListScraping(
         totalSkipped,
       }
       localStorage.setItem(STORAGE_KEY_1688, JSON.stringify(state))
-      console.log(`[鲸智 AI] 1688 保存状态到localStorage (${seen.size}个ID, 第${pageCount}页 → 第${pageCount + 1}页)`)
 
       // URL跳转翻页 (页面会重载，当前函数终止)
       navigateToNextPage1688()
@@ -330,9 +320,7 @@ async function runListScraping(
       })
       totalCreated += result?.created || 0
       totalSkipped += result?.skipped || 0
-      console.log(`[鲸智 AI] 1688 批量同步: ${seen.size} 件(本次${allItems.length}), 同步: ${result?.created || 0} 件`)
     } catch (e) {
-      console.error('[鲸智 AI] 1688 列表采集同步失败:', e)
     }
   }
 

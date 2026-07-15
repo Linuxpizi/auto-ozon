@@ -47,7 +47,6 @@ export function readingPause(): Promise<void> {
  */
 export async function occasionalLongPause(): Promise<void> {
   if (Math.random() < 0.15) {
-    console.log('[Humanize] Occasional long pause (simulating user distraction)')
     await randomDelay(3000, 6000)
   }
 }
@@ -368,7 +367,6 @@ export async function enrichDelay(
 
   // 偶尔加入一次"打字停顿" (3% 概率等 6~12 秒,模拟用户在打字或做别的事)
   if (Math.random() < 0.03) {
-    console.log('[Humanize] Extended pause (simulating user activity)')
     await randomDelay(6000, 12000)
   }
 }

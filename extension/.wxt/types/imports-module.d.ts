@@ -2,7 +2,7 @@
 // Types for the #import virtual module
 declare module '#imports' {
   export { browser, Browser } from 'wxt/browser';
-  export { storage, WxtStorage, WxtStorageItem, StorageArea, StorageItemKey, StorageAreaChanges, MigrationError } from 'wxt/utils/storage';
+  export { storage, StorageArea, WxtStorage, WxtStorageItem, StorageItemKey, StorageAreaChanges, MigrationError } from 'wxt/utils/storage';
   export { getAppConfig, useAppConfig } from 'wxt/utils/app-config';
   export { ContentScriptContext, WxtWindowEventMap } from 'wxt/utils/content-script-context';
   export { createIframeUi, IframeContentScriptUi, IframeContentScriptUiOptions } from 'wxt/utils/content-script-ui/iframe';
@@ -16,12 +16,12 @@ declare module '#imports' {
   export { defineWxtPlugin } from 'wxt/utils/define-wxt-plugin';
   export { injectScript, ScriptPublicPath, InjectScriptOptions } from 'wxt/utils/inject-script';
   export { InvalidMatchPattern, MatchPattern } from 'wxt/utils/match-patterns';
-  export { onActivated, onBeforeMount, onBeforeUnmount, onBeforeUpdate, onErrorCaptured, onDeactivated, onMounted, onServerPrefetch, onUnmounted, onUpdated, useAttrs, useSlots, computed, customRef, isReadonly, isRef, isShallow, isProxy, isReactive, markRaw, reactive, readonly, ref, shallowReactive, shallowReadonly, shallowRef, triggerRef, toRaw, toRef, toRefs, toValue, unref, watch, watchEffect, watchPostEffect, watchSyncEffect, defineComponent, defineAsyncComponent, getCurrentInstance, h, inject, nextTick, provide, useCssModule, createApp, effectScope, EffectScope, getCurrentScope, onScopeDispose, Component, Slot, Slots, ComponentPublicInstance, ComputedRef, DirectiveBinding, ExtractDefaultPropTypes, ExtractPropTypes, ExtractPublicPropTypes, InjectionKey, PropType, Ref, ShallowRef, MaybeRef, MaybeRefOrGetter, VNode, WritableComputedRef, onRenderTracked, onRenderTriggered, resolveComponent, useCssVars, useModel, getCurrentWatcher, onWatcherCleanup, useId, useTemplateRef } from 'vue';
+  export { onActivated, onBeforeMount, onBeforeUnmount, onBeforeUpdate, onErrorCaptured, onDeactivated, onMounted, onServerPrefetch, onUnmounted, onUpdated, useAttrs, useSlots, computed, customRef, isReadonly, isRef, isProxy, isReactive, markRaw, reactive, readonly, ref, shallowReactive, shallowReadonly, shallowRef, triggerRef, toRaw, toRef, toRefs, toValue, unref, watch, watchEffect, watchPostEffect, watchSyncEffect, defineComponent, defineAsyncComponent, getCurrentInstance, h, inject, nextTick, provide, useCssModule, createApp, effectScope, EffectScope, getCurrentScope, onScopeDispose, Component, ComponentPublicInstance, ComputedRef, DirectiveBinding, ExtractDefaultPropTypes, ExtractPropTypes, ExtractPublicPropTypes, InjectionKey, PropType, Ref, MaybeRef, MaybeRefOrGetter, VNode, WritableComputedRef, onRenderTracked, onRenderTriggered, resolveComponent, useCssVars, useModel, onWatcherCleanup, useId, useTemplateRef } from 'vue';
   export { fakeBrowser } from 'wxt/testing';
-  export { syncProducts, fetchBackendProducts, deleteBackendProduct, checkBackendHealth } from '../src/utils/api';
-  export { generateShortId } from '../src/utils/crypto';
-  export { injectFloatingButton, ButtonState } from '../src/utils/floating-button';
-  export { randomDelay, normalDelay, microPause, readingPause, occasionalLongPause, humanScroll, humanScrollTo, humanScrollToTop, humanScrollToBottom, simulateHover, simulateMouseLeave, humanClick, humanLinkClick, humanFetch, transitionPause, batchTransitionPause, enrichDelay, scrollPause } from '../src/utils/humanize';
-  export { getSettings, saveSettings } from '../src/utils/storage';
-  export { DEFAULT_SETTINGS, Platform, ScrapedProduct, ProductAttribute, OzonMetrics, PlatformScrapingConfig, PluginSettings, ListProductSummary } from '../src/utils/types';
+  export { syncProducts, fetchBackendProducts, deleteBackendProduct, checkBackendHealth } from '../utils/api';
+  export { generateShortId } from '../utils/crypto';
+  export { injectFloatingButton, ButtonState } from '../utils/floating-button';
+  export { randomDelay, normalDelay, microPause, readingPause, occasionalLongPause, humanScroll, humanScrollTo, humanScrollToTop, humanScrollToBottom, simulateHover, simulateMouseLeave, humanClick, humanLinkClick, humanFetch, transitionPause, batchTransitionPause, enrichDelay, scrollPause } from '../utils/humanize';
+  export { getSettings, saveSettings } from '../utils/storage';
+  export { DEFAULT_SETTINGS, Platform, ScrapedProduct, ProductAttribute, OzonMetrics, PlatformScrapingConfig, PluginSettings, ListProductSummary } from '../utils/types';
 }

@@ -119,6 +119,7 @@ function scrapeWBProduct(): ScrapedProduct | null {
     price: extractPrice(),
     oldPrice: extractOldPrice(),
     images: extractImages(),
+    specList: [],
     rating: extractRating(),
     reviewCount: extractReviewCount(),
     brand: extractBrand(),

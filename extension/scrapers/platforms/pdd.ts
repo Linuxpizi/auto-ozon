@@ -3,11 +3,8 @@ import type { ProductAttribute, ScrapedProduct } from '@/utils/types'
 type SpecRecord = { weight_g: number; depth_mm: number; height_mm: number; width_mm: number; [key: string]: any }
 
 const MAX_SCAN_DEPTH = 12
-const PDD_DEBUG = Boolean((window as any).__JINGZHI_PDD_DEBUG__ || localStorage.getItem('jingzhi:pdd:debug') === '1')
 
-type DebugSource = { field: string; source: string; value: unknown }
 type PddSkuLike = Record<string, any>
-const debugSources: DebugSource[] = []
 
 function text(selector: string, parent: Element | Document = document): string {
   return parent.querySelector(selector)?.textContent?.trim() || ''
@@ -21,10 +18,6 @@ function clean(input: unknown): string {
   return String(input ?? '').replace(/\s+/g, ' ').trim()
 }
 
-function recordSource(field: string, source: string, value: unknown) {
-  if (!PDD_DEBUG || value === undefined || value === null || value === '') return
-  debugSources.push({ field, source, value })
-}
 
 function pickString(obj: any, keys: string[]): string {
   if (!obj || typeof obj !== 'object') return ''
@@ -338,7 +331,6 @@ function pushNameValue(attrs: ProductAttribute[], item: any, source: string) {
   const value = valueText(rawValue)
   if (name && value) {
     pushAttr(attrs, name, value)
-    recordSource('attribute', source, { name, value })
   }
 }
 
@@ -350,7 +342,6 @@ function collectSkuObjects(roots: unknown[]): PddSkuLike[] {
     const hasSkuFields = skuId || item.specs || item.spec || item.specList || item.spec_list || item.properties || item.property || item.quantity || item.stock || item.thumb_url || item.thumbUrl || item.group_price || item.groupPrice
     if (!hasSkuFields || skus.includes(item)) return
     skus.push(item)
-    recordSource('sku', source, { skuId, keys: Object.keys(item).slice(0, 16) })
   }
 
   for (const node of collectGoodsNodes(roots)) {
@@ -441,7 +432,6 @@ function parseAssignedJson(scriptText: string, variablePattern: RegExp): unknown
 }
 
 function collectDataRoots(): unknown[] {
-  debugSources.length = 0
   const roots: unknown[] = []
   const w = window as any
   for (const key of ['rawData', '__INITIAL_STATE__', '__NEXT_DATA__', 'INIT_STATE', 'goodsData', 'goodsInfo', 'initialData', '__data__']) {
@@ -467,7 +457,6 @@ function collectDataRoots(): unknown[] {
       if (parsed) roots.push(parsed)
     }
   })
-  if (PDD_DEBUG) console.info('[鲸智 AI][PDD] data roots:', roots.map((root: any) => Object.keys(root || {}).slice(0, 12)))
   return roots
 }
 
@@ -509,7 +498,6 @@ function extractPrice(roots: unknown[]): number {
   for (const node of collectGoodsNodes(roots)) {
     const price = pickNumber(node, ['group_price', 'groupPrice', 'min_group_price', 'minGroupPrice', 'price', 'normal_price', 'normalPrice', 'market_price', 'marketPrice'])
     if (price > 0) {
-      recordSource('price', 'goods.price', price)
       return price
     }
   }
@@ -570,7 +558,6 @@ function extractCategory(roots: unknown[]): string {
     const best = paths.find((path) => path.length)?.concat(direct.filter((item) => !paths.flat().includes(item))) || direct
     if (best.length) {
       const value = uniq(best).join(' > ')
-      recordSource('category', 'goods.category', value)
       return value
     }
   }
@@ -625,7 +612,6 @@ function extractAttributes(roots: unknown[]): ProductAttribute[] {
   // 这里把弹层维度作为上传必需的规格属性采集，并同步给 specList 做物理规格回填。
   for (const group of extractDomSkuGroups()) {
     pushAttr(attrs, group.name, group.values.join(' / '))
-    recordSource('attribute', 'dom.skuPanel', group)
   }
 
   // 0) 优先读取 PDD 商品对象中的类目、商品参数和 SKU 规格。
@@ -755,12 +741,10 @@ function extractPddSpecList(roots: unknown[], attrs: ProductAttribute[]): SpecRe
     .filter((spec) => Object.entries(spec).some(([key, value]) => key !== 'sku' && Boolean(value)))
 
   if (skuSpecs.length) {
-    recordSource('specList', 'sku.specs', skuSpecs.slice(0, 5))
     return skuSpecs.slice(0, 100)
   }
   const domSpecs = buildDomSpecRecords(attrs)
   if (domSpecs.length) {
-    recordSource('specList', 'dom.skuPanel', domSpecs.slice(0, 5))
     return domSpecs
   }
   return extractSpecList(attrs)
@@ -820,18 +804,6 @@ export async function scrapePddProduct(): Promise<ScrapedProduct | null> {
     tradeQuantity: 0,
   }
 
-  if (PDD_DEBUG) {
-    console.info('[鲸智 AI][PDD] scraped product summary:', {
-      sourceId,
-      title: product.title,
-      category: product.category,
-      attributes: product.attributes.slice(0, 20),
-      skuCount: product.skuList.length,
-      specCount: product.specList.length,
-      specList: product.specList.slice(0, 5),
-      debugSources: debugSources.slice(-80),
-    })
-  }
 
   return product
 }

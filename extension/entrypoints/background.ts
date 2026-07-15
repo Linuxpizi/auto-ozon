@@ -18,7 +18,6 @@ async function updateBadge() {
 }
 
 export default defineBackground(() => {
-  console.log('[鲸智 AI] Background service worker started')
 
   // 初始化 badge
   updateBadge()
@@ -36,14 +35,6 @@ export default defineBackground(() => {
     // Content script 增量批量上报 → 保存到后端
     if (message.action === 'batchSyncProducts') {
       handleBatchSync(message.products).then((result) => {
-        sendResponse(result)
-      })
-      return true
-    }
-
-    // Content script 导出 Ozon 买家端内部接口原始响应,便于人工分析 widgetStates。
-    if (message.action === 'downloadOzonApiCapture') {
-      downloadOzonApiCapture(message.payload, message.filename).then((result) => {
         sendResponse(result)
       })
       return true
@@ -129,13 +120,12 @@ export default defineBackground(() => {
 
     if (isOzon || isWB || is1688 || isPdd) {
       try {
-        const file = isPdd ? 'content-scripts/pdd.js' : is1688 ? 'content-scripts/ali1688.js' : isOzon ? 'content-scripts/ozon.js' : 'content-scripts/wb.js'
+        const file = isPdd ? '/content-scripts/pdd.js' : is1688 ? '/content-scripts/ali1688.js' : isOzon ? '/content-scripts/ozon.js' : '/content-scripts/wb.js'
         await browser.scripting.executeScript({
           target: { tabId },
           files: [file],
         })
       } catch (e) {
-        console.warn('[鲸智 AI] 注入 content script 失败:', e)
       }
     }
   })
@@ -151,17 +141,16 @@ async function handleProductScraped(product: ScrapedProduct) {
     await updateBadge()
     return { success: true, created: result.created, skipped: result.skipped }
   } catch (e) {
-    console.error('[鲸智 AI] 直接保存到后端失败:', e)
     return { success: false, error: String(e) }
   }
 }
 
 /** 根据 URL 判断平台并返回对应的 content script 文件 */
 function getContentScriptFile(url: string): string | null {
-  if (/detail\.1688\.com\/offer\//.test(url) || /s\.1688\.com\/selloffer/.test(url) || /s\.1688\.com\/offer_search/.test(url)) return 'content-scripts/ali1688.js'
-  if (/(yangkeduo|pinduoduo)\.com/.test(url)) return 'content-scripts/pdd.js'
-  if (/ozon\.ru/.test(url)) return 'content-scripts/ozon.js'
-  if (/wildberries\.ru/.test(url)) return 'content-scripts/wb.js'
+  if (/1688\.com/.test(url)) return '/content-scripts/ali1688.js'
+  if (/yangkeduo\.com|pinduoduo\.com/.test(url)) return '/content-scripts/pdd.js'
+  if (/ozon\.ru/.test(url)) return '/content-scripts/ozon.js'
+  if (/wildberries\.ru/.test(url)) return '/content-scripts/wb.js'
   return null
 }
 
@@ -176,12 +165,11 @@ async function ensureContentScript(tabId: number, url?: string): Promise<boolean
     const scriptFile = url ? getContentScriptFile(url) : null
     if (!scriptFile) return false
     try {
-      await browser.scripting.executeScript({ target: { tabId }, files: [scriptFile] })
+      await browser.scripting.executeScript({ target: { tabId }, files: [scriptFile as any] })
       // 等待 content script 初始化
       await new Promise((resolve) => setTimeout(resolve, 300))
       return true
     } catch (e) {
-      console.warn('[鲸智 AI] 自动注入 content script 失败:', e)
       return false
     }
   }
@@ -221,33 +209,6 @@ async function handleBatchSync(products: ScrapedProduct[]) {
     await updateBadge()
     return { success: true, created: result.created, skipped: result.skipped }
   } catch (e) {
-    console.error('[鲸智 AI] 批量同步到后端失败:', e)
-    return { success: false, error: String(e) }
-  }
-}
-
-function sanitizeDownloadFilename(value: string) {
-  return value
-    .replace(/[\\/:*?"<>|]+/g, '_')
-    .replace(/\s+/g, '_')
-    .replace(/^_+|_+$/g, '')
-    .slice(0, 180) || 'ozon-api-capture.json'
-}
-
-async function downloadOzonApiCapture(payload: any, filename?: string) {
-  try {
-    const content = JSON.stringify(payload, null, 2)
-    const dataUrl = `data:application/json;charset=utf-8,${encodeURIComponent(content)}`
-    const safeFilename = sanitizeDownloadFilename(filename || 'ozon-api-capture.json')
-    const downloadId = await browser.downloads.download({
-      url: dataUrl,
-      filename: `jingzhi-ozon-api/${safeFilename}`,
-      saveAs: false,
-      conflictAction: 'uniquify',
-    })
-    return { success: true, downloadId, filename: safeFilename }
-  } catch (e) {
-    console.warn('[鲸智 AI] Ozon API 原始响应导出失败:', e)
     return { success: false, error: String(e) }
   }
 }

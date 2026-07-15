@@ -133,7 +133,6 @@ export function injectFloatingButton(onScrape: () => Promise<void>): void {
       setState('success')
       setTimeout(() => setState('idle'), 2500)
     } catch (err) {
-      console.error('[鲸智 AI] 浮窗采集失败:', err)
       setState('error')
       setTimeout(() => setState('idle'), 3000)
     }

@@ -1,6 +1,6 @@
 import type { ScrapedProduct } from '@/utils/types'
 import { injectFloatingButton } from '@/utils/floating-button'
-import { isPddDetailPage, isPddListPage, scrapePddProduct, scanPddListCards, type ListCardPdd } from './content/pdd'
+import { isPddDetailPage, isPddListPage, scrapePddProduct, scanPddListCards, type ListCardPdd } from '@/scrapers/platforms/pdd'
 
 export default defineContentScript({
   matches: [
@@ -14,7 +14,6 @@ export default defineContentScript({
     const isList = isPddListPage()
     if (!isDetail && !isList) return
 
-    console.log(`[鲸智 AI] PDD content script loaded (${isDetail ? 'detail' : 'list'} page)`)
 
     if (isDetail) {
       injectFloatingButton(async () => {
@@ -98,7 +97,6 @@ async function runListScraping(maxItems: number, scrollDelay: number, batchSize:
       totalCreated += resp?.created || 0
       totalSkipped += resp?.skipped || 0
     } catch (e) {
-      console.warn('[鲸智 AI] PDD 批量同步失败:', e)
     }
   }
 

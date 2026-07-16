@@ -1,14 +1,14 @@
 """1688 (阿里巴巴中国站) product page scraper + search.
 
 Scrapes product detail pages on 1688.com to extract:
-  title, images, price, SKU attributes, MOQ, seller info, etc.
+  title, images, price, MOQ, seller info, etc.
 
 Also supports searching 1688 for products by keyword.
 
 1688 uses heavy anti-bot + login walls.  This scraper:
   1. First tries to extract data from the embedded JSON state
      (window.__INIT_DATA__ / window.__data__).
-  2. Fallbacks to HTML regex for meta tags and spec tables.
+  2. Fallbacks to HTML regex for meta tags.
   3. Raises a clear error if the page is blocked so the frontend
      can offer manual input as a fallback.
 """
@@ -22,7 +22,7 @@ from urllib.parse import urlparse, quote_plus
 
 import httpx
 
-from app.services.scrapers.base import PlatformScraper, ScrapedProduct, ScrapedAttribute
+from app.services.scrapers.base import PlatformScraper, ScrapedProduct
 
 logger = logging.getLogger(__name__)
 
@@ -252,7 +252,6 @@ class Ali1688Scraper(PlatformScraper):
         price = ""
         currency = "CNY"
         description = ""
-        attributes: List[ScrapedAttribute] = []
         source_id = ""
         brand = ""
         min_order = ""
@@ -266,7 +265,6 @@ class Ali1688Scraper(PlatformScraper):
             images = parsed.get("images", [])
             price = parsed.get("price", "")
             description = parsed.get("description", "")
-            attributes = parsed.get("attributes", [])
             source_id = parsed.get("source_id", "")
             brand = parsed.get("brand", "")
             min_order = parsed.get("min_order", "")
@@ -306,10 +304,6 @@ class Ali1688Scraper(PlatformScraper):
             if m:
                 source_id = m.group(1)
 
-        # ── 4. Attributes from spec table ───────────────────
-        if not attributes:
-            attributes = self._extract_spec_table(html)
-
         if not title:
             raise ValueError(
                 "Could not extract product data from 1688 page. "
@@ -325,7 +319,6 @@ class Ali1688Scraper(PlatformScraper):
             images=images,
             price=price,
             currency=currency,
-            attributes=attributes,
             brand=brand,
             min_order_qty=min_order,
             seller_name=seller_name,
@@ -399,21 +392,6 @@ class Ali1688Scraper(PlatformScraper):
                         result["price"] = str(first.get("price", ""))
                 break
 
-        # Attributes
-        for k in ("attributes", "skuProps", "props"):
-            if isinstance(product, dict) and k in product:
-                attrs_raw = product[k]
-                if isinstance(attrs_raw, list):
-                    attrs = []
-                    for a in attrs_raw:
-                        if isinstance(a, dict):
-                            name = a.get("name") or a.get("attributeName") or ""
-                            value = a.get("value") or a.get("attributeValue") or ""
-                            if name and value:
-                                attrs.append(ScrapedAttribute(name=str(name), value=str(value)))
-                    result["attributes"] = attrs
-                break
-
         # Seller
         for k in ("seller", "company"):
             if isinstance(product, dict) and k in product:
@@ -435,18 +413,3 @@ class Ali1688Scraper(PlatformScraper):
                 break
 
         return result
-
-    def _extract_spec_table(self, html: str) -> List[ScrapedAttribute]:
-        """Extract attributes from 1688's spec table HTML."""
-        attrs = []
-        # Pattern: <div class="... attributeName">...</div> <div class="... attributeValue">...</div>
-        for m in re.finditer(
-            r'class="[^"]*attribute[Nn]ame[^"]*"[^>]*>(.*?)</div>\s*'
-            r'class="[^"]*attribute[Vv]alue[^"]*"[^>]*>(.*?)</div>',
-            html, re.DOTALL,
-        ):
-            name = re.sub(r'<[^>]+>', '', m.group(1)).strip()
-            value = re.sub(r'<[^>]+>', '', m.group(2)).strip()
-            if name and value:
-                attrs.append(ScrapedAttribute(name=name, value=value))
-        return attrs

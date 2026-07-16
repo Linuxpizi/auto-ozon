@@ -86,7 +86,6 @@ def create_draft(body: CreateDraftRequest, db: Session = Depends(get_db)):
             name=body.name,
             price_rub=body.price_rub,
             old_price_rub=body.old_price_rub,
-            attributes=body.attributes,
         )
         return UploadDraftRead.model_validate(draft)
     except ValueError as e:
@@ -107,7 +106,6 @@ def batch_create_drafts(body: BatchCreateDraftRequest, db: Session = Depends(get
         old_price_rub=body.old_price_rub,
         markup_pct=body.markup_pct,
         exchange_rate=body.exchange_rate,
-        attributes=body.attributes,
     )
     return {
         "success": True,

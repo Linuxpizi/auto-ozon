@@ -126,7 +126,7 @@ SEED_PROMPTS = [
         "model": "deepseek-chat",
         "system_prompt": """你是一名资深淘宝商品运营专家。
 
-请根据商品属性生成完整的商品信息：
+请根据商品基础信息生成完整的商品信息：
 ① 核心卖点（5条，每条一句话，突出差异化）
 ② 商品介绍（200~300字，突出购买理由）
 ③ 使用场景（3~5个真实生活场景）
@@ -137,7 +137,7 @@ SEED_PROMPTS = [
 - 符合淘宝表达方式
 - 语言自然，不要营销腔
 - 突出购买理由
-- 不编造商品属性
+- 不编造商品基础信息
 - 输出JSON
 
 输出格式：
@@ -149,7 +149,7 @@ SEED_PROMPTS = [
   "notes": "注意事项",
   "keywords": ["关键词1", "关键词2", ...]
 }""",
-        "input_schema": '{"title":"", "category":"", "brand":"", "material":"", "features":[""], "attributes":{}}',
+        "input_schema": '{"title":"", "category":"", "brand":"", "material":"", "features":[""]}',
         "output_schema": '{"selling_points":[],"description":"","usage_scenarios":[],"target_audience":"","notes":"","keywords":[]}',
         "output_format": "JSON",
         "is_active": True,
@@ -164,7 +164,7 @@ SEED_PROMPTS = [
         "model": "deepseek-chat",
         "system_prompt": """你是一名资深淘宝商品详情页文案专家。
 
-请根据商品属性生成详情页文案，要求：
+请根据商品基础信息生成详情页文案，要求：
 - 适用于淘宝PC端和移动端详情页
 - 图文配合的文字说明
 - 每段控制在50字以内，方便配图
@@ -195,7 +195,7 @@ SEED_PROMPTS = [
         "model": "deepseek-chat",
         "system_prompt": """你是一名资深淘宝客服运营专家。
 
-请根据商品属性生成常见问题FAQ和客服话术：
+请根据商品基础信息生成常见问题FAQ和客服话术：
 - 生成8~10个买家常问问题
 - 回答要专业、自然、有说服力
 - 覆盖材质、使用、售后、物流等方面
@@ -378,7 +378,7 @@ SEED_PROMPTS = [
 - 使用俄语自然语言
 - 强调实际用途、耐用性、家庭场景
 - 适用时强调冬季使用场景
-- 不编造商品属性
+- 不编造商品基础信息
 
 输出：
 - 标题
@@ -399,7 +399,7 @@ SEED_PROMPTS = [
   "usage_scenarios": [],
   "faq": [{"question": "", "answer": ""}]
 }""",
-        "input_schema": '{"title":"", "category":"", "brand":"", "material":"", "features":[""], "attributes":{}}',
+        "input_schema": '{"title":"", "category":"", "brand":"", "material":"", "features":[""]}',
         "output_schema": '{"title_ru":"","selling_points":[],"description":"","keywords":[],"usage_scenarios":[],"faq":[]}',
         "output_format": "JSON",
         "is_active": True,
@@ -453,7 +453,7 @@ SEED_PROMPTS = [
 - 使用俄罗斯消费者熟悉的表达方式
 - 强调实用性、耐用性、家庭场景
 - 适用时强调冬季使用场景
-- 不编造商品属性
+- 不编造商品基础信息
 - 自然俄语，200~300字
 
 输出JSON：

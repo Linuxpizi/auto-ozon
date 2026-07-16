@@ -22,7 +22,6 @@ class ScrapedProductRecord(Base):
     stock = Column(String(128), default="", comment="库存文本 如 Осталось 5 штук")
     seller_name = Column(String(256), default="")
     seller_url = Column(String(512), default="")
-    attributes = Column(JSON, default=list, comment="属性列表")
     description = Column(Text, default="")
     source_url = Column(String(1024), default="")
     scraped_at = Column(DateTime, nullable=True, comment="插件采集时间")

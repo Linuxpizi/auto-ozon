@@ -1,6 +1,6 @@
 from datetime import datetime
 from pydantic import BaseModel, ConfigDict
-from typing import Optional, List
+from typing import Optional
 
 
 class PrecisionListingBase(BaseModel):
@@ -11,13 +11,11 @@ class PrecisionListingBase(BaseModel):
     source_name: str = ""
     source_description: str = ""
     source_images: str = "[]"
-    source_attributes: str = "[]"
     category_id: int = 0
     type_id: int = 0
     category_name: str = ""
     translated_name: str = ""
     translated_description: str = ""
-    translated_attributes: str = "[]"
     price: str = ""
     old_price: str = ""
     vat: str = "0"
@@ -39,13 +37,11 @@ class PrecisionListingCreate(BaseModel):
     source_name: str = ""
     source_description: str = ""
     source_images: str = "[]"
-    source_attributes: str = "[]"
     category_id: int = 0
     type_id: int = 0
     category_name: str = ""
     translated_name: str = ""
     translated_description: str = ""
-    translated_attributes: str = "[]"
     price: str = ""
     old_price: str = ""
     vat: str = "0"
@@ -61,13 +57,11 @@ class PrecisionListingUpdate(BaseModel):
     source_name: Optional[str] = None
     source_description: Optional[str] = None
     source_images: Optional[str] = None
-    source_attributes: Optional[str] = None
     category_id: Optional[int] = None
     type_id: Optional[int] = None
     category_name: Optional[str] = None
     translated_name: Optional[str] = None
     translated_description: Optional[str] = None
-    translated_attributes: Optional[str] = None
     price: Optional[str] = None
     old_price: Optional[str] = None
     vat: Optional[str] = None
@@ -116,7 +110,6 @@ class SubmitToOzonRequest(BaseModel):
     """Request to submit a precision listing task to Ozon as a new product."""
     description_category_id: int = 0
     type_id: int = 0
-    attributes: List[dict] = []
     price_rub: Optional[float] = None
     old_price_rub: Optional[float] = None
     weight_g: Optional[int] = None
@@ -137,7 +130,6 @@ class ScrapeResponse(BaseModel):
     images: list[str] = []
     price: str = ""
     currency: str = ""
-    attributes: list[dict] = []
     brand: str = ""
     category: str = ""
     weight: str = ""

@@ -1,7 +1,7 @@
 """Ozon product page scraper (ozon.ru).
 
 Scrapes the public product page at ozon.ru to extract:
-  title, images, price, attributes, description, etc.
+  title, images, price, description, etc.
 
 Ozon has strong anti-bot protection. This scraper uses httpx with
 browser-like headers and extracts data from JSON-LD or embedded
@@ -17,7 +17,7 @@ from urllib.parse import urlparse
 
 import httpx
 
-from app.services.scrapers.base import PlatformScraper, ScrapedProduct, ScrapedAttribute
+from app.services.scrapers.base import PlatformScraper, ScrapedProduct
 
 logger = logging.getLogger(__name__)
 
@@ -75,7 +75,6 @@ class OzonScraper(PlatformScraper):
         price = ""
         currency = "RUB"
         description = ""
-        attributes: List[ScrapedAttribute] = []
         source_id = ""
 
         # 1) Look for __NEXT_DATA__ or similar JSON blob
@@ -85,7 +84,6 @@ class OzonScraper(PlatformScraper):
             images = json_data.get("images", [])
             price = json_data.get("price", "")
             description = json_data.get("description", "")
-            attributes = json_data.get("attributes", [])
             source_id = json_data.get("source_id", "")
 
         # 2) Fallback: JSON-LD
@@ -126,10 +124,6 @@ class OzonScraper(PlatformScraper):
             if m:
                 source_id = m.group(1)
 
-        # 5) Try extracting attributes from the HTML
-        if not attributes:
-            attributes = self._extract_attributes_from_html(html)
-
         if not title:
             raise ValueError(
                 "Could not extract product data from the page. "
@@ -145,7 +139,6 @@ class OzonScraper(PlatformScraper):
             images=images,
             price=price,
             currency=currency,
-            attributes=attributes,
         )
 
     # ── internal helpers ────────────────────────────────────
@@ -227,26 +220,3 @@ class OzonScraper(PlatformScraper):
             except (json.JSONDecodeError, KeyError):
                 continue
         return None
-
-    def _extract_attributes_from_html(self, html: str) -> List[ScrapedAttribute]:
-        """Try to scrape spec tables from the product page."""
-        attrs = []
-        # Ozon often uses <dl> or <tr> for specs
-        for m in re.finditer(
-            r'<dt[^>]*>(.*?)</dt>\s*<dd[^>]*>(.*?)</dd>',
-            html, re.DOTALL,
-        ):
-            name = re.sub(r'<[^>]+>', '', m.group(1)).strip()
-            value = re.sub(r'<[^>]+>', '', m.group(2)).strip()
-            if name and value:
-                attrs.append(ScrapedAttribute(name=name, value=value))
-        # Also try table rows
-        for m in re.finditer(
-            r'<tr[^>]*>\s*<td[^>]*>(.*?)</td>\s*<td[^>]*>(.*?)</td>\s*</tr>',
-            html, re.DOTALL,
-        ):
-            name = re.sub(r'<[^>]+>', '', m.group(1)).strip()
-            value = re.sub(r'<[^>]+>', '', m.group(2)).strip()
-            if name and value and name != value:
-                attrs.append(ScrapedAttribute(name=name, value=value))
-        return attrs

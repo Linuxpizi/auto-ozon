@@ -1409,7 +1409,7 @@ class OzonClient:
         return data
 
     # ------------------------------------------------------------------
-    # Product API — Category Tree & Attributes
+    # Product API — Category Tree
     # ------------------------------------------------------------------
 
     def get_category_tree(
@@ -1438,86 +1438,6 @@ class OzonClient:
         )
         return data.get("result", [])
 
-    def get_category_attributes(
-        self,
-        description_category_id: int,
-        type_id: int = 0,
-        language: str = "ZH_HANS",
-    ) -> list[dict]:
-        """Get required/optional attributes for a description category.
-
-        POST /v1/description-category/attribute
-        https://docs.ozon.ru/api/seller/zh/#tag/ProductAPI/operation/DescriptionCategoryAttribute
-
-        Args:
-            description_category_id: The description_category_id from the tree.
-            type_id: The type_id within the category (0 for all types).
-            language: Language code.
-
-        Returns:
-            List of attribute dicts with keys: id, name, description_attribute_id,
-            type, is_collection, is_required, dictionary_id, etc.
-        """
-        payload: dict[str, Any] = {
-            "description_category_id": description_category_id,
-            "language": language,
-        }
-        if type_id:
-            payload["type_id"] = type_id
-        data = self._request(
-            "POST",
-            "/v1/description-category/attribute",
-            json_body=payload,
-        )
-        return data.get("result", [])
-
-    def get_category_attribute_values(
-        self,
-        description_category_id: int,
-        attribute_id: int,
-        type_id: int = 0,
-        language: str = "ZH",
-        last_value_id: int = 0,
-        limit: int = 100,
-    ) -> list[dict]:
-        """Get dictionary values for a specific category attribute.
-
-        POST /v1/description-category/attribute/values
-
-        Useful when an attribute has type="Dictionary" — you need the
-        dictionary_value_id to submit in the product import payload.
-
-        Args:
-            description_category_id: The description_category_id.
-            attribute_id: The attribute ID to look up values for.
-            type_id: Optional type_id filter.
-            language: Language code.
-            last_value_id: Pagination cursor.
-            limit: Max values to return.
-
-        Returns:
-            List of value dicts with keys: value_id, value, etc.
-        """
-        payload: dict[str, Any] = {
-            "description_category_id": description_category_id,
-            "attribute_id": attribute_id,
-            "language": language,
-            "last_value_id": last_value_id,
-            "limit": limit,
-        }
-        if type_id:
-            payload["type_id"] = type_id
-        data = self._request(
-            "POST",
-            "/v1/description-category/attribute/values",
-            json_body=payload,
-        )
-        return data.get("result", [])
-
-    # ------------------------------------------------------------------
-    # Product API — Import & Status
-    # ------------------------------------------------------------------
-
     def import_products(self, items: list[dict]) -> dict:
         """Create or update products via POST /v3/product/import.
 
@@ -1526,7 +1446,6 @@ class OzonClient:
             - name: Product title
             - description_category_id: Ozon category ID
             - type_id: Ozon type ID within the category
-            - attributes: List of attribute dicts [{complex_id, id, values}]
             - price: Price in kopecks (amount × 100)
             - images: List of image URLs
             - weight, height, depth, width: Dimensions
@@ -1615,41 +1534,6 @@ class OzonClient:
             json_body={"product_id": product_ids},
         )
         return data
-
-    def get_product_attributes(
-        self,
-        product_id: int = 0,
-        offer_id: str = "",
-        limit: int = 100,
-        last_attribute_id: int = 0,
-    ) -> list[dict]:
-        """Get attributes for a specific product.
-
-        POST /v3/products/info/attributes
-
-        Args:
-            product_id: Ozon product ID (use either this or offer_id).
-            offer_id: Your SKU identifier (use either this or product_id).
-            limit: Max attributes to return.
-            last_attribute_id: Pagination cursor.
-
-        Returns:
-            List of attribute dicts.
-        """
-        payload: dict[str, Any] = {
-            "limit": limit,
-            "last_attribute_id": last_attribute_id,
-        }
-        if product_id:
-            payload["filter"] = {"product_id": [product_id]}
-        elif offer_id:
-            payload["filter"] = {"offer_id": [offer_id]}
-        data = self._request(
-            "POST",
-            "/v3/products/info/attributes",
-            json_body=payload,
-        )
-        return data.get("result", {}).get("items", [])
 
     def delete_product(self, product_ids: list[int]) -> dict:
         """Delete products (FBS only).

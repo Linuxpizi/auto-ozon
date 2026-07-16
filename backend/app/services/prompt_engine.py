@@ -126,8 +126,6 @@ def build_product_input(req: ProductOptimizeRequest) -> Dict[str, Any]:
         data["category"] = req.category
     if req.description:
         data["description"] = req.description
-    if req.attributes:
-        data["attributes"] = req.attributes
     if req.features:
         data["features"] = req.features
     return data

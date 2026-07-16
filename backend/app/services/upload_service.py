@@ -76,7 +76,6 @@ def create_draft_from_scraped(
     name: str = "",
     price_rub: float = 0.0,
     old_price_rub: float = 0.0,
-    attributes: list = [],
 ) -> UploadDraft:
     """从单个采集商品创建上架草稿"""
     record = db.query(ScrapedProductRecord).filter(
@@ -111,7 +110,6 @@ def create_draft_from_scraped(
         "old_price_rub": old_price_rub,
         "primary_image": valid_images[0] if valid_images else "",
         "images": valid_images[:15],
-        "attributes": attributes,
         "weight": 500,
         "height": 100,
         "depth": 100,
@@ -134,7 +132,6 @@ def create_drafts_batch(
     old_price_rub: float = 0.0,
     markup_pct: float = 0.0,
     exchange_rate: float = 0.0,
-    attributes: list = [],
 ) -> List[UploadDraft]:
     """批量从采集商品创建上架草稿"""
     results = []
@@ -165,7 +162,6 @@ def create_drafts_batch(
                 offer_id=auto_offer_id,
                 price_rub=auto_price_rub,
                 old_price_rub=old_price_rub,
-                attributes=attributes,
             )
             results.append(draft)
         except Exception as e:
@@ -201,13 +197,6 @@ def _build_ozon_item(draft: UploadDraft) -> dict:
         "currency_code": "RUB",
         "status": "processed",
     }
-
-    # Attributes
-    attrs = draft.attributes if isinstance(draft.attributes, list) else []
-    if attrs:
-        item["attributes"] = attrs
-    else:
-        item["attributes"] = []
 
     return item
 

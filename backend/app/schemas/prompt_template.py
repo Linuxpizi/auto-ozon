@@ -89,7 +89,6 @@ class ProductOptimizeRequest(BaseModel):
     title: str = ""
     brand: str = ""
     description: Optional[str] = None
-    attributes: Optional[Dict[str, str]] = None
     features: List[str] = []
     template_name: Optional[str] = Field(None, description="指定模板名称，否则自动路由")
 

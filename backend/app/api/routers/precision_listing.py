@@ -80,8 +80,6 @@ async def scrape_product_url(payload: ScrapeRequest):
         images=result.images,
         price=result.price,
         currency=result.currency,
-        attributes=[{"name": a.name, "value": a.value, "group_name": a.group_name}
-                    for a in result.attributes],
         brand=result.brand,
         category=result.category,
         weight=result.weight,
@@ -201,7 +199,6 @@ async def sync_imported_product(task_id: int, db: Session = Depends(get_db)):
     """
     Phase 2: After import-by-sku completes, the copied product now exists in
     the user's own store. We can now query it using the standard product APIs
-    (/v3/product/info/list, /v4/product/info/attributes, /v1/product/info/description)
     because it belongs to us.
 
     This endpoint fetches the copied product's details and populates the task.
@@ -240,33 +237,12 @@ async def sync_imported_product(task_id: int, db: Session = Depends(get_db)):
     product_id = str(item.get("id", ""))
     actual_offer_id = item.get("offer_id", task.offer_id)
 
-    # 2. Get attributes from our own store
-    attrs_resp = await client._request("POST", "/v4/product/info/attributes", body={
-        "filter": {"product_id": [product_id]},
-        "limit": 100,
-    })
-    attr_items = attrs_resp.get("result", [])
-    attr_data = attr_items[0] if attr_items else {}
-
-    images = attr_data.get("images", [])
-    primary_image = attr_data.get("primary_image", "")
+    images = item.get("images", [])
+    primary_image = item.get("primary_image", "")
     if primary_image and primary_image not in images:
         images = [primary_image] + images
 
-    source_name = attr_data.get("name", item.get("name", ""))
-
-    source_attributes_raw = attr_data.get("attributes", [])
-    simple_attrs = []
-    for a in source_attributes_raw:
-        values = a.get("values", [])
-        val_str = ", ".join(v.get("value", "") for v in values) if values else ""
-        simple_attrs.append({
-            "id": a.get("id", 0),
-            "complex_id": a.get("complex_id", 0),
-            "name": a.get("name", f"Attr_{a.get('id', 0)}"),
-            "value": val_str,
-            "dictionary_value_id": values[0].get("dictionary_value_id", 0) if values else 0,
-        })
+    source_name = item.get("name", "")
 
     # 3. Get description from our own store
     desc_text = ""
@@ -283,7 +259,6 @@ async def sync_imported_product(task_id: int, db: Session = Depends(get_db)):
         source_name=source_name or task.source_name,
         source_description=desc_text,
         source_images=json.dumps(images, ensure_ascii=False),
-        source_attributes=json.dumps(simple_attrs, ensure_ascii=False),
         product_id=product_id,
         offer_id=actual_offer_id,
         status="imported",  # Ready for editing
@@ -296,7 +271,6 @@ async def sync_imported_product(task_id: int, db: Session = Depends(get_db)):
         "product_id": product_id,
         "offer_id": actual_offer_id,
         "image_count": len(images),
-        "attr_count": len(simple_attrs),
     }
 
 
@@ -380,14 +354,6 @@ async def submit_to_ozon(
         str(int(float(task.old_price) * 100)) if task.old_price and float(task.old_price or 0) > 0 else ""
     )
 
-    # Parse attributes
-    ozon_attributes = body.attributes or []
-    if not ozon_attributes and task.translated_attributes:
-        try:
-            ozon_attributes = json.loads(task.translated_attributes)
-        except Exception:
-            pass
-
     # Parse images
     images = []
     if task.source_images:
@@ -420,7 +386,6 @@ async def submit_to_ozon(
         "weight": weight,
         "primary_image": images[0] if images else "",
         "images": images[:15],
-        "attributes": ozon_attributes,
         "currency_code": "RUB",
         "price": price_kopecks,
         "old_price": old_price_kopecks,

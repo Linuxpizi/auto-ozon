@@ -27,7 +27,6 @@ class UploadDraftBase(BaseModel):
     depth: int = 100
     width: int = 100
     primary_image: str = ""
-    attributes: list = []
 
 
 # ── 创建 ──────────────────────────────────────────────────────
@@ -43,7 +42,6 @@ class CreateDraftRequest(BaseModel):
     name: str = ""
     price_rub: float = 0.0
     old_price_rub: float = 0.0
-    attributes: list = []
 
 
 class BatchCreateDraftRequest(BaseModel):
@@ -57,7 +55,6 @@ class BatchCreateDraftRequest(BaseModel):
     old_price_rub: float = 0.0
     markup_pct: float = 0.0
     exchange_rate: float = 0.0
-    attributes: list = []
 
 
 # ── 更新 ──────────────────────────────────────────────────────
@@ -80,7 +77,6 @@ class UpdateDraftRequest(BaseModel):
     width: Optional[int] = None
     primary_image: Optional[str] = None
     images: Optional[List[str]] = None
-    attributes: Optional[list] = None
 
 
 # ── 提交 ──────────────────────────────────────────────────────

@@ -46,7 +46,6 @@ def create_scraped_product(db: Session, product: ScrapedProductCreate) -> Scrape
         seller_url=product.seller_url,
         discount=product.discount,
         stock=product.stock,
-        attributes=product.attributes,
         description=product.description,
         source_url=product.source_url,
         scraped_at=product.scraped_at,
@@ -117,7 +116,6 @@ def bulk_create_scraped_products(
                 stock=product.stock,
                 seller_name=product.seller_name,
                 seller_url=product.seller_url,
-                attributes=product.attributes,
                 description=product.description,
                 source_url=product.source_url,
                 scraped_at=product.scraped_at,
@@ -158,11 +156,6 @@ def bulk_create_scraped_products(
             # 评论数
             if _is_enriched(product.review_count, record.review_count, "int"):
                 record.review_count = product.review_count
-                changed = True
-
-            # 属性列表
-            if _is_enriched(product.attributes, record.attributes, "list"):
-                record.attributes = product.attributes
                 changed = True
 
             # 描述

@@ -7,15 +7,7 @@ of which platform the product was scraped from.
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
-from typing import List, Optional
-
-
-@dataclass
-class ScrapedAttribute:
-    """A single product attribute from the source platform."""
-    name: str
-    value: str
-    group_name: str = ""
+from typing import List
 
 
 @dataclass
@@ -33,7 +25,6 @@ class ScrapedProduct:
     images: List[str] = field(default_factory=list)
     price: str = ""                  # Original price (e.g. "¥120.00")
     currency: str = ""               # Original currency code
-    attributes: List[ScrapedAttribute] = field(default_factory=list)
     brand: str = ""
     category: str = ""               # Platform category path
     weight: str = ""

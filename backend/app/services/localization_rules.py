@@ -49,7 +49,7 @@ def apply_localization(data: Dict[str, Any]) -> Dict[str, Any]:
     Apply Russian localization rules to product data.
     - Removes Chinese e-commerce specific expressions
     - Replaces with Russian consumer-friendly expressions
-    - Does NOT fabricate attributes
+    - Does NOT fabricate product facts
     """
     localized = {}
     for key, value in data.items():

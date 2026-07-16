@@ -113,7 +113,7 @@
          右侧:编辑数据 + AI按钮
          ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ -->
     <n-drawer v-model:show="drawerVisible" :width="680" placement="right" :closable="true" :mask-closable="true" :theme-overrides="drawerThemeOverrides">
-      <n-drawer-content :title="null" :native-scrollbar="false" closable>
+      <n-drawer-content :native-scrollbar="false" closable>
         <template #header>
           <div style="display:flex; align-items:center; gap:8px;">
             <span style="font-size:15px; font-weight:600;">编辑商品</span>
@@ -169,14 +169,6 @@
             <div class="section-block">
               <div class="section-label">商品描述</div>
               <div class="readonly-text">{{ editProduct.description || '暂无描述' }}</div>
-            </div>
-
-            <div class="section-block" v-if="editProduct.attributes?.length">
-              <div class="section-label">商品属性</div>
-              <div v-for="attr in editProduct.attributes" :key="attr.name" class="attr-row readonly">
-                <span class="attr-name">{{ attr.name }}</span>
-                <span class="attr-value">{{ attr.value }}</span>
-              </div>
             </div>
 
             <div class="section-block" v-if="editProduct.spec_list?.length">
@@ -417,37 +409,14 @@
               <div class="section-label">
                 🔗 1688 同款
                 <div class="section-actions">
-                  <n-button size="tiny" quaternary type="warning" :loading="extract1688Loading" @click="handleExtract1688Specs" :disabled="!linked1688Info && !editProduct?.source_url?.includes('1688')">📥 提取参数</n-button>
+                  <n-button size="tiny" quaternary type="warning" :loading="extract1688Loading" @click="handleExtract1688Specs" :disabled="!editProduct?.source_url?.includes('1688')">📥 提取参数</n-button>
                   <n-button size="tiny" type="primary" @click="showSearch1688Modal" :loading="search1688Loading">🔍 搜索同款</n-button>
                 </div>
               </div>
-              <div v-if="linked1688Info" class="linked-1688-info">
-                <n-tag size="small" type="info" :bordered="false">✅ 已绑定</n-tag>
-                <div class="linked-1688-title" @click="openUrl(linked1688Info.url)">{{ linked1688Info.title || linked1688Info.url }}</div>
-                <n-button size="tiny" quaternary type="error" @click="unlink1688">解绑</n-button>
-              </div>
-              <div v-else class="empty-hint">
+              <div class="empty-hint">
                 <span v-if="editProduct.source_url?.includes('1688')">当前商品来自1688，可直接提取参数</span>
                 <span v-else>未绑定1688同款，点击搜索按钮查找</span>
               </div>
-            </div>
-
-            <!-- 属性 -->
-            <div class="section-block">
-              <div class="section-label">
-                商品属性
-                <div class="section-actions">
-                  <n-button size="tiny" quaternary @click="handleTranslateAllAttrs">🌐 翻译全部</n-button>
-                </div>
-              </div>
-              <div v-if="editProduct.attributes?.length">
-                <div v-for="(attr, idx) in editProduct.attributes" :key="idx" class="attr-row">
-                  <n-input v-model:value="attr.name" size="small" placeholder="属性名" style="width:120px" />
-                  <n-input v-model:value="attr.value" size="small" placeholder="属性值" style="flex:1" />
-                  <n-button size="tiny" quaternary type="error" @click="removeAttribute(idx)">✕</n-button>
-                </div>
-              </div>
-              <n-button size="small" quaternary @click="addAttribute">+ 添加属性</n-button>
             </div>
 
             <!-- 物理规格 -->
@@ -687,7 +656,7 @@ import {
   type GlobalThemeOverrides,
 } from "naive-ui";
 import { apiGet, apiPost, apiPut, apiDelete } from "../api";
-import { translateText, translateBatch, optimizeDescription, translateImage, replaceImageSubject, generateImage } from "../api/ai";
+import { translateText, optimizeDescription, replaceImageSubject, generateImage } from "../api/ai";
 import ImageEditor from "../components/image/ImageEditor.vue";
 import { useMessage } from "naive-ui";
 
@@ -869,7 +838,6 @@ async function saveEdit() {
       description: d.description,
       source_url: d.source_url,
       images: d.images,
-      attributes: d.attributes,
       seller_name: d.seller_name,
       seller_url: d.seller_url,
       video_urls: d.video_urls || [],
@@ -1008,28 +976,12 @@ async function handleSmartPricing() {
   }
 }
 
-function applySmartPricing() {
-  if (!pricingResult.value || !editProduct.value) return;
-  editProduct.value.price = pricingResult.value.suggested_price_rub;
-  editProduct.value.old_price = pricingResult.value.old_price_rub;
-  message.success(`✅ 已应用：售价 ₽${pricingResult.value.suggested_price_rub}，划线价 ₽${pricingResult.value.old_price_rub}`);
-  smartPricingVisible.value = false;
-}
-
 // ── 1688 找同款 ──
 const search1688Visible = ref(false);
 const search1688Keyword = ref("");
 const search1688Results = ref<any[]>([]);
 const search1688Loading = ref(false);
 const search1688Searched = ref(false);
-
-const linked1688Info = computed(() => {
-  if (!editProduct.value?.attributes) return null;
-  const linkAttr = editProduct.value.attributes.find((a: any) => a.name === "1688_同款链接");
-  if (!linkAttr) return null;
-  const titleAttr = editProduct.value.attributes.find((a: any) => a.name === "1688_同款标题");
-  return { url: linkAttr.value, title: titleAttr?.value || "" };
-});
 
 function showSearch1688Modal() {
   // 用商品标题作为默认搜索关键词
@@ -1069,35 +1021,11 @@ async function handleLink1688(item: any) {
       image: item.image || "",
       seller: item.seller || "",
     });
-    // 更新本地属性
-    if (result.total_attributes) {
-      const existingAttrs = editProduct.value.attributes || [];
-      const filtered = existingAttrs.filter((a: any) => !["1688_同款链接", "1688_同款标题", "1688_offer_id", "1688_供应商"].includes(a.name));
-      filtered.push(
-        { name: "1688_同款链接", value: item.url || `https://detail.1688.com/offer/${item.offer_id}.html` },
-        { name: "1688_同款标题", value: item.title || "" },
-      );
-      if (item.offer_id) filtered.push({ name: "1688_offer_id", value: item.offer_id });
-      if (item.seller) filtered.push({ name: "1688_供应商", value: item.seller });
-      editProduct.value.attributes = filtered;
-    }
-    message.success(`✅ 已绑定1688同款${result.specs_extracted?.length ? `，提取了 ${result.specs_extracted.length} 个规格参数` : ""}`);
+    message.success(`✅ 已提取1688同款信息${result.specs_extracted?.length ? `，提取了 ${result.specs_extracted.length} 个规格参数` : ""}`);
     search1688Visible.value = false;
   } catch (e: any) {
     message.error("绑定失败: " + e.message);
   }
-}
-
-function unlink1688() {
-  if (!editProduct.value?.attributes) return;
-  editProduct.value.attributes = editProduct.value.attributes.filter(
-    (a: any) => !["1688_同款链接", "1688_同款标题", "1688_offer_id", "1688_供应商"].includes(a.name)
-  );
-  message.success("已解绑1688同款");
-}
-
-function openUrl(url: string) {
-  if (url) window.open(url, "_blank");
 }
 
 // ── 1688 参数提取 ──
@@ -1113,11 +1041,6 @@ async function handleExtract1688Specs() {
     if (result.depth_mm) editProduct.value.depth_mm = result.depth_mm;
     if (result.height_mm) editProduct.value.height_mm = result.height_mm;
     if (result.width_mm) editProduct.value.width_mm = result.width_mm;
-    // 更新属性
-    if (result.total_attributes) {
-      const res = await apiGet(`/selection/products/${editProduct.value.id}`);
-      if (res.attributes) editProduct.value.attributes = res.attributes;
-    }
     message.success(`✅ 已提取 ${result.specs_extracted?.length || 0} 个参数` +
       (result.weight_g ? `，重量: ${result.weight_g}g` : ""));
   } catch (e: any) {
@@ -1228,10 +1151,6 @@ async function handleAiOptimize(target: "title" | "description") {
     const res = await optimizeDescription({
       title: editProduct.value.title || "",
       description: target === "description" ? text : undefined,
-      attributes: (editProduct.value.attributes || []).reduce((acc: any, a: any) => {
-        if (a.name) acc[a.name] = a.value;
-        return acc;
-      }, {}),
       field_type: target,
       context: editProduct.value.category || "",
     });
@@ -1241,40 +1160,6 @@ async function handleAiOptimize(target: "title" | "description") {
     }
   } catch (e: any) {
     message.error("优化失败: " + e.message);
-  } finally {
-    aiTextLoading.value = false;
-  }
-}
-
-async function handleTranslateAllAttrs() {
-  if (!editProduct.value?.attributes?.length) {
-    message.warning("暂无属性可翻译");
-    return;
-  }
-  aiTextLoading.value = true;
-  try {
-    const items = editProduct.value.attributes
-      .filter((a: any) => a.name || a.value)
-      .map((a: any) => ({ key: a.name || "", value: a.value || "" }));
-    if (items.length === 0) {
-      message.warning("属性为空");
-      return;
-    }
-    const res = await translateBatch({
-      items,
-      field_type: "attribute",
-    });
-    if (res.items?.length) {
-      for (const item of res.items) {
-        const attr = editProduct.value.attributes.find((a: any) => a.name === item.key);
-        if (attr) {
-          if (item.translated) attr.value = item.translated;
-        }
-      }
-      message.success(`翻译 ${res.items.length} 个属性`);
-    }
-  } catch (e: any) {
-    message.error("属性翻译失败: " + e.message);
   } finally {
     aiTextLoading.value = false;
   }
@@ -1294,10 +1179,6 @@ async function handleOneClickAiOptimize() {
       try {
         const titleRes = await optimizeDescription({
           title: editProduct.value.title,
-          attributes: (editProduct.value.attributes || []).reduce((acc: any, a: any) => {
-            if (a.name) acc[a.name] = a.value;
-            return acc;
-          }, {}),
           field_type: "title",
           context: editProduct.value.category || "",
         });
@@ -1314,10 +1195,6 @@ async function handleOneClickAiOptimize() {
         const descRes = await optimizeDescription({
           title: editProduct.value.title || "",
           description: editProduct.value.description,
-          attributes: (editProduct.value.attributes || []).reduce((acc: any, a: any) => {
-            if (a.name) acc[a.name] = a.value;
-            return acc;
-          }, {}),
           field_type: "description",
           context: editProduct.value.category || "",
         });
@@ -1328,26 +1205,7 @@ async function handleOneClickAiOptimize() {
       } catch { /* skip */ }
     }
 
-    // Step 3: 翻译属性
-    if (editProduct.value.attributes?.length) {
-      try {
-        const items = editProduct.value.attributes
-          .filter((a: any) => a.name || a.value)
-          .map((a: any) => ({ key: a.name || "", value: a.value || "" }));
-        if (items.length > 0) {
-          const attrRes = await translateBatch({ items, field_type: "attribute" });
-          if (attrRes.items?.length) {
-            for (const item of attrRes.items) {
-              const attr = editProduct.value.attributes.find((a: any) => a.name === item.key);
-              if (attr && item.translated) attr.value = item.translated;
-            }
-            steps.push(`翻译${attrRes.items.length}个属性`);
-          }
-        }
-      } catch { /* skip */ }
-    }
-
-    // Step 4: AI 优化图片
+    // Step 3: AI 优化图片
     if (editProduct.value.images?.length) {
       let optimizedCount = 0;
       for (let i = 0; i < editProduct.value.images.length; i++) {
@@ -1381,18 +1239,6 @@ async function handleOneClickAiOptimize() {
   } finally {
     aiOneClickLoading.value = false;
   }
-}
-
-// ── 属性管理 ──
-function addAttribute() {
-  if (!editProduct.value) return;
-  if (!editProduct.value.attributes) editProduct.value.attributes = [];
-  editProduct.value.attributes.push({ name: "", value: "" });
-}
-
-function removeAttribute(idx: number) {
-  if (!editProduct.value?.attributes) return;
-  editProduct.value.attributes.splice(idx, 1);
 }
 
 // ── SKU 管理 ──
@@ -1564,28 +1410,9 @@ async function loadStoreOptions() {
 const categoryTreeNodes = ref<any[]>([]);
 const selectedCategoryKeys = ref<any[]>([]);
 const expandedCategoryKeys = ref<any[]>([]);
-const categorySearchPattern = ref('');
-const categoryPopoverShow = ref(false);
 const categoryLoading = ref(false);
 const categoryTreeMap = ref<Map<any, any[]>>(new Map()); // node key -> children[]
 const categoryPathLabelMap = ref<Map<any, string>>(new Map()); // node key -> breadcrumb label
-
-const selectedCategoryLabel = computed(() => {
-  if (!selectedCategoryKeys.value.length) return '';
-  const key = selectedCategoryKeys.value[0];
-  return getCategoryPathLabelByKey(key);
-});
-
-function clearCategorySelection() {
-  editSelectedCategoryKeys.value = [];
-  editSelectedCategoryPathLabel.value = '';
-  if (editProduct.value) {
-    editProduct.value.description_category_id = null;
-    editProduct.value.type_id = null;
-    editProduct.value.ozon_category_id = 0;
-    editProduct.value.ozon_type_id = 0;
-  }
-}
 
 // n-tree filter: match node label against search pattern
 function filterCategoryTree(pattern: string, node: any): boolean {
@@ -1629,10 +1456,6 @@ function getCategoryPathLabelByKey(key: any) {
   if (indexedPathLabel) return indexedPathLabel;
   const path = findCategoryTreeNodePathByKey(categoryTreeNodes.value, key);
   return path.map((node: any) => node.label).filter(Boolean).join(' > ');
-}
-
-function hasCategoryChildren(node: any) {
-  return Array.isArray(node?.children) && node.children.length > 0;
 }
 
 function isSelectableCategoryNode(node: any) {
@@ -2214,36 +2037,6 @@ onMounted(() => {
   background: var(--bg-card-hover, #f8f9fa);
 }
 
-/* ── 属性行 ── */
-.attr-row {
-  display: flex;
-  gap: 6px;
-  align-items: center;
-  margin-bottom: 6px;
-  padding: 4px 6px;
-  border-radius: 6px;
-  transition: background 0.15s ease;
-}
-
-.attr-row:hover {
-  background: var(--bg-card-hover, #f8f9fa);
-}
-
-.attr-row.readonly {
-  font-size: 13px;
-}
-
-.attr-name {
-  font-weight: 500;
-  color: var(--text-secondary);
-  min-width: 60px;
-}
-
-.attr-value {
-  color: var(--text-primary);
-  flex: 1;
-}
-
 /* ── SKU 编辑行 ── */
 .sku-edit-row {
   display: flex;
@@ -2311,9 +2104,6 @@ onMounted(() => {
 }
 [data-theme="dark"] .n-collapse-item {
   --n-title-font-size: 14px;
-}
-[data-theme="dark"] .attr-row:hover {
-  background: var(--bg-card-hover, #1c2048) !important;
 }
 [data-theme="dark"] .image-add:hover {
   background: var(--bg-card-hover, #1c2048) !important;
@@ -2522,27 +2312,4 @@ onMounted(() => {
   flex-wrap: wrap;
 }
 
-/* ── 已绑定 1688 信息 ── */
-.linked-1688-info {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 8px;
-  background: var(--bg-elevated, #f8f9fa);
-  border-radius: 6px;
-}
-
-.linked-1688-title {
-  flex: 1;
-  font-size: 12px;
-  color: #18a058;
-  cursor: pointer;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.linked-1688-title:hover {
-  text-decoration: underline;
-}
 </style>

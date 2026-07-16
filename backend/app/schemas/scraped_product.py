@@ -25,7 +25,6 @@ class ScrapedProductBase(BaseModel):
     stock: str = ""
     seller_name: str = ""
     seller_url: str = ""
-    attributes: List[dict] = []
     description: str = ""
     source_url: str = ""
     scraped_at: Optional[datetime] = None
@@ -46,7 +45,7 @@ class ScrapedProductBase(BaseModel):
     supplier_url: str = ""
     trade_quantity: int = 0
 
-    @field_validator("images", "attributes", "video_urls", "sku_list", "spec_list", "price_ranges", mode="before")
+    @field_validator("images", "video_urls", "sku_list", "spec_list", "price_ranges", mode="before")
     @classmethod
     def normalize_list_fields(cls, value):
         if value is None or value == "":

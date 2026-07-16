@@ -1,7 +1,7 @@
 """AliExpress product page scraper.
 
 Scrapes product detail pages on aliexpress.com to extract:
-  title, images, price, attributes, etc.
+  title, images, price, etc.
 
 AliExpress embeds product data in a JSON blob inside a <script> tag.
 This scraper extracts that data and normalises it into ScrapedProduct.
@@ -15,7 +15,7 @@ from urllib.parse import urlparse
 
 import httpx
 
-from app.services.scrapers.base import PlatformScraper, ScrapedProduct, ScrapedAttribute
+from app.services.scrapers.base import PlatformScraper, ScrapedProduct
 
 logger = logging.getLogger(__name__)
 
@@ -74,7 +74,6 @@ class AliExpressScraper(PlatformScraper):
         price = ""
         currency = "USD"
         description = ""
-        attributes: List[ScrapedAttribute] = []
         source_id = ""
         brand = ""
 
@@ -86,7 +85,6 @@ class AliExpressScraper(PlatformScraper):
             images = parsed.get("images", [])
             price = parsed.get("price", "")
             description = parsed.get("description", "")
-            attributes = parsed.get("attributes", [])
             source_id = parsed.get("source_id", "")
             brand = parsed.get("brand", "")
 
@@ -151,7 +149,6 @@ class AliExpressScraper(PlatformScraper):
             images=images,
             price=price,
             currency=currency,
-            attributes=attributes,
             brand=brand,
         )
 
@@ -229,23 +226,6 @@ class AliExpressScraper(PlatformScraper):
                     first = p[0]
                     if isinstance(first, dict):
                         result["price"] = str(first.get("text", ""))
-                break
-
-        # Attributes
-        for k in ("attributes", "skuProps", "props"):
-            if isinstance(product, dict) and k in product:
-                attrs_raw = product[k]
-                if isinstance(attrs_raw, list):
-                    attrs = []
-                    for a in attrs_raw:
-                        if isinstance(a, dict):
-                            name = a.get("name") or a.get("attributeName") or ""
-                            value = a.get("value") or a.get("attributeValue") or ""
-                            if name and value:
-                                if isinstance(value, list):
-                                    value = ", ".join(str(v) for v in value)
-                                attrs.append(ScrapedAttribute(name=str(name), value=str(value)))
-                    result["attributes"] = attrs
                 break
 
         # Product ID

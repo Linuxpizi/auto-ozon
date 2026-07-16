@@ -10,7 +10,7 @@ router = APIRouter()
 
 @router.post("/optimize", response_model=TitleOptimizeResponse)
 def optimize_title(body: TitleOptimizeRequest, db: Session = Depends(get_db)):
-    """根据商品属性优化标题（淘宝/ Ozon 自动路由）"""
+    """根据商品基础信息优化标题（淘宝/ Ozon 自动路由）"""
     try:
         return prompt_engine.optimize_title(body, db)
     except ValueError as e:

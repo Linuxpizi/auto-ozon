@@ -15,7 +15,6 @@ class PrecisionListingTask(Base):
     source_name = Column(String(512), default="", comment="Original product name")
     source_description = Column(Text, default="", comment="Original description (HTML)")
     source_images = Column(Text, default="[]", comment="JSON array of source image URLs")
-    source_attributes = Column(Text, default="[]", comment="JSON array of source attributes")
 
     # Category / type mapping
     category_id = Column(Integer, default=0, comment="Ozon description category ID")
@@ -25,7 +24,6 @@ class PrecisionListingTask(Base):
     # Translated content
     translated_name = Column(String(512), default="", comment="Translated title")
     translated_description = Column(Text, default="", comment="Translated description (HTML)")
-    translated_attributes = Column(Text, default="[]", comment="Translated attributes JSON")
 
     # Pricing
     price = Column(String(32), default="", comment="Selling price in RUB")

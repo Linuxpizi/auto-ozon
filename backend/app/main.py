@@ -29,9 +29,9 @@ logger = logging.getLogger(__name__)
 
 Base.metadata.create_all(bind=engine)
 
-# ── Auto-migration: ensure columns added after model updates ────────────
+# ── Auto-migration: keep SQLite schema aligned with model updates ──────
 def _ensure_scraped_product_columns():
-    """Add model columns missing from scraped_product_records (SQLite ALTER TABLE)."""
+    """Add current columns and remove retired product-attribute columns."""
     import sqlite3 as _sqlite3
 
     from app.core.config import DATABASE_URL
@@ -104,12 +104,33 @@ def _ensure_scraped_product_columns():
             typedef = f"{_column_type(column)}{_column_default(column)}"
             cur.execute(f'ALTER TABLE scraped_product_records ADD COLUMN "{column.name}" {typedef}')
             logger.info("DB migration: added column %s %s", column.name, typedef)
-        list_json_columns = ["images", "attributes", "video_urls", "sku_list", "spec_list", "price_ranges", "matched_suppliers"]
+        list_json_columns = ["images", "video_urls", "sku_list", "spec_list", "price_ranges", "matched_suppliers"]
         for column_name in list_json_columns:
             if column_name in existing or column_name in {c.name for c in ScrapedProductRecord.__table__.columns}:
                 cur.execute(f"UPDATE scraped_product_records SET {column_name} = '[]' WHERE {column_name} IS NULL")
         if "ozon_metrics" in existing or "ozon_metrics" in {c.name for c in ScrapedProductRecord.__table__.columns}:
             cur.execute("UPDATE scraped_product_records SET ozon_metrics = '{}' WHERE ozon_metrics IS NULL")
+
+        # 商品属性链路已移除；同步清理旧数据库中的持久化字段。
+        retired_columns = {
+            "scraped_product_records": ("attributes",),
+            "upload_drafts": ("attributes",),
+            "precision_listing_tasks": ("source_attributes", "translated_attributes"),
+        }
+        for table_name, column_names in retired_columns.items():
+            cur.execute(
+                "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?",
+                (table_name,),
+            )
+            if cur.fetchone() is None:
+                continue
+            cur.execute(f'PRAGMA table_info("{table_name}")')
+            table_columns = {row[1] for row in cur.fetchall()}
+            for column_name in column_names:
+                if column_name not in table_columns:
+                    continue
+                cur.execute(f'ALTER TABLE "{table_name}" DROP COLUMN "{column_name}"')
+                logger.info("DB migration: dropped retired column %s.%s", table_name, column_name)
         conn.commit()
         conn.close()
     except Exception as e:

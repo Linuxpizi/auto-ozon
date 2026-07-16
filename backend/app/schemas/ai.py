@@ -1,5 +1,5 @@
 """Schemas for AI Translation and Optimization endpoints."""
-from typing import Dict, List, Optional
+from typing import List, Optional
 from pydantic import BaseModel, Field
 
 
@@ -10,7 +10,7 @@ class AITranslateRequest(BaseModel):
     source_lang: str = Field(default="zh", description="源语言")
     target_lang: str = Field(default="ru", description="目标语言")
     context: Optional[str] = Field(None, description="上下文提示(如商品类目、品牌等)")
-    field_type: str = Field(default="title", description="字段类型: title / description / attribute")
+    field_type: str = Field(default="title", description="字段类型: title / description")
 
 
 class AITranslateResponse(BaseModel):
@@ -24,7 +24,7 @@ class AITranslateResponse(BaseModel):
 class AIBatchTranslateItem(BaseModel):
     key: str = Field(..., description="字段标识, 如 'title', 'color', 'material'")
     text: str = Field(..., description="待翻译文本")
-    field_type: str = Field(default="attribute", description="字段类型: title / description / attribute")
+    field_type: str = Field(default="description", description="字段类型: title / description")
 
 
 class AIBatchTranslateRequest(BaseModel):
@@ -50,8 +50,7 @@ class AIBatchTranslateResponse(BaseModel):
 class AIOptimizeDescriptionRequest(BaseModel):
     title: str = Field(default="", description="商品标题")
     description: str = Field(default="", description="商品描述")
-    attributes: Optional[Dict[str, str]] = Field(None, description="商品属性")
-    field_type: str = Field(default="description", description="优化目标: title / description / attribute")
+    field_type: str = Field(default="description", description="优化目标: title / description")
     platform: str = Field(default="OZON", description="目标平台")
     language: str = Field(default="ru", description="目标语言")
     context: Optional[str] = Field(None, description="额外优化要求")

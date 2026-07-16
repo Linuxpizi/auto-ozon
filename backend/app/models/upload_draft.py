@@ -48,9 +48,6 @@ class UploadDraft(Base):
     primary_image = Column(String(1024), default="", comment="主图 URL")
     images = Column(JSON, default=list, comment="图片 URL 列表（最多 15 张）")
 
-    # ── Ozon 属性 ──
-    attributes = Column(JSON, default=list, comment="Ozon 属性 [{complex_id, id, values}]")
-
     # ── 上架状态 ──
     status = Column(String(32), default="draft", index=True,
                     comment="draft|ready|submitting|submitted|processing|active|error")

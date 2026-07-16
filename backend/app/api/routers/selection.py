@@ -29,7 +29,6 @@ class ProductUpdate(BaseModel):
     description: Optional[str] = None
     source_url: Optional[str] = None
     images: Optional[List[str]] = None
-    attributes: Optional[List[dict]] = None
     rating: Optional[float] = None
     review_count: Optional[int] = None
     seller_name: Optional[str] = None
@@ -56,7 +55,6 @@ class UploadRequest(BaseModel):
     offer_id: str = ""
     description_category_id: int = 0
     type_id: int = 0
-    attributes: List[dict] = []
     price_rub: Optional[float] = None
     old_price_rub: Optional[float] = None
     weight_g: Optional[int] = None
@@ -73,7 +71,6 @@ class BatchUploadRequest(BaseModel):
     store_id: int
     description_category_id: int
     type_id: int
-    attributes: List[dict] = []
     price_rub: Optional[float] = None
     old_price_rub: Optional[float] = None
     weight_g: Optional[int] = None
@@ -85,13 +82,6 @@ class BatchUploadRequest(BaseModel):
 class CategoryTreeRequest(BaseModel):
     """查询 Ozon 分类树"""
     category_id: int = 0
-    language: str = "ZH"
-
-
-class CategoryAttributeRequest(BaseModel):
-    """查询分类属性"""
-    description_category_id: int
-    type_id: int = 0
     language: str = "ZH"
 
 
@@ -117,7 +107,6 @@ class ScrapeItem(BaseModel):
     reviews: str = ""
     stock: str = ""
     url: str = ""
-    attributes: list[dict] = []
     skuVariants: list[dict] = []
 
 
@@ -242,7 +231,6 @@ def import_products(body: ImportRequest, db: Session = Depends(get_db)):
             category=body.category,
             seller_name="",
             seller_url=item.url,
-            attributes=item.attributes,
             description=item.stock,
             source_url=item.url,
         )
@@ -442,8 +430,7 @@ def upload_to_store(product_id: int, body: UploadRequest, db: Session = Depends(
 
     前端需要先：
     1. 调用 GET /selection/ozon-categories 获取分类树
-    2. 用户选择分类后，调用 GET /selection/ozon-attributes 获取必填属性
-    3. 用户填写/确认属性后，调用此接口提交上架
+    2. 用户选择分类后，调用此接口提交上架
     """
     from app.models.scraped_product import ScrapedProductRecord
     from app.models.store import Store
@@ -478,14 +465,6 @@ def upload_to_store(product_id: int, body: UploadRequest, db: Session = Depends(
     old_price_kopecks = str(int(body.old_price_rub * 100)) if body.old_price_rub else (
         str(int(record.old_price * 100)) if record.old_price and record.old_price > record.price else ""
     )
-
-    # 构建 attributes 列表
-    ozon_attributes = body.attributes or []
-    if not ozon_attributes and record.brand:
-        ozon_attributes = [
-            {"complex_id": 0, "id": 85, "values": [{"value": record.brand}]},
-        ]
-
     # 构建图片列表
     images = [img for img in (record.images or []) if img and img.startswith("http")]
 
@@ -507,7 +486,6 @@ def upload_to_store(product_id: int, body: UploadRequest, db: Session = Depends(
         "old_price": old_price_kopecks,
         "vat": "0",
         "currency_code": "RUB",
-        "attributes": ozon_attributes,
         "status": "processed",
     }
 
@@ -612,13 +590,6 @@ def batch_upload_products(body: BatchUploadRequest, db: Session = Depends(get_db
             price_kopecks = str(int(body.price_rub * 100)) if body.price_rub else (
                 str(int(record.price * 100)) if record.price else "0"
             )
-
-            ozon_attributes = body.attributes or []
-            if not ozon_attributes and record.brand:
-                ozon_attributes = [
-                    {"complex_id": 0, "id": 85, "values": [{"value": record.brand}]},
-                ]
-
             item = {
                 "offer_id": offer_id,
                 "name": record.title,
@@ -637,7 +608,6 @@ def batch_upload_products(body: BatchUploadRequest, db: Session = Depends(get_db
                 "old_price": "",
                 "vat": "0",
                 "currency_code": "RUB",
-                "attributes": ozon_attributes,
                 "status": "processed",
             }
             items.append(item)
@@ -763,72 +733,6 @@ def get_ozon_categories(
         raise HTTPException(status_code=502, detail=f"获取分类失败: {str(e)}")
 
 
-@router.get("/ozon-attributes")
-def get_ozon_attributes(
-    description_category_id: int = Query(..., description="Ozon 分类ID"),
-    type_id: int = Query(0, description="Ozon 类型ID"),
-    store_id: Optional[int] = Query(None, description="店铺ID"),
-    db: Session = Depends(get_db),
-):
-    """获取 Ozon 某分类下的所有属性"""
-    from app.models.store import Store
-    from app.services.ozon_client import OzonClient
-
-    store = None
-    if store_id:
-        store = db.query(Store).filter(Store.id == store_id).first()
-    if not store:
-        store = db.query(Store).first()
-    if not store:
-        raise HTTPException(status_code=404, detail="未找到已配置的店铺")
-
-    client = OzonClient(client_id=store.client_id, api_key=store.api_key)
-
-    try:
-        attrs = client.get_category_attributes(
-            description_category_id=description_category_id,
-            type_id=type_id,
-        )
-        return {"attributes": attrs}
-    except Exception as e:
-        logger.error("Failed to get attributes: %s", str(e))
-        raise HTTPException(status_code=502, detail=f"获取属性失败: {str(e)}")
-
-
-@router.get("/ozon-attribute-values")
-def get_ozon_attribute_values(
-    description_category_id: int = Query(...),
-    attribute_id: int = Query(...),
-    type_id: int = Query(0),
-    store_id: Optional[int] = Query(None),
-    db: Session = Depends(get_db),
-):
-    """获取 Ozon 字典类型属性的可选值列表"""
-    from app.models.store import Store
-    from app.services.ozon_client import OzonClient
-
-    store = None
-    if store_id:
-        store = db.query(Store).filter(Store.id == store_id).first()
-    if not store:
-        store = db.query(Store).first()
-    if not store:
-        raise HTTPException(status_code=404, detail="未找到已配置的店铺")
-
-    client = OzonClient(client_id=store.client_id, api_key=store.api_key)
-
-    try:
-        values = client.get_category_attribute_values(
-            description_category_id=description_category_id,
-            attribute_id=attribute_id,
-            type_id=type_id,
-        )
-        return {"values": values}
-    except Exception as e:
-        logger.error("Failed to get attribute values: %s", str(e))
-        raise HTTPException(status_code=502, detail=f"获取属性值失败: {str(e)}")
-
-
 @router.post("/price-calc")
 def calculate_price(body: PriceCalcRequest):
     """价格换算计算器
@@ -894,31 +798,20 @@ def link_1688_to_product(
     body: Link1688Request,
     db: Session = Depends(get_db),
 ):
-    """将1688同款链接绑定到选品商品，并自动提取规格参数"""
+    """将1688同款链接绑定到选品商品，并回填可核验的物理规格。"""
     from app.models.scraped_product import ScrapedProductRecord
 
     record = db.query(ScrapedProductRecord).filter(ScrapedProductRecord.id == product_id).first()
     if not record:
         raise HTTPException(status_code=404, detail="商品不存在")
 
-    # 更新1688关联信息
-    existing_attrs = record.attributes or []
-    supplier_info = {
-        "name": "1688_同款链接",
-        "value": body.url or f"https://detail.1688.com/offer/{body.offer_id}.html",
-    }
-    # 移除旧的1688链接属性
-    existing_attrs = [a for a in existing_attrs if a.get("name") != "1688_同款链接"]
-    existing_attrs.append(supplier_info)
-    if body.offer_id:
-        existing_attrs.append({"name": "1688_offer_id", "value": body.offer_id})
+    record.supplier_url = body.url or (
+        f"https://detail.1688.com/offer/{body.offer_id}.html" if body.offer_id else ""
+    )
     if body.seller:
-        existing_attrs.append({"name": "1688_供应商", "value": body.seller})
-
-    record.attributes = existing_attrs
+        record.seller_name = body.seller
 
     # 如果有1688链接，尝试抓取规格参数
-    specs_extracted = []
     if body.url:
         try:
             from app.services.scrapers.scraper_1688 import Ali1688Scraper
@@ -939,18 +832,6 @@ def link_1688_to_product(
                             record.depth_mm = int(product_data.extra[key].get("depth", 0) or 0)
                             record.height_mm = int(product_data.extra[key].get("height", 0) or 0)
                             record.width_mm = int(product_data.extra[key].get("width", 0) or 0)
-            # 提取属性
-            if product_data and product_data.attributes:
-                specs_extracted = [
-                    {"name": attr.name, "value": attr.value}
-                    for attr in product_data.attributes
-                ]
-                # 合并属性（不覆盖已有的）
-                existing_names = {a.get("name") for a in existing_attrs}
-                for spec in specs_extracted:
-                    if spec["name"] not in existing_names:
-                        existing_attrs.append(spec)
-                record.attributes = existing_attrs
         except Exception as e:
             logger.warning("Failed to scrape 1688 specs: %s", e)
 
@@ -960,8 +841,6 @@ def link_1688_to_product(
     return {
         "success": True,
         "product_id": product_id,
-        "specs_extracted": specs_extracted,
-        "total_attributes": len(record.attributes or []),
     }
 
 
@@ -970,26 +849,18 @@ def extract_1688_specs_for_product(
     product_id: int,
     db: Session = Depends(get_db),
 ):
-    """重新从1688提取规格参数并回填到选品商品（支持已绑定1688链接的商品）"""
+    """重新从1688提取物理规格并回填到选品商品。"""
     from app.models.scraped_product import ScrapedProductRecord
 
     record = db.query(ScrapedProductRecord).filter(ScrapedProductRecord.id == product_id).first()
     if not record:
         raise HTTPException(status_code=404, detail="商品不存在")
 
-    # 查找1688链接
-    existing_attrs = record.attributes or []
-    link_attr = next((a for a in existing_attrs if a.get("name") == "1688_同款链接"), None)
-    url_1688 = link_attr.get("value") if link_attr else None
-
-    if not url_1688:
-        # 也检查 source_url
-        url_1688 = record.source_url or ""
+    url_1688 = record.supplier_url or record.source_url or ""
 
     if not url_1688 or "1688.com" not in url_1688:
         raise HTTPException(status_code=400, detail="该商品未绑定1688链接，无法提取参数")
 
-    specs_extracted = []
     try:
         from app.services.scrapers.scraper_1688 import Ali1688Scraper
         import asyncio
@@ -1012,25 +883,6 @@ def extract_1688_specs_for_product(
                 record.height_mm = int(dims.get("height", 0) or 0)
                 record.width_mm = int(dims.get("width", 0) or 0)
 
-            # 提取所有属性
-            if product_data.attributes:
-                specs_extracted = [
-                    {"name": attr.name, "value": attr.value}
-                    for attr in product_data.attributes
-                ]
-                # 合并属性（不覆盖已有的同名属性，但更新1688特有的）
-                existing_names = {a.get("name") for a in existing_attrs}
-                skip_names = {"1688_同款链接", "1688_同款标题", "1688_offer_id", "1688_供应商"}
-                for spec in specs_extracted:
-                    if spec["name"] not in existing_names and spec["name"] not in skip_names:
-                        existing_attrs.append(spec)
-                record.attributes = existing_attrs
-
-            # 更新标题（如果1688有更完整的标题）
-            if product_data.title and not link_attr:
-                # 仅在未绑定时更新
-                pass  # 不自动覆盖用户编辑的标题
-
     except Exception as e:
         logger.warning("Failed to re-extract 1688 specs: %s", e)
         raise HTTPException(status_code=500, detail=f"1688参数提取失败: {e}")
@@ -1041,12 +893,10 @@ def extract_1688_specs_for_product(
     return {
         "success": True,
         "product_id": product_id,
-        "specs_extracted": specs_extracted,
         "weight_g": record.weight_g,
         "depth_mm": record.depth_mm,
         "height_mm": record.height_mm,
         "width_mm": record.width_mm,
-        "total_attributes": len(record.attributes or []),
     }
 
 

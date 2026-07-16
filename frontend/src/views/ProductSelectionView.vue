@@ -20,34 +20,12 @@
       <div class="filter-bar">
         <div class="filter-row">
           <div class="filter-group">
-            <n-input
-              v-model:value="keyword"
-              placeholder="搜索商品名称/品牌"
-              clearable
-              size="small"
-              style="width: 220px"
-              @keyup.enter="loadProducts"
-              @clear="loadProducts"
-            />
-            <n-select
-              v-model:value="filterPlatform"
-              :options="platformOptions"
-              placeholder="平台"
-              clearable
-              size="small"
-              style="width: 120px"
-              @update:value="loadProducts"
-            />
-            <n-input-number
-              v-model:value="minRating"
-              placeholder="最低评分"
-              :min="0"
-              :max="5"
-              :step="0.1"
-              size="small"
-              style="width: 110px"
-              @update:value="loadProducts"
-            />
+            <n-input v-model:value="keyword" placeholder="搜索商品名称/品牌" clearable size="small" style="width: 220px"
+              @keyup.enter="loadProducts" @clear="loadProducts" />
+            <n-select v-model:value="filterPlatform" :options="platformOptions" placeholder="平台" clearable size="small"
+              style="width: 120px" @update:value="loadProducts" />
+            <n-input-number v-model:value="minRating" placeholder="最低评分" :min="0" :max="5" :step="0.1" size="small"
+              style="width: 110px" @update:value="loadProducts" />
           </div>
           <div class="filter-group filter-actions">
             <n-button size="small" @click="filterExpanded = !filterExpanded">
@@ -59,14 +37,20 @@
         <!-- 高级筛选 -->
         <div v-if="filterExpanded" class="filter-row filter-advanced">
           <div class="filter-group">
-            <n-input v-model:value="filterBrand" placeholder="品牌" clearable size="small" style="width: 140px" @keyup.enter="loadProducts" @clear="loadProducts" />
-            <n-input v-model:value="filterCategory" placeholder="分类" clearable size="small" style="width: 140px" @keyup.enter="loadProducts" @clear="loadProducts" />
-            <n-input-number v-model:value="minPrice" placeholder="最低价" :min="0" size="small" style="width: 100px" @update:value="loadProducts" />
-            <n-input-number v-model:value="maxPrice" placeholder="最高价" :min="0" size="small" style="width: 100px" @update:value="loadProducts" />
-            <n-input-number v-model:value="minReviews" placeholder="最低评论" :min="0" size="small" style="width: 100px" @update:value="loadProducts" />
+            <n-input v-model:value="filterBrand" placeholder="品牌" clearable size="small" style="width: 140px"
+              @keyup.enter="loadProducts" @clear="loadProducts" />
+            <n-input v-model:value="filterCategory" placeholder="分类" clearable size="small" style="width: 140px"
+              @keyup.enter="loadProducts" @clear="loadProducts" />
+            <n-input-number v-model:value="minPrice" placeholder="最低价" :min="0" size="small" style="width: 100px"
+              @update:value="loadProducts" />
+            <n-input-number v-model:value="maxPrice" placeholder="最高价" :min="0" size="small" style="width: 100px"
+              @update:value="loadProducts" />
+            <n-input-number v-model:value="minReviews" placeholder="最低评论" :min="0" size="small" style="width: 100px"
+              @update:value="loadProducts" />
           </div>
           <div class="filter-group">
-            <n-date-picker v-model:value="dateRange" type="daterange" clearable size="small" style="width: 240px" @update:value="loadProducts" />
+            <n-date-picker v-model:value="dateRange" type="daterange" clearable size="small" style="width: 240px"
+              @update:value="loadProducts" />
           </div>
         </div>
       </div>
@@ -80,30 +64,15 @@
       </div>
 
       <!-- 数据表格 -->
-      <n-data-table
-        :columns="columns"
-        :data="products"
-        :row-key="(r: any) => r.id"
-        :checked-row-keys="selectedKeys"
-        @update:checked-row-keys="handleCheck"
-        :pagination="false"
-        :loading="loading"
-        size="small"
-        striped
-        :scroll-x="1000"
-      />
+      <n-data-table :columns="columns" :data="products" :row-key="(r: any) => r.id" :checked-row-keys="selectedKeys"
+        @update:checked-row-keys="handleCheck" :pagination="false" :loading="loading" size="small" striped
+        :scroll-x="1000" />
 
       <!-- 分页 -->
       <div class="pagination-wrap">
-        <n-pagination
-          v-model:page="currentPage"
-          v-model:page-size="pageSize"
-          :item-count="totalCount"
-          :page-sizes="[20, 50, 100]"
-          show-size-picker
-          @update:page="loadProducts"
-          @update:page-size="onPageSizeChange"
-        />
+        <n-pagination v-model:page="currentPage" v-model:page-size="pageSize" :item-count="totalCount"
+          :page-sizes="[20, 50, 100]" show-size-picker @update:page="loadProducts"
+          @update:page-size="onPageSizeChange" />
       </div>
     </div>
 
@@ -112,12 +81,14 @@
          左侧:原始数据 (只读)
          右侧:编辑数据 + AI按钮
          ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ -->
-    <n-drawer v-model:show="drawerVisible" :width="680" placement="right" :closable="true" :mask-closable="true" :theme-overrides="drawerThemeOverrides">
+    <n-drawer v-model:show="drawerVisible" :width="680" placement="right" :closable="true" :mask-closable="true"
+      :theme-overrides="drawerThemeOverrides">
       <n-drawer-content :native-scrollbar="false" closable>
         <template #header>
           <div style="display:flex; align-items:center; gap:8px;">
             <span style="font-size:15px; font-weight:600;">编辑商品</span>
-            <n-tag v-if="editProduct" size="small" :bordered="false" :type="editProduct.platform === '1688' ? 'info' : 'success'">
+            <n-tag v-if="editProduct" size="small" :bordered="false"
+              :type="editProduct.platform === '1688' ? 'info' : 'success'">
               {{ editProduct.platform }}
             </n-tag>
             <n-tag v-if="hasChanges" size="small" type="warning" :bordered="false">已修改</n-tag>
@@ -137,8 +108,10 @@
             <div class="section-block">
               <div class="section-label">商品图片</div>
               <div v-if="editProduct.images?.length" class="gallery-row">
-                <div v-for="(img, idx) in editProduct.images" :key="idx" class="gallery-item" :class="{ 'is-main': idx === 0 }">
-                  <n-image :src="img" :width="idx === 0 ? 100 : 64" :height="idx === 0 ? 100 : 64" object-fit="cover" preview-disabled class="gallery-img" />
+                <div v-for="(img, idx) in editProduct.images" :key="idx" class="gallery-item"
+                  :class="{ 'is-main': idx === 0 }">
+                  <n-image :src="img" :width="idx === 0 ? 100 : 64" :height="idx === 0 ? 100 : 64" object-fit="cover"
+                    preview-disabled class="gallery-img" />
                   <span v-if="idx === 0" class="main-badge">主</span>
                 </div>
               </div>
@@ -151,18 +124,27 @@
               <div class="section-label">基础信息</div>
               <div class="info-grid">
                 <div class="info-item"><span class="info-key">品牌</span><span>{{ editProduct.brand || '—' }}</span></div>
-                <div class="info-item"><span class="info-key">分类</span><span>{{ editProduct.category || '—' }}</span></div>
-                <div class="info-item"><span class="info-key">评分</span><span>{{ editProduct.rating ?? '—' }}</span></div>
-                <div class="info-item"><span class="info-key">评论</span><span>{{ editProduct.review_count ?? '—' }}</span></div>
+                <div class="info-item"><span class="info-key">分类</span><span>{{ editProduct.category || '—' }}</span>
+                </div>
+                <div class="info-item"><span class="info-key">评分</span><span>{{ editProduct.rating ?? '—' }}</span>
+                </div>
+                <div class="info-item"><span class="info-key">评论</span><span>{{ editProduct.review_count ?? '—'
+                    }}</span>
+                </div>
               </div>
             </div>
 
             <div class="section-block">
               <div class="section-label">价格</div>
               <div class="info-grid">
-                <div class="info-item"><span class="info-key">现价</span><span>{{ editProduct.price?.toLocaleString() }} {{ _currencySymbol(editProduct.currency) }}</span></div>
-                <div class="info-item" v-if="editProduct.old_price"><span class="info-key">原价</span><span style="text-decoration:line-through; color:#999">{{ editProduct.old_price?.toLocaleString() }} {{ _currencySymbol(editProduct.currency) }}</span></div>
-                <div class="info-item" v-if="editProduct.discount"><span class="info-key">折扣</span><span>{{ editProduct.discount }}</span></div>
+                <div class="info-item"><span class="info-key">现价</span><span>{{ editProduct.price?.toLocaleString() }}
+                    {{
+                      _currencySymbol(editProduct.currency) }}</span></div>
+                <div class="info-item" v-if="editProduct.old_price"><span class="info-key">原价</span><span
+                    style="text-decoration:line-through; color:#999">{{ editProduct.old_price?.toLocaleString() }} {{
+                      _currencySymbol(editProduct.currency) }}</span></div>
+                <div class="info-item" v-if="editProduct.discount"><span class="info-key">折扣</span><span>{{
+                    editProduct.discount }}</span></div>
               </div>
             </div>
 
@@ -174,10 +156,16 @@
             <div class="section-block" v-if="editProduct.spec_list?.length">
               <div class="section-label">物理规格</div>
               <div class="info-grid">
-                <div class="info-item" v-if="editProduct.spec_list[0]?.weight_g"><span class="info-key">重量</span><span>{{ editProduct.spec_list[0].weight_g }}g</span></div>
-                <div class="info-item" v-if="editProduct.spec_list[0]?.width_mm"><span class="info-key">宽</span><span>{{ editProduct.spec_list[0].width_mm }}mm</span></div>
-                <div class="info-item" v-if="editProduct.spec_list[0]?.height_mm"><span class="info-key">高</span><span>{{ editProduct.spec_list[0].height_mm }}mm</span></div>
-                <div class="info-item" v-if="editProduct.spec_list[0]?.depth_mm"><span class="info-key">深</span><span>{{ editProduct.spec_list[0].depth_mm }}mm</span></div>
+                <div class="info-item" v-if="editProduct.spec_list[0]?.weight_g"><span
+                    class="info-key">重量</span><span>{{
+                      editProduct.spec_list[0].weight_g }}g</span></div>
+                <div class="info-item" v-if="editProduct.spec_list[0]?.width_mm"><span class="info-key">宽</span><span>{{
+                  editProduct.spec_list[0].width_mm }}mm</span></div>
+                <div class="info-item" v-if="editProduct.spec_list[0]?.height_mm"><span
+                    class="info-key">高</span><span>{{
+                      editProduct.spec_list[0].height_mm }}mm</span></div>
+                <div class="info-item" v-if="editProduct.spec_list[0]?.depth_mm"><span class="info-key">深</span><span>{{
+                  editProduct.spec_list[0].depth_mm }}mm</span></div>
               </div>
             </div>
 
@@ -194,10 +182,12 @@
               <div class="section-label">来源信息</div>
               <div class="info-grid">
                 <div class="info-item"><span class="info-key">平台</span><span>{{ editProduct.platform }}</span></div>
-                <div class="info-item"><span class="info-key">卖家</span><span>{{ editProduct.seller_name || '—' }}</span></div>
+                <div class="info-item"><span class="info-key">卖家</span><span>{{ editProduct.seller_name || '—' }}</span>
+                </div>
                 <div class="info-item" style="grid-column: span 2">
                   <span class="info-key">链接</span>
-                  <n-a v-if="editProduct.source_url" :href="editProduct.source_url" target="_blank" style="font-size:12px; word-break:break-all">{{ editProduct.source_url }}</n-a>
+                  <n-a v-if="editProduct.source_url" :href="editProduct.source_url" target="_blank"
+                    style="font-size:12px; word-break:break-all">{{ editProduct.source_url }}</n-a>
                   <span v-else>—</span>
                 </div>
               </div>
@@ -238,7 +228,8 @@
                 <div v-for="(img, idx) in editProduct.images" :key="idx" class="image-card">
                   <n-image :src="img" width="80" height="80" object-fit="cover" preview-disabled class="gallery-img" />
                   <div class="image-actions">
-                    <n-button size="tiny" quaternary type="primary" @click="handleAiOptimizeImage(idx)" :loading="aiImageLoading === idx">✨</n-button>
+                    <n-button size="tiny" quaternary type="primary" @click="handleAiOptimizeImage(idx)"
+                      :loading="aiImageLoading === idx">✨</n-button>
                     <n-button size="tiny" quaternary type="info" @click="openEditor(idx)">✏️</n-button>
                     <n-button size="tiny" quaternary type="error" @click="removeImage(idx)">✕</n-button>
                   </div>
@@ -249,7 +240,8 @@
                   <span style="font-size:11px; color:#999">添加图片</span>
                 </div>
               </div>
-              <input ref="imageUploadRef" type="file" accept="image/*" multiple style="display:none" @change="handleImageUpload" />
+              <input ref="imageUploadRef" type="file" accept="image/*" multiple style="display:none"
+                @change="handleImageUpload" />
             </div>
 
             <n-divider style="margin:8px 0" />
@@ -275,50 +267,34 @@
               <n-grid :cols="1" :x-gap="8">
                 <n-gi>
                   <div class="field-label">Ozon 店铺</div>
-                  <n-select
-                    v-model:value="editProduct.store_id"
-                    :options="storeOptions"
-                    placeholder="选择店铺"
-                    size="small"
-                    clearable
-                    @update:value="onEditStoreChange"
-                  />
+                  <n-select v-model:value="editProduct.store_id" :options="storeOptions" placeholder="选择店铺" size="small"
+                    clearable @update:value="onEditStoreChange" />
                 </n-gi>
                 <n-gi style="margin-top:8px">
                   <div class="field-label">商品分类</div>
-                  <n-popover
-                    trigger="click"
-                    placement="bottom-start"
-                    :disabled="!editProduct.store_id"
-                    :show="editCategoryPopoverShow"
-                    @update:show="(v: boolean) => editCategoryPopoverShow = v"
-                    raw
-                    :style="{ width: '420px' }"
-                  >
+                  <n-popover trigger="click" placement="bottom-start" :disabled="!editProduct.store_id"
+                    :show="editCategoryPopoverShow" @update:show="(v: boolean) => editCategoryPopoverShow = v" raw
+                    :style="{ width: '420px' }">
                     <template #trigger>
-                      <n-input
-                        :value="editSelectedCategoryLabel"
-                        placeholder="请先选择店铺,然后点击选择分类"
-                        readonly
-                        :disabled="!editProduct.store_id"
-                        size="small"
-                        style="cursor: pointer"
-                      >
+                      <n-input :value="editSelectedCategoryLabel" placeholder="请先选择店铺,然后点击选择分类" readonly
+                        :disabled="!editProduct.store_id" size="small" style="cursor: pointer">
                         <template #suffix>
-                          <n-icon v-if="editSelectedCategoryLabel" @click.stop="clearEditCategorySelection" style="cursor: pointer">
-                            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" width="14" height="14"><path d="M12 2C6.47 2 2 6.47 2 12s4.47 10 10 10 10-4.47 10-10S17.53 2 12 2zm5 13.59L15.59 17 12 13.41 8.41 17 7 15.59 10.59 12 7 8.41 8.41 7 12 10.59 15.59 7 17 8.41 13.41 12 17 15.59z"/></svg>
+                          <n-icon v-if="editSelectedCategoryLabel" @click.stop="clearEditCategorySelection"
+                            style="cursor: pointer">
+                            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" width="14"
+                              height="14">
+                              <path
+                                d="M12 2C6.47 2 2 6.47 2 12s4.47 10 10 10 10-4.47 10-10S17.53 2 12 2zm5 13.59L15.59 17 12 13.41 8.41 17 7 15.59 10.59 12 7 8.41 8.41 7 12 10.59 15.59 7 17 8.41 13.41 12 17 15.59z" />
+                            </svg>
                           </n-icon>
                         </template>
                       </n-input>
                     </template>
-                    <div style="background: var(--n-color); border-radius: 8px; box-shadow: 0 6px 16px rgba(0,0,0,.12); overflow: hidden;">
+                    <div
+                      style="background: var(--n-color); border-radius: 8px; box-shadow: 0 6px 16px rgba(0,0,0,.12); overflow: hidden;">
                       <div style="padding: 8px 12px; border-bottom: 1px solid rgba(0,0,0,.06);">
-                        <n-input
-                          v-model:value="editCategorySearchPattern"
-                          placeholder="🔍 搜索分类..."
-                          clearable
-                          size="small"
-                        />
+                        <n-input v-model:value="editCategorySearchPattern" placeholder="🔍 搜索分类..." clearable
+                          size="small" />
                       </div>
                       <div class="category-selected-card" :class="{ 'is-empty': !editSelectedCategoryLabel }">
                         <template v-if="editSelectedCategoryLabel">
@@ -338,16 +314,10 @@
                         </template>
                       </div>
                       <div style="height: 360px; overflow-y: auto; padding: 4px 0;">
-                        <n-tree
-                          :data="categoryTreeNodes"
-                          :selected-keys="editSelectedCategoryKeys"
-                          :expanded-keys="expandedCategoryKeys"
-                          :cascade="false"
-                          :pattern="editCategorySearchPattern || undefined"
-                          :filter="filterCategoryTree"
-                          @update:selected-keys="onCategoryTreeSelect"
-                          @update:expanded-keys="onCategoryTreeExpand"
-                        />
+                        <n-tree :data="categoryTreeNodes" :selected-keys="editSelectedCategoryKeys"
+                          :expanded-keys="expandedCategoryKeys" :cascade="false"
+                          :pattern="editCategorySearchPattern || undefined" :filter="filterCategoryTree"
+                          @update:selected-keys="onCategoryTreeSelect" @update:expanded-keys="onCategoryTreeExpand" />
                       </div>
                     </div>
                   </n-popover>
@@ -373,17 +343,20 @@
               <div class="section-label">
                 价格与促销
                 <div class="section-actions">
-                  <n-button size="tiny" type="warning" @click="showSmartPricingModal" :loading="smartPricingLoading">💰 智能定价</n-button>
+                  <n-button size="tiny" type="warning" @click="showSmartPricingModal" :loading="smartPricingLoading">💰
+                    智能定价</n-button>
                 </div>
               </div>
               <n-grid :cols="3" :x-gap="8">
                 <n-gi>
                   <div class="field-label">现价</div>
-                  <n-input-number v-model:value="editProduct.price" :min="0" :precision="2" size="small" style="width:100%" />
+                  <n-input-number v-model:value="editProduct.price" :min="0" :precision="2" size="small"
+                    style="width:100%" />
                 </n-gi>
                 <n-gi>
                   <div class="field-label">原价</div>
-                  <n-input-number v-model:value="editProduct.old_price" :min="0" :precision="2" size="small" style="width:100%" />
+                  <n-input-number v-model:value="editProduct.old_price" :min="0" :precision="2" size="small"
+                    style="width:100%" />
                 </n-gi>
                 <n-gi>
                   <div class="field-label">折扣</div>
@@ -409,8 +382,11 @@
               <div class="section-label">
                 🔗 1688 同款
                 <div class="section-actions">
-                  <n-button size="tiny" quaternary type="warning" :loading="extract1688Loading" @click="handleExtract1688Specs" :disabled="!editProduct?.source_url?.includes('1688')">📥 提取参数</n-button>
-                  <n-button size="tiny" type="primary" @click="showSearch1688Modal" :loading="search1688Loading">🔍 搜索同款</n-button>
+                  <n-button size="tiny" quaternary type="warning" :loading="extract1688Loading"
+                    @click="handleExtract1688Specs" :disabled="!editProduct?.source_url?.includes('1688')">📥
+                    提取参数</n-button>
+                  <n-button size="tiny" type="primary" @click="showSearch1688Modal" :loading="search1688Loading">🔍
+                    搜索同款</n-button>
                 </div>
               </div>
               <div class="empty-hint">
@@ -448,9 +424,11 @@
               <div v-if="editProduct.sku_list?.length">
                 <div v-for="(sku, idx) in editProduct.sku_list" :key="idx" class="sku-edit-row">
                   <n-input v-model:value="sku.name" size="small" placeholder="变体名称" style="flex:1" />
-                  <n-input-number v-model:value="sku.price" size="small" :min="0" :precision="2" placeholder="价格" style="width:90px" />
+                  <n-input-number v-model:value="sku.price" size="small" :min="0" :precision="2" placeholder="价格"
+                    style="width:90px" />
                   <n-input-number v-model:value="sku.stock" size="small" :min="0" placeholder="库存" style="width:70px" />
-                  <n-button size="tiny" quaternary type="error" @click="editProduct.sku_list.splice(idx, 1)">✕</n-button>
+                  <n-button size="tiny" quaternary type="error"
+                    @click="editProduct.sku_list.splice(idx, 1)">✕</n-button>
                 </div>
               </div>
               <n-button size="small" quaternary @click="addSku">+ 添加 SKU</n-button>
@@ -500,7 +478,7 @@
       </n-drawer-content>
     </n-drawer>
 
-        <!-- ━━━ 1688 搜索同款弹窗 ━━━ -->
+    <!-- ━━━ 1688 搜索同款弹窗 ━━━ -->
     <n-modal v-model:show="search1688Visible" preset="card" style="width: 800px;" :bordered="false">
       <template #header>
         <span>🔍 1688 搜索同款</span>
@@ -512,9 +490,13 @@
         </n-input-group>
         <n-spin :show="search1688Loading">
           <div v-if="search1688Results.length" class="search1688-results">
-            <div v-for="item in search1688Results" :key="item.offer_id" class="search1688-card" @click="handleLink1688(item)">
-              <n-image :src="item.image" width="80" height="80" object-fit="cover" style="border-radius: 6px; flex-shrink: 0;" v-if="item.image" />
-              <div v-else style="width:80px;height:80px;background:#f0f0f0;border-radius:6px;display:flex;align-items:center;justify-content:center;flex-shrink:0;">📦</div>
+            <div v-for="item in search1688Results" :key="item.offer_id" class="search1688-card"
+              @click="handleLink1688(item)">
+              <n-image :src="item.image" width="80" height="80" object-fit="cover"
+                style="border-radius: 6px; flex-shrink: 0;" v-if="item.image" />
+              <div v-else
+                style="width:80px;height:80px;background:#f0f0f0;border-radius:6px;display:flex;align-items:center;justify-content:center;flex-shrink:0;">
+                📦</div>
               <div class="search1688-card__info">
                 <div class="search1688-card__title">{{ item.title || '(无标题)' }}</div>
                 <div class="search1688-card__meta">
@@ -526,7 +508,8 @@
               <n-button size="tiny" type="primary" quaternary>选择</n-button>
             </div>
           </div>
-          <div v-else-if="!search1688Loading && search1688Keyword && search1688Searched" style="text-align:center; padding:20px; color:#999;">
+          <div v-else-if="!search1688Loading && search1688Keyword && search1688Searched"
+            style="text-align:center; padding:20px; color:#999;">
             未找到结果，换个关键词试试
           </div>
         </n-spin>
@@ -546,31 +529,38 @@
         <n-grid :cols="2" :x-gap="12" :y-gap="8">
           <n-gi>
             <div class="field-label">采购价 (CNY)</div>
-            <n-input-number v-model:value="pricingForm.cost_cny" :min="0" :precision="2" size="small" style="width:100%" placeholder="1688 采购价" />
+            <n-input-number v-model:value="pricingForm.cost_cny" :min="0" :precision="2" size="small" style="width:100%"
+              placeholder="1688 采购价" />
           </n-gi>
           <n-gi>
             <div class="field-label">运费 (CNY)</div>
-            <n-input-number v-model:value="pricingForm.shipping_cny" :min="0" :precision="2" size="small" style="width:100%" placeholder="国际运费" />
+            <n-input-number v-model:value="pricingForm.shipping_cny" :min="0" :precision="2" size="small"
+              style="width:100%" placeholder="国际运费" />
           </n-gi>
           <n-gi>
             <div class="field-label">包装费 (CNY)</div>
-            <n-input-number v-model:value="pricingForm.packaging_cny" :min="0" :precision="2" size="small" style="width:100%" placeholder="包装费" />
+            <n-input-number v-model:value="pricingForm.packaging_cny" :min="0" :precision="2" size="small"
+              style="width:100%" placeholder="包装费" />
           </n-gi>
           <n-gi>
             <div class="field-label">汇率 (CNY→RUB)</div>
-            <n-input-number v-model:value="pricingForm.exchange_rate" :min="0" :precision="2" size="small" style="width:100%" />
+            <n-input-number v-model:value="pricingForm.exchange_rate" :min="0" :precision="2" size="small"
+              style="width:100%" />
           </n-gi>
           <n-gi>
             <div class="field-label">Ozon 佣金 (%)</div>
-            <n-input-number v-model:value="pricingForm.ozon_commission_pct" :min="0" :max="100" :precision="1" size="small" style="width:100%" />
+            <n-input-number v-model:value="pricingForm.ozon_commission_pct" :min="0" :max="100" :precision="1"
+              size="small" style="width:100%" />
           </n-gi>
           <n-gi>
             <div class="field-label">目标利润率 (%)</div>
-            <n-input-number v-model:value="pricingForm.target_margin_pct" :min="0" :max="500" :precision="1" size="small" style="width:100%" />
+            <n-input-number v-model:value="pricingForm.target_margin_pct" :min="0" :max="500" :precision="1"
+              size="small" style="width:100%" />
           </n-gi>
           <n-gi>
             <div class="field-label">竞品价格 (RUB)</div>
-            <n-input-number v-model:value="pricingForm.competitor_price_rub" :min="0" :precision="2" size="small" style="width:100%" placeholder="可选" />
+            <n-input-number v-model:value="pricingForm.competitor_price_rub" :min="0" :precision="2" size="small"
+              style="width:100%" placeholder="可选" />
           </n-gi>
         </n-grid>
         <n-button type="warning" block :loading="smartPricingLoading" @click="handleSmartPricing">
@@ -582,7 +572,8 @@
             <n-gi>
               <div class="pricing-result-item">
                 <span class="pricing-result-label">💰 建议售价</span>
-                <span class="pricing-result-value" style="color: #d03050; font-size: 18px;">₽ {{ pricingResult.suggested_price_rub }}</span>
+                <span class="pricing-result-value" style="color: #d03050; font-size: 18px;">₽ {{
+                  pricingResult.suggested_price_rub }}</span>
               </div>
             </n-gi>
             <n-gi>
@@ -594,7 +585,9 @@
             <n-gi>
               <div class="pricing-result-item">
                 <span class="pricing-result-label">📦 总成本</span>
-                <span class="pricing-result-value">₽ {{ pricingResult.cost_total_rub }} (¥{{ pricingResult.cost_total_cny }})</span>
+                <span class="pricing-result-value">₽ {{ pricingResult.cost_total_rub }} (¥{{
+                  pricingResult.cost_total_cny
+                  }})</span>
               </div>
             </n-gi>
             <n-gi>
@@ -626,19 +619,10 @@
     </n-modal>
 
     <!-- ━━━ 图片编辑器 (ImageEditor) ━━━ -->
-    <n-modal
-      v-model:show="editorVisible"
-      :mask-closable="true"
-      :close-on-esc="true"
-      style="width: 85vw; max-width: 1400px; height: 75vh;"
-      content-style="padding: 0; height: 75vh; overflow: hidden;"
-    >
+    <n-modal v-model:show="editorVisible" :mask-closable="true" :close-on-esc="true"
+      style="width: 85vw; max-width: 1400px; height: 75vh;" content-style="padding: 0; height: 75vh; overflow: hidden;">
       <div class="image-editor-modal">
-        <ImageEditor
-          :image-url="editorImageUrl"
-          @apply="onEditorApply"
-          @close="editorVisible = false"
-        />
+        <ImageEditor :image-url="editorImageUrl" @apply="onEditorApply" @close="editorVisible = false" />
       </div>
     </n-modal>
 
@@ -815,10 +799,6 @@ function openDrawer(product: any) {
     loadStoreOptions();
   }
   drawerVisible.value = true;
-  // Auto-detect PowerPaint service when drawer opens
-  if (!ppDeviceInfo.value && !ppDeviceLoading.value) {
-    loadPpDeviceInfo();
-  }
   nextTick(() => {
     suppressEditStoreWatch.value = false;
   });
@@ -1693,13 +1673,16 @@ onMounted(() => {
   cursor: pointer;
   transition: border-color 0.15s, box-shadow 0.15s;
 }
+
 .pp-selectable:hover {
   border-color: var(--accent, #2080f0);
 }
+
 .pp-selected {
   border-color: var(--accent, #2080f0);
   box-shadow: 0 0 0 2px rgba(32, 128, 240, 0.25);
 }
+
 .pp-mask-canvas {
   border: 1px solid var(--border-color);
   border-radius: 4px;
@@ -1996,7 +1979,7 @@ onMounted(() => {
 
 .image-card:hover {
   border-color: #18a058;
-  box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
 }
 
 .image-card:hover .image-actions {
@@ -2020,7 +2003,7 @@ onMounted(() => {
   justify-content: center;
   gap: 2px;
   padding: 3px 2px;
-  background: rgba(0,0,0,0.6);
+  background: rgba(0, 0, 0, 0.6);
   opacity: 1;
 }
 
@@ -2068,12 +2051,14 @@ onMounted(() => {
   .edit-drawer-body {
     flex-direction: column;
   }
+
   .panel-left {
     flex: none;
     width: 100%;
     border-right: none;
     border-bottom: 1px solid var(--border-color);
   }
+
   .panel-right {
     flex: none;
     width: 100%;
@@ -2085,26 +2070,33 @@ onMounted(() => {
 [data-theme="dark"] .n-drawer {
   --n-color: var(--bg-main, #1a1a2e) !important;
 }
+
 [data-theme="dark"] .n-drawer-content {
   background-color: var(--bg-main, #1a1a2e) !important;
 }
+
 [data-theme="dark"] .n-drawer-header {
   background-color: var(--bg-main, #1a1a2e) !important;
-  border-bottom-color: var(--border-color, rgba(255,255,255,0.08)) !important;
+  border-bottom-color: var(--border-color, rgba(255, 255, 255, 0.08)) !important;
 }
+
 [data-theme="dark"] .n-drawer-footer {
   background-color: var(--bg-main, #1a1a2e) !important;
-  border-top-color: var(--border-color, rgba(255,255,255,0.08)) !important;
+  border-top-color: var(--border-color, rgba(255, 255, 255, 0.08)) !important;
 }
+
 [data-theme="dark"] .panel-left {
   background: #1a1a2e !important;
 }
+
 [data-theme="dark"] .panel-right {
   background: #16213e !important;
 }
+
 [data-theme="dark"] .n-collapse-item {
   --n-title-font-size: 14px;
 }
+
 [data-theme="dark"] .image-add:hover {
   background: var(--bg-card-hover, #1c2048) !important;
 }
@@ -2114,9 +2106,11 @@ onMounted(() => {
     flex-direction: column;
     align-items: stretch;
   }
+
   .filter-group {
     flex-wrap: wrap;
   }
+
   .filter-actions {
     margin-left: 0;
     justify-content: flex-end;
@@ -2311,5 +2305,4 @@ onMounted(() => {
   margin-top: 4px;
   flex-wrap: wrap;
 }
-
 </style>

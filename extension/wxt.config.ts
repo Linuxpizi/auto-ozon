@@ -1,13 +1,11 @@
 import { defineConfig } from 'wxt'
 import packageJson from './package.json'
 
-const extensionName = `${packageJson.name} v${packageJson.version}`
-
 export default defineConfig({
   modules: ['@wxt-dev/module-vue'],
   manifest: {
-    name: extensionName,
-    description: `${packageJson.name} — 跨境电商智能采集与管理工具`,
+    name: packageJson.displayName,
+    description: packageJson.description,
     permissions: ['storage', 'activeTab', 'tabs', 'scripting'],
     host_permissions: [
       'https://www.ozon.ru/*',

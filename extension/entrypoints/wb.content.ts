@@ -1,5 +1,5 @@
-import type { ProductAttribute, ScrapedProduct } from '@/utils/types'
-import { injectFloatingButton } from '@/utils/floating-button'
+import type { ProductVariant, ScrapedProduct } from '@/lib/utils/types'
+import { injectFloatingButton } from '@/lib/utils/floating-button'
 
 function extractSourceId(): string {
   const match = location.pathname.match(/\/(\d+)\/?$/)
@@ -81,22 +81,6 @@ function extractSellerName(): string {
   return el?.textContent?.trim() || ''
 }
 
-function extractAttributes(): ProductAttribute[] {
-  const attrs: ProductAttribute[] = []
-  const rows = document.querySelectorAll(
-    '[class*="product-page__params"] tr, [class*="char-list"] tr, [class*="detail-info"] tr',
-  )
-  rows.forEach((row) => {
-    const cells = row.querySelectorAll('td')
-    if (cells.length >= 2) {
-      const name = cells[0]?.textContent?.trim() || ''
-      const value = cells[1]?.textContent?.trim() || ''
-      if (name && value) attrs.push({ name, value })
-    }
-  })
-  return attrs
-}
-
 function extractDescription(): string {
   const el = document.querySelector(
     '[class*="product-page__description"], [class*="description-text"], [class*="collapsable__text"]',
@@ -104,10 +88,41 @@ function extractDescription(): string {
   return el?.textContent?.trim()?.slice(0, 2000) || ''
 }
 
+function extractWbData(): Record<string, any> | null {
+  const state = (window as any).__PRELOADED_STATE__ || (window as any).__INITIAL_STATE__
+  if (state && typeof state === 'object') return state
+  for (const script of document.querySelectorAll('script[type="application/ld+json"]')) {
+    try {
+      const parsed = JSON.parse(script.textContent || '')
+      if (parsed?.sku || parsed?.offers) return parsed
+    } catch {}
+  }
+  return null
+}
+
+function extractVariants(): ProductVariant[] {
+  const data = extractWbData()
+  const sizes = data?.product?.sizes || data?.sizes || data?.offers?.offers || []
+  if (!Array.isArray(sizes)) return []
+  return sizes.flatMap((item: any) => {
+    const sku = String(item?.optionId || item?.sku || item?.id || '').trim()
+    const size = String(item?.name || item?.origName || item?.size || '').trim()
+    if (!sku || !size) return []
+    return [{
+      sku,
+      ...(item?.barcode ? { barcode: String(item.barcode) } : {}),
+      values: [{ name: 'Размер', value: size }],
+      ...(Number.isFinite(Number(item?.price?.product)) ? { price: Number(item.price.product) / 100 } : {}),
+      ...(Number.isFinite(Number(item?.qty)) ? { stock: Number(item.qty) } : {}),
+    }]
+  })
+}
+
 function scrapeWBProduct(): ScrapedProduct | null {
   const sourceId = extractSourceId()
   if (!sourceId) return null
 
+  const variants = extractVariants()
   return {
     platform: 'wb',
     sourceId,
@@ -119,6 +134,8 @@ function scrapeWBProduct(): ScrapedProduct | null {
     price: extractPrice(),
     oldPrice: extractOldPrice(),
     images: extractImages(),
+    skuList: variants.map((variant) => ({ sku: variant.sku, barcode: variant.barcode || '' })),
+    variants,
     specList: [],
     rating: extractRating(),
     reviewCount: extractReviewCount(),
@@ -126,7 +143,6 @@ function scrapeWBProduct(): ScrapedProduct | null {
     category: extractCategory(),
     sellerName: extractSellerName(),
     sellerUrl: '',
-    attributes: extractAttributes(),
     description: extractDescription(),
     sourceUrl: location.href,
     scrapedAt: new Date().toISOString(),
@@ -149,8 +165,19 @@ export default defineContentScript({
 
     browser.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       if (message.action === 'scrape') {
-        const product = scrapeWBProduct()
-        sendResponse({ success: !!product, data: product })
+        try {
+          const product = scrapeWBProduct()
+          sendResponse({
+            success: !!product,
+            data: product,
+            error: product ? '' : '未找到 Wildberries 商品 ID 或商品详情数据',
+          })
+        } catch (error) {
+          sendResponse({
+            success: false,
+            error: error instanceof Error ? error.message : String(error),
+          })
+        }
         return true
       }
       if (message.action === 'checkPage') {

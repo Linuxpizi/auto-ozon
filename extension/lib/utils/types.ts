@@ -1,6 +1,44 @@
 /** 平台类型 */
 export type Platform = 'ozon' | 'wb' | '1688' | 'pdd'
 
+/** 页面/API 中可核验的单个变体维度。 */
+export interface ProductVariantValue {
+  name: string
+  value: string
+}
+
+/**
+ * 商品的一个真实可售 SKU/变体组合。
+ *
+ * 不允许根据标题或默认值构造；只保存页面 DOM、页面内嵌数据或平台接口
+ * 明确提供的字段。`values` 必须描述该 SKU 的完整变体组合；对于平台明确
+ * 只有一个 Offer 且不存在颜色/尺码等变体维度的普通商品，完整组合是空数组。
+ */
+export interface ProductVariant {
+  sku: string
+  barcode?: string
+  values: ProductVariantValue[]
+  price?: number
+  oldPrice?: number
+  stock?: number
+  imageUrl?: string
+  /** 变体事实来源，便于区分页面结构化数据、DOM 与平台接口。 */
+  sourcePath?: string
+}
+
+export interface ProductSpec {
+  weight_g?: number
+  depth_mm?: number
+  height_mm?: number
+  width_mm?: number
+  package_weight_g?: number
+  package_depth_mm?: number
+  package_width_mm?: number
+  package_height_mm?: number
+  volume_cm3?: number
+  [key: string]: unknown
+}
+
 /** 采集的商品数据 */
 export interface ScrapedProduct {
   platform: Platform
@@ -17,7 +55,6 @@ export interface ScrapedProduct {
   category?: string
   sellerName?: string
   sellerUrl?: string
-  attributes?: ProductAttribute[]
   description?: string
   sourceUrl: string
   scrapedAt: string
@@ -25,26 +62,12 @@ export interface ScrapedProduct {
   // ── 多值字段 (JSON arrays) ──
   /** 商品视频 URL 列表 */
   videoUrls?: string[]
-  /** SKU + 条形码列表 [{sku, barcode}] */
-  skuList?: Array<{ sku: string; barcode: string }>
+  /** 页面事实中的 SKU + 条形码标识列表。 */
+  skuList: Array<{ sku: string; barcode: string }>
+  /** 所有可售 SKU 及其完整变体组合。 */
+  variants: ProductVariant[]
   /** 规格列表 [{weight_g, depth_mm, height_mm, width_mm, color, size, ...}] */
-  specList: Array<{
-    weight_g?: number
-    depth_mm?: number
-    height_mm?: number
-    width_mm?: number
-    /** 包装重量，按 docs/采集强制要求.md: 非 SKU 重量 */
-    package_weight_g?: number
-    /** 包装长/深，物流包装规格 */
-    package_depth_mm?: number
-    /** 包装宽，物流包装规格 */
-    package_width_mm?: number
-    /** 包装高，物流包装规格 */
-    package_height_mm?: number
-    /** 体积 cm³，优先包装尺寸，否则商品尺寸 */
-    volume_cm3?: number
-    [key: string]: any
-  }>
+  specList: ProductSpec[]
   /** 商品标签 (品牌、分类、促销标签等) */
   tags?: string[]
 
@@ -81,11 +104,11 @@ export interface ScrapedProduct {
   tradeQuantity?: number
 }
 
-export interface ProductAttribute {
-  name: string
-  value: string
-  /** 原始采集路径/来源，用于排查 API 语义采集是否来自可信业务字段，避免 UI 布局字段误入规格 */
-  sourcePath?: string
+export type RequiredProductField = 'skuList' | 'variants'
+
+export interface ProductCompleteness {
+  complete: boolean
+  missing: RequiredProductField[]
 }
 
 export interface OzonMetrics {

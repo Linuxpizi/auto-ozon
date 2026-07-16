@@ -1,11 +1,14 @@
-import type { OzonMetrics, ProductAttribute, ScrapedProduct } from '@/utils/types'
-import { injectFloatingButton } from '@/utils/floating-button'
+import type { OzonMetrics, ProductVariant, ProductVariantValue, ScrapedProduct } from '@/lib/utils/types'
+
+interface CollectedFact { name: string; value: string; sourcePath?: string }
+type CollectorProduct = Partial<ScrapedProduct> & { facts?: CollectedFact[] }
+import { injectFloatingButton } from '@/lib/utils/floating-button'
 import {
   randomDelay, normalDelay, microPause, readingPause, occasionalLongPause,
-  humanScroll, humanScrollTo, humanScrollToTop, humanScrollToBottom,
-  simulateHover, simulateMouseLeave, humanClick, humanLinkClick,
-  humanFetch, transitionPause, batchTransitionPause, enrichDelay, scrollPause,
-} from '@/utils/humanize'
+  humanScroll, humanScrollToTop, humanScrollToBottom,
+  humanClick, humanLinkClick,
+  transitionPause, batchTransitionPause, enrichDelay, scrollPause,
+} from '@/lib/utils/humanize'
 
 // ─── 通用工具 ───────────────────────────────────────────────
 
@@ -53,6 +56,133 @@ function decodedOzonStateEntries(states: any): Array<[string, any]> {
     .filter(([, value]) => value && typeof value === 'object')
 }
 
+function readOzonVariantValues(node: any): ProductVariantValue[] {
+  const candidates = [node?.characteristics, node?.properties, node?.aspects, node?.variantValues]
+  for (const candidate of candidates) {
+    if (!Array.isArray(candidate)) continue
+    const values = candidate.flatMap((item: any) => {
+      const name = normalizeText(item?.name ?? item?.title ?? item?.label ?? item?.propertyName)
+      const value = normalizeText(item?.value ?? item?.text ?? item?.selectedValue ?? item?.propertyValue)
+      return name && value ? [{ name, value }] : []
+    })
+    if (values.length > 0) return values
+  }
+  return []
+}
+
+function readOzonVariant(node: any): ProductVariant | null {
+  if (!node || typeof node !== 'object' || Array.isArray(node)) return null
+  const sku = normalizeText(node.sku ?? node.offerId ?? node.offerID ?? node.article ?? node.productId)
+  const values = readOzonVariantValues(node)
+  if (!sku || values.length === 0) return null
+  const barcode = normalizeText(node.barcode ?? node.gtin ?? node.ean).replace(/\s/g, '')
+  const price = parsePrice(normalizeText(node.finalPrice ?? node.currentPrice ?? node.price))
+  const oldPrice = parsePrice(normalizeText(node.oldPrice ?? node.originalPrice))
+  const stock = Number(node.stock ?? node.quantity ?? node.availableQuantity)
+  const imageUrl = normalizeOzonMediaUrl(normalizeText(node.imageUrl ?? node.image ?? node.picture))
+  return {
+    sku,
+    ...(barcode ? { barcode } : {}),
+    values,
+    ...(price > 0 ? { price } : {}),
+    ...(oldPrice > 0 ? { oldPrice } : {}),
+    ...(Number.isFinite(stock) && stock >= 0 ? { stock } : {}),
+    ...(looksLikeImageUrl(imageUrl) ? { imageUrl } : {}),
+    sourcePath: 'Ozon widgetStates',
+  }
+}
+
+function readSchemaVariantValues(node: any): ProductVariantValue[] {
+  if (!node || typeof node !== 'object') return []
+  const values: ProductVariantValue[] = []
+  const append = (name: string, value: any) => {
+    const normalized = normalizeText(value)
+    if (!normalized || values.some((item) => item.name.toLowerCase() === name.toLowerCase())) return
+    values.push({ name, value: normalized })
+  }
+  append('颜色', node.color)
+  append('尺码', node.size)
+  for (const property of Array.isArray(node.additionalProperty) ? node.additionalProperty : []) {
+    const name = normalizeText(property?.name ?? property?.propertyID)
+    const value = normalizeText(property?.value)
+    if (name && value) append(name, value)
+  }
+  return values
+}
+
+/** 只读取 Schema.org Product/Offer 明确声明的 SKU，不扫描推荐商品等任意 productId。 */
+function extractJsonLdVariants(root: any): ProductVariant[] {
+  const products: any[] = []
+  const visit = (node: any) => {
+    if (!node) return
+    if (Array.isArray(node)) {
+      node.forEach(visit)
+      return
+    }
+    if (typeof node !== 'object') return
+    const types = Array.isArray(node['@type']) ? node['@type'] : [node['@type']]
+    if (types.some((type) => String(type).toLowerCase() === 'product')) products.push(node)
+    if (Array.isArray(node['@graph'])) node['@graph'].forEach(visit)
+  }
+  visit(root)
+
+  const variants: ProductVariant[] = []
+  for (const product of products) {
+    const rawOffers = product.offers
+      ? (Array.isArray(product.offers) ? product.offers : [product.offers])
+      : [product]
+    const productValues = readSchemaVariantValues(product)
+    for (const offer of rawOffers) {
+      const sku = normalizeText(offer?.sku ?? product.sku ?? product.productID)
+      if (!sku) continue
+      const offerValues = readSchemaVariantValues(offer)
+      const values = offerValues.length > 0 ? offerValues : (rawOffers.length === 1 ? productValues : [])
+      const barcode = normalizeText(
+        offer?.gtin ?? offer?.gtin13 ?? offer?.gtin12 ?? offer?.gtin8
+        ?? product.gtin ?? product.gtin13 ?? product.gtin12 ?? product.gtin8,
+      ).replace(/\s/g, '')
+      const price = Number(offer?.price ?? offer?.priceSpecification?.price)
+      const imageUrl = normalizeOzonMediaUrl(normalizeText(offer?.image ?? product.image?.[0] ?? product.image))
+      variants.push({
+        sku,
+        ...(barcode ? { barcode } : {}),
+        values,
+        ...(Number.isFinite(price) && price > 0 ? { price } : {}),
+        ...(looksLikeImageUrl(imageUrl) ? { imageUrl } : {}),
+        sourcePath: 'script[type="application/ld+json"] Product/Offer',
+      })
+    }
+  }
+  return mergeOzonVariants(variants)
+}
+
+function mergeOzonVariants(...groups: Array<ProductVariant[] | undefined>): ProductVariant[] {
+  const bySku = new Map<string, ProductVariant>()
+  for (const group of groups) {
+    for (const variant of group || []) {
+      const sku = normalizeText(variant.sku)
+      if (!sku) continue
+      const existing = bySku.get(sku)
+      // 相同 SKU 优先保留变体维度更完整的事实记录。
+      if (!existing || (variant.values?.length || 0) > (existing.values?.length || 0)) bySku.set(sku, variant)
+    }
+  }
+  return Array.from(bySku.values())
+}
+
+function extractOzonVariants(node: any, depth = 0, result: ProductVariant[] = []): ProductVariant[] {
+  if (!node || depth > 8 || result.length >= 200) return result
+  if (Array.isArray(node)) {
+    for (const item of node) extractOzonVariants(item, depth + 1, result)
+    return result
+  }
+  if (typeof node !== 'object') return result
+  const variant = readOzonVariant(node)
+  if (variant && !result.some((item) => item.sku === variant.sku)) result.push(variant)
+  for (const value of Object.values(node)) extractOzonVariants(value, depth + 1, result)
+  return result
+}
+
 function pushUniqueText(list: string[] | undefined, value: any, maxLength = 120): string[] {
   const target = list || []
   const text = normalizeText(value)
@@ -61,7 +191,7 @@ function pushUniqueText(list: string[] | undefined, value: any, maxLength = 120)
   return target
 }
 
-function addPriceRange(result: Partial<ScrapedProduct>, price: number, minQty = 0, maxQty = 0) {
+function addPriceRange(result: CollectorProduct, price: number, minQty = 0, maxQty = 0) {
   if (!Number.isFinite(price) || price <= 0) return
   result.priceRanges = result.priceRanges || []
   const exists = result.priceRanges.some((item) => Number(item.price) === price && Number(item.minQty || 0) === minQty)
@@ -85,7 +215,7 @@ function hasOzonPhysicalUnitOrCompound(value: any): boolean {
 
 function isTrustedOzonPhysicalPath(path: string): boolean {
   const normalized = path.toLowerCase()
-  return /(characteristic|properties|property|specification|specifications|params|attributes|dimension|dimensions|package|packaging|logistic|shipment|delivery|sku|offer|webfull|webshortcharacteristics|webcharacteristics|webproductproperties|webaspects|webdescription)/i.test(normalized)
+  return /(characteristic|properties|property|specification|specifications|params|dimension|dimensions|package|packaging|logistic|shipment|delivery|sku|offer|webfull|webshortcharacteristics|webcharacteristics|webproductproperties|webaspects|webdescription)/i.test(normalized)
 }
 
 function isOzonLayoutPhysicalPath(path: string): boolean {
@@ -107,7 +237,7 @@ function shouldCollectSemanticPhysicalAttribute(path: string, value: any): boole
   return trustedPath || hasUnit
 }
 
-function isTrustedPhysicalAttribute(attr: ProductAttribute): boolean {
+function isTrustedPhysicalFact(attr: CollectedFact): boolean {
   const sourcePath = normalizeText((attr as any).sourcePath)
   if (!sourcePath) return true
   if (isOzonLayoutPhysicalPath(sourcePath) && !isTrustedOzonPhysicalPath(sourcePath)) return false
@@ -129,7 +259,7 @@ function normalizeOzonMediaUrl(url: string): string {
   return withProtocol.replace(/\/wc\d+\//, '/wc1000/')
 }
 
-function collectOzonValueSignals(node: any, result: Partial<ScrapedProduct>, path: string[] = [], depth = 0) {
+function collectOzonValueSignals(node: any, result: CollectorProduct, path: string[] = [], depth = 0) {
   if (!node || depth > 8) return
   if (Array.isArray(node)) {
     node.forEach((item, index) => collectOzonValueSignals(item, result, [...path, String(index)], depth + 1))
@@ -158,7 +288,7 @@ function collectOzonValueSignals(node: any, result: Partial<ScrapedProduct>, pat
   }
 }
 
-function applySemanticOzonField(result: Partial<ScrapedProduct>, path: string, value: any, parent?: any) {
+function applySemanticOzonField(result: CollectorProduct, path: string, value: any, parent?: any) {
   const key = path.toLowerCase().replace(/[-_\s]/g, '')
   const text = normalizeText(value)
   if (!text) return
@@ -202,7 +332,7 @@ function applySemanticOzonField(result: Partial<ScrapedProduct>, path: string, v
     result.tags = pushUniqueText(result.tags, text, 100)
   }
   if (/(paidpromotion|advert|ads|sponsored|реклам|продвиж)/i.test(`${path} ${text}`) && text.length <= 140) {
-    addProductAttribute(result.attributes!, '付费推广', text, path)
+    addCollectedFact(result.facts!, '付费推广', text, path)
   }
 
   if (!result.rating && /(rating|score|totalscore)/.test(key)) {
@@ -222,17 +352,17 @@ function applySemanticOzonField(result: Partial<ScrapedProduct>, path: string, v
     const item = isBarcode ? { sku: '', barcode: text.replace(/\D/g, '') || text } : { sku: text, barcode: '' }
     if ((item.sku || item.barcode) && !result.skuList!.some((s) => s.sku === item.sku && s.barcode === item.barcode)) result.skuList!.push(item)
   }
-  if (/(monthlysales|salesmonth|soldmonth|ordersmonth|продаж.*месяц)/i.test(key)) addProductAttribute(result.attributes!, '月销量', text, path)
-  if (/(monthlyrevenue|revenuemonth|turnovermonth|gmv|выручк.*месяц)/i.test(key)) addProductAttribute(result.attributes!, '月销售额', text, path)
-  if (/(turnover|turnoverdynamics|оборачиваем|динамик)/i.test(key)) addProductAttribute(result.attributes!, '周转动态', text, path)
-  if (/(followers|subscribers|favorite|wish|followcount|подпис|избран)/i.test(key)) addProductAttribute(result.attributes!, '被跟数量', text, path)
-  if (/(conversion|cr|конверси)/i.test(key) && /\d/.test(text)) addProductAttribute(result.attributes!, '成交率', text, path)
-  if (/(rfbs.*commission|commission.*rfbs)/i.test(key)) addProductAttribute(result.attributes!, 'rFBS佣金', text, path)
-  if (/(fbp.*commission|fbo.*commission|commission.*fbp|commission.*fbo)/i.test(key)) addProductAttribute(result.attributes!, 'FBP佣金', text, path)
-  if (/(createdat|publishedat|listedat|datecreate|datepublish|размещ|создан)/i.test(key) && text.length < 80) addProductAttribute(result.attributes!, '上架时间', text, path)
+  if (/(monthlysales|salesmonth|soldmonth|ordersmonth|продаж.*месяц)/i.test(key)) addCollectedFact(result.facts!, '月销量', text, path)
+  if (/(monthlyrevenue|revenuemonth|turnovermonth|gmv|выручк.*месяц)/i.test(key)) addCollectedFact(result.facts!, '月销售额', text, path)
+  if (/(turnover|turnoverdynamics|оборачиваем|динамик)/i.test(key)) addCollectedFact(result.facts!, '周转动态', text, path)
+  if (/(followers|subscribers|favorite|wish|followcount|подпис|избран)/i.test(key)) addCollectedFact(result.facts!, '被跟数量', text, path)
+  if (/(conversion|cr|конверси)/i.test(key) && /\d/.test(text)) addCollectedFact(result.facts!, '成交率', text, path)
+  if (/(rfbs.*commission|commission.*rfbs)/i.test(key)) addCollectedFact(result.facts!, 'rFBS佣金', text, path)
+  if (/(fbp.*commission|fbo.*commission|commission.*fbp|commission.*fbo)/i.test(key)) addCollectedFact(result.facts!, 'FBP佣金', text, path)
+  if (/(createdat|publishedat|listedat|datecreate|datepublish|размещ|создан)/i.test(key) && text.length < 80) addCollectedFact(result.facts!, '上架时间', text, path)
 
   if (shouldCollectSemanticPhysicalAttribute(path, text)) {
-    addProductAttribute(result.attributes!, humanizeOzonKey(path.split('.').slice(-2).join(' ')), text, path)
+    addCollectedFact(result.facts!, humanizeOzonKey(path.split('.').slice(-2).join(' ')), text, path)
   }
   applyLogisticsCandidate(result, path, text)
 
@@ -244,7 +374,7 @@ function applySemanticOzonField(result: Partial<ScrapedProduct>, path: string, v
   }
 }
 
-function addProductAttribute(attrs: ProductAttribute[], name: any, value: any, sourcePath?: string) {
+function addCollectedFact(attrs: CollectedFact[], name: any, value: any, sourcePath?: string) {
   const attrName = normalizeText(name).replace(/[:：]+$/, '').trim()
   const attrValue = normalizeText(value)
   if (!attrName || !attrValue || attrName === attrValue || attrName.length > 120 || attrValue.length > 500) return
@@ -259,15 +389,15 @@ function addProductAttribute(attrs: ProductAttribute[], name: any, value: any, s
     return
   }
 
-  const attr: ProductAttribute = { name: attrName, value: attrValue }
+  const attr: CollectedFact = { name: attrName, value: attrValue }
   if (attrSourcePath) attr.sourcePath = attrSourcePath
   attrs.push(attr)
 }
 
-function mergeProductAttributes(...groups: Array<ProductAttribute[] | undefined>): ProductAttribute[] {
-  const merged: ProductAttribute[] = []
+function mergeCollectedFacts(...groups: Array<CollectedFact[] | undefined>): CollectedFact[] {
+  const merged: CollectedFact[] = []
   for (const group of groups) {
-    for (const attr of group || []) addProductAttribute(merged, attr.name, attr.value, (attr as any).sourcePath)
+    for (const attr of group || []) addCollectedFact(merged, attr.name, attr.value, (attr as any).sourcePath)
   }
   return merged
 }
@@ -349,11 +479,11 @@ function isPackagePhysicalField(text: string): boolean {
   return /(упаков|package|packaging|boxed|с упаковкой|в упаковке|包装)/i.test(text)
 }
 
-function extractPhysicalSpecFromAttributes(attrs: ProductAttribute[]): ScrapedProduct['specList'] {
+function extractPhysicalSpecFromFacts(attrs: CollectedFact[]): ScrapedProduct['specList'] {
   const spec: ScrapedProduct['specList'][number] = { weight_g: 0, depth_mm: 0, height_mm: 0, width_mm: 0 }
 
   for (const attr of attrs) {
-    if (!isTrustedPhysicalAttribute(attr)) continue
+    if (!isTrustedPhysicalFact(attr)) continue
 
     const name = normalizeText(attr.name).toLowerCase()
     const value = normalizeText(attr.value)
@@ -407,7 +537,7 @@ function extractPhysicalSpecFromAttributes(attrs: ProductAttribute[]): ScrapedPr
   return hasSpec ? [spec] : []
 }
 
-function firstAttributeValue(attrs: ProductAttribute[], patterns: RegExp[]): string {
+function firstFactValue(attrs: CollectedFact[], patterns: RegExp[]): string {
   for (const attr of attrs) {
     const name = normalizeText(attr.name)
     if (patterns.some((pattern) => pattern.test(name))) return normalizeText(attr.value)
@@ -462,7 +592,7 @@ function inferLogisticsType(text: any): string {
   return ''
 }
 
-function applyLogisticsCandidate(result: Partial<ScrapedProduct>, key: string, value: any) {
+function applyLogisticsCandidate(result: CollectorProduct, key: string, value: any) {
   const normalizedKey = key.toLowerCase().replace(/[-_\s]/g, '')
   const text = normalizeText(value)
   if (!text || text.length > 180) return
@@ -477,7 +607,7 @@ function applyLogisticsCandidate(result: Partial<ScrapedProduct>, key: string, v
   if (!result.deliveryRegion && /(region|address|city|location|регион|город|адрес)/i.test(key)) result.deliveryRegion = text
 }
 
-function extractLogisticsFromObject(node: any, result: Partial<ScrapedProduct>, depth = 0) {
+function extractLogisticsFromObject(node: any, result: CollectorProduct, depth = 0) {
   if (!node || depth > 6) return
   if (Array.isArray(node)) {
     node.forEach((item) => extractLogisticsFromObject(item, result, depth + 1))
@@ -491,8 +621,8 @@ function extractLogisticsFromObject(node: any, result: Partial<ScrapedProduct>, 
   }
 }
 
-function extractLogisticsFromDocument(doc: Document): Partial<ScrapedProduct> {
-  const result: Partial<ScrapedProduct> = {}
+function extractLogisticsFromDocument(doc: Document): CollectorProduct {
+  const result: CollectorProduct = {}
   const selectors = [
     '[data-widget*="Delivery"]', '[data-widget*="delivery"]', '[data-widget*="Logistic"]',
     '[data-widget*="Stock"]', '[data-widget*="Availability"]', '[data-widget*="Pickup"]',
@@ -511,20 +641,20 @@ function extractLogisticsFromDocument(doc: Document): Partial<ScrapedProduct> {
   return result
 }
 
-function buildOzonMetrics(product: Partial<ScrapedProduct>): OzonMetrics {
-  const attrs = product.attributes || []
+function buildOzonMetrics(product: CollectorProduct): OzonMetrics {
+  const attrs = product.facts || []
   const spec = product.specList?.[0] || { weight_g: 0, depth_mm: 0, height_mm: 0, width_mm: 0 }
   const skuFromList = product.skuList?.find((item) => normalizeText(item.sku))?.sku || ''
-  const articleNumber = firstAttributeValue(attrs, [
+  const articleNumber = firstFactValue(attrs, [
     /^артикул$/i,
     /артикул\s*(продавца|поставщика)?/i,
     /vendor\s*code/i,
     /article/i,
     /货号/,
   ])
-  const sku = skuFromList || firstAttributeValue(attrs, [/^sku$/i, /ozon\s*sku/i, /озон\s*sku/i]) || product.sourceId || ''
-  const monthlySales = parseMetricNumber(firstAttributeValue(attrs, [/月销量/, /monthly\s*sales/i, /продаж[иа]?\s*в\s*месяц/i]))
-  const monthlyRevenueAttr = parseMetricNumber(firstAttributeValue(attrs, [/月销售额/, /monthly\s*revenue/i, /выручк[аеи]?\s*за\s*месяц/i]))
+  const sku = skuFromList || firstFactValue(attrs, [/^sku$/i, /ozon\s*sku/i, /озон\s*sku/i]) || product.sourceId || ''
+  const monthlySales = parseMetricNumber(firstFactValue(attrs, [/月销量/, /monthly\s*sales/i, /продаж[иа]?\s*в\s*месяц/i]))
+  const monthlyRevenueAttr = parseMetricNumber(firstFactValue(attrs, [/月销售额/, /monthly\s*revenue/i, /выручк[аеи]?\s*за\s*месяц/i]))
   const monthlyRevenue = monthlyRevenueAttr || (monthlySales && product.price ? Math.round(monthlySales * product.price) : 0)
   const priceCandidates = [product.price || 0, product.oldPrice || 0, ...(product.priceRanges || []).map((range: any) => Number(range.price) || 0)].filter((value) => value > 0)
   const packageLengthMm = spec.package_depth_mm || 0
@@ -536,19 +666,19 @@ function buildOzonMetrics(product: Partial<ScrapedProduct>): OzonMetrics {
   const metrics: OzonMetrics = {
     sku,
     articleNumber,
-    brand: product.brand || firstAttributeValue(attrs, [/^бренд$/i, /^brand$/i, /品牌/]),
+    brand: product.brand || firstFactValue(attrs, [/^бренд$/i, /^brand$/i, /品牌/]),
     category: product.category || '',
     promotions: uniqueStrings([...(product.tags || []), product.discount]),
-    paidPromotion: firstAttributeValue(attrs, [/付费推广/, /paid\s*promotion/i, /реклам/i, /продвиж/i]),
+    paidPromotion: firstFactValue(attrs, [/付费推广/, /paid\s*promotion/i, /реклам/i, /продвиж/i]),
     monthlyRevenue,
     monthlySales,
-    turnoverDynamics: firstAttributeValue(attrs, [/周转动态/, /turnover/i, /оборачиваем/i, /динамик/i]),
-    followersCount: parseMetricNumber(firstAttributeValue(attrs, [/被跟数量/, /followers?/i, /подпис/i, /отслеж/i])),
+    turnoverDynamics: firstFactValue(attrs, [/周转动态/, /turnover/i, /оборачиваем/i, /динамик/i]),
+    followersCount: parseMetricNumber(firstFactValue(attrs, [/被跟数量/, /followers?/i, /подпис/i, /отслеж/i])),
     minPrice: priceCandidates.length ? Math.min(...priceCandidates) : 0,
     maxPrice: priceCandidates.length ? Math.max(...priceCandidates) : 0,
-    rfbsCommission: parseMetricPercent(firstAttributeValue(attrs, [/rFBS\s*佣金/i, /rfbs/i])),
-    fbpCommission: parseMetricPercent(firstAttributeValue(attrs, [/FBP\s*佣金/i, /fbp/i])),
-    conversionRate: parseMetricPercent(firstAttributeValue(attrs, [/成交率/, /conversion/i, /конверси/i])),
+    rfbsCommission: parseMetricPercent(firstFactValue(attrs, [/rFBS\s*佣金/i, /rfbs/i])),
+    fbpCommission: parseMetricPercent(firstFactValue(attrs, [/FBP\s*佣金/i, /fbp/i])),
+    conversionRate: parseMetricPercent(firstFactValue(attrs, [/成交率/, /conversion/i, /конверси/i])),
     volumeCm3,
     lengthMm: packageLengthMm,
     widthMm: packageWidthMm,
@@ -558,13 +688,13 @@ function buildOzonMetrics(product: Partial<ScrapedProduct>): OzonMetrics {
     packageLengthMm,
     packageWidthMm,
     packageHeightMm,
-    warehouse: product.warehouse || firstAttributeValue(attrs, [/warehouse/i, /склад/i, /仓库/]),
+    warehouse: product.warehouse || firstFactValue(attrs, [/warehouse/i, /склад/i, /仓库/]),
     warehouseId: product.warehouseId || '',
     logisticsType: product.logisticsType || inferLogisticsType(`${product.deliveryMethod || ''} ${product.warehouse || ''}`),
-    deliveryMethod: product.deliveryMethod || firstAttributeValue(attrs, [/delivery\s*method/i, /способ\s*достав/i, /配送方式/]),
-    deliveryRegion: product.deliveryRegion || firstAttributeValue(attrs, [/delivery\s*region/i, /регион/i, /配送区域/]),
-    deliveryDays: product.deliveryDays || parseDeliveryDays(firstAttributeValue(attrs, [/delivery/i, /достав/i, /配送时效/])),
-    listedAt: firstAttributeValue(attrs, [/上架时间/, /listed/i, /created/i, /размещ/i, /дата\s*(создания|публикации)/i]),
+    deliveryMethod: product.deliveryMethod || firstFactValue(attrs, [/delivery\s*method/i, /способ\s*достав/i, /配送方式/]),
+    deliveryRegion: product.deliveryRegion || firstFactValue(attrs, [/delivery\s*region/i, /регион/i, /配送区域/]),
+    deliveryDays: product.deliveryDays || parseDeliveryDays(firstFactValue(attrs, [/delivery/i, /достав/i, /配送时效/])),
+    listedAt: firstFactValue(attrs, [/上架时间/, /listed/i, /created/i, /размещ/i, /дата\s*(создания|публикации)/i]),
     missingFields: [],
   }
 
@@ -602,7 +732,7 @@ function buildOzonMetrics(product: Partial<ScrapedProduct>): OzonMetrics {
   return metrics
 }
 
-function appendOzonMetrics(product: Partial<ScrapedProduct>): Partial<ScrapedProduct> {
+function appendOzonMetrics(product: CollectorProduct): CollectorProduct {
   return { ...product, ozonMetrics: buildOzonMetrics(product) }
 }
 
@@ -629,25 +759,25 @@ function extractCategoryFromWidget(widget: any): string {
   return normalizeText(widget?.category?.title ?? widget?.category?.name ?? widget?.categoryName)
 }
 
-function extractAttributePairsFromObject(node: any, attrs: ProductAttribute[], depth = 0) {
+function extractFactPairsFromObject(node: any, attrs: CollectedFact[], depth = 0) {
   if (!node || depth > 5) return
   if (Array.isArray(node)) {
-    node.forEach((item) => extractAttributePairsFromObject(item, attrs, depth + 1))
+    node.forEach((item) => extractFactPairsFromObject(item, attrs, depth + 1))
     return
   }
   if (typeof node !== 'object') return
 
   const name = normalizeText(node.name ?? node.propertyName ?? node.title ?? node.label ?? node.caption ?? node.key)
   const value = normalizeText(node.value ?? node.text ?? node.propertyValue ?? node.propertyValues ?? node.values ?? node.content)
-  addProductAttribute(attrs, name, value)
+  addCollectedFact(attrs, name, value)
 
-  for (const key of ['characteristics', 'properties', 'attributes', 'params', 'items', 'rows', 'sections', 'groups']) {
-    if (Array.isArray(node[key])) extractAttributePairsFromObject(node[key], attrs, depth + 1)
-    if (Array.isArray(node.options?.[key])) extractAttributePairsFromObject(node.options[key], attrs, depth + 1)
+  for (const key of ['characteristics', 'properties', 'params', 'items', 'rows', 'sections', 'groups']) {
+    if (Array.isArray(node[key])) extractFactPairsFromObject(node[key], attrs, depth + 1)
+    if (Array.isArray(node.options?.[key])) extractFactPairsFromObject(node.options[key], attrs, depth + 1)
   }
 }
 
-function extractOzonIdsFromObject(node: any, result: Partial<ScrapedProduct>, depth = 0) {
+function extractOzonIdsFromObject(node: any, result: CollectorProduct, depth = 0) {
   if (!node || depth > 6 || typeof node !== 'object') return
   if (Array.isArray(node)) {
     node.forEach((item) => extractOzonIdsFromObject(item, result, depth + 1))
@@ -802,10 +932,10 @@ function extractDetailSellerName(): string {
   return ''
 }
 
-async function extractDetailAttributes(): Promise<ProductAttribute[]> {
-  const attrs: ProductAttribute[] = []
+async function extractDetailFacts(): Promise<CollectedFact[]> {
+  const facts: CollectedFact[] = []
 
-  // 策略 1: 先尝试逐个点击「展开全部」按钮,让折叠的属性显示出来
+  // 策略 1: 先尝试逐个点击「展开全部」按钮,让折叠的特征显示出来
   // ★ 拟人化:逐个点击而非批量点击,每次点击后等待 DOM 更新
   const expandBtns = document.querySelectorAll(
     'button[class*="show-more"], button[class*="expand"], [data-widget="webCharacteristics"] button, [class*="characteristic"] button'
@@ -818,7 +948,7 @@ async function extractDetailAttributes(): Promise<ProductAttribute[]> {
     }
   }
 
-  // 策略 2: 从所有明确 characteristics widget 解析属性。
+  // 策略 2: 从所有明确 characteristics widget 解析特征。
   // Ozon 常同时渲染 webShortCharacteristics / webCharacteristics / webFullCharacteristics，必须全部合并。
   const charWidgets = Array.from(document.querySelectorAll('[data-widget*="Characteristics"], [data-widget*="characteristics"], [data-widget*="Properties"], [data-widget*="Specifications"]'))
   for (const charWidget of charWidgets) {
@@ -828,7 +958,7 @@ async function extractDetailAttributes(): Promise<ProductAttribute[]> {
         const name = dt.textContent?.trim() || ''
         const dd = dt.nextElementSibling
         const value = dd?.textContent?.trim() || ''
-        addProductAttribute(attrs, name, value)
+        addCollectedFact(facts, name, value)
       }
     }
 
@@ -837,20 +967,27 @@ async function extractDetailAttributes(): Promise<ProductAttribute[]> {
       if (children.length >= 2) {
         const name = children[0]?.textContent?.trim() || ''
         const value = children.slice(1).map((child) => child.textContent?.trim() || '').filter(Boolean).join(', ')
-        addProductAttribute(attrs, name, value)
+        addCollectedFact(facts, name, value)
       }
     })
   }
 
-  return attrs
+  return facts
 }
 
 /** 提取 SKU / article 编号 — Ozon 商品页有专门的 SKU 展示区域 */
 function extractDetailSku(): string {
   // Ozon 通常在「Артикул」或「SKU」标签附近显示编号
   const allText = document.body.innerText || ''
-  const skuMatch = allText.match(/(?:Артикул|SKU|Артикул\s+поставщика)[:\s]*([\w\-\.]+)/i)
-  if (skuMatch) return skuMatch[1].trim()
+  const skuPatterns = [
+    /(?:Ozon\s*SKU|SKU\s*Ozon|Артикул\s+Ozon)[:\s№#]*([\w\-.]+)/i,
+    /Артикул(?!\s+(?:продавца|поставщика))[:\s№#]*(\d{5,})/i,
+    /\bSKU[:\s№#]*([\w\-.]+)/i,
+  ]
+  for (const pattern of skuPatterns) {
+    const match = allText.match(pattern)
+    if (match?.[1]) return match[1].trim()
+  }
   // 尝试从 meta 标签提取
   const metaSku = document.querySelector('meta[itemprop="sku"]')
   if (metaSku) return metaSku.getAttribute('content') || ''
@@ -899,7 +1036,7 @@ async function scrapeOzonProduct(): Promise<ScrapedProduct | null> {
     await normalDelay(400, 1000)
   }
 
-  // 展开全部属性
+  // 展开全部特征
   const expandAllBtns = document.querySelectorAll(
     'button[class*="show-more"], button[class*="expand"]'
   )
@@ -908,31 +1045,33 @@ async function scrapeOzonProduct(): Promise<ScrapedProduct | null> {
   }
 
   await microPause()
-  const attributes = await extractDetailAttributes()
+  const facts = await extractDetailFacts()
 
-  // 把 SKU 和变体信息也追加到 attributes 中
+  // SKU 仅作为标识特征；完整变体必须来自结构化页面数据/API。
   const sku = extractDetailSku()
-  if (sku) attributes.unshift({ name: 'Артикул (SKU)', value: sku })
-  const variants = extractDetailVariants()
-  if (variants) attributes.push({ name: '变体选项', value: variants })
+  if (sku) facts.unshift({ name: 'Артикул (SKU)', value: sku })
+  const variantSummary = extractDetailVariants()
+  if (variantSummary) facts.push({ name: '变体选项', value: variantSummary })
 
   // 从 JSON-LD 补充额外结构化数据
   let jsonLd: any = null
+  const jsonLdDocuments: any[] = []
   document.querySelectorAll('script[type="application/ld+json"]').forEach((s) => {
     try {
       const data = JSON.parse(s.textContent || '{}')
+      jsonLdDocuments.push(data)
       if (data['@type'] === 'Product' || data.productID) jsonLd = data
     } catch { /* ignore */ }
   })
   if (jsonLd) {
-    if (jsonLd.sku && !sku) attributes.unshift({ name: 'SKU', value: String(jsonLd.sku) })
+    if (jsonLd.sku && !sku) facts.unshift({ name: 'SKU', value: String(jsonLd.sku) })
     if (jsonLd.brand?.name) { /* brand 已单独提取 */ }
-    if (jsonLd.weight) attributes.push({ name: '重量', value: String(jsonLd.weight) })
-    if (jsonLd.color) attributes.push({ name: '颜色', value: String(jsonLd.color) })
+    if (jsonLd.weight) facts.push({ name: '重量', value: String(jsonLd.weight) })
+    if (jsonLd.color) facts.push({ name: '颜色', value: String(jsonLd.color) })
   }
 
   // ── 拟人化: 先尝试通过内部 API 获取结构化数据 (评分/规格/视频/标签更准确) ──
-  let apiData: Partial<ScrapedProduct> | null = null
+  let apiData: CollectorProduct | null = null
   try {
     apiData = await fetchProductDetailFromApi(sourceId, location.href)
   } catch { /* DOM fallback below */ }
@@ -948,7 +1087,7 @@ async function scrapeOzonProduct(): Promise<ScrapedProduct | null> {
     brand: extractDetailBrand() || (jsonLd?.brand?.name ?? ''),
     category: extractDetailCategory(),
     sellerName: extractDetailSellerName(),
-    attributes,
+    facts,
     description: extractDetailDescription(),
   }
 
@@ -958,7 +1097,7 @@ async function scrapeOzonProduct(): Promise<ScrapedProduct | null> {
     const src = (el as HTMLSourceElement).src || (el as HTMLVideoElement).src || ''
     if (src && src.startsWith('http') && !domVideos.includes(src)) domVideos.push(src)
   })
-  // Ozon 视频也经常以 data 属性或 iframe 形式出现
+  // Ozon 视频也经常以 data 特征或 iframe 形式出现
   document.querySelectorAll('[data-video-url], [data-src*="video"]').forEach((el) => {
     const url = el.getAttribute('data-video-url') || el.getAttribute('data-src') || ''
     if (url && url.startsWith('http') && !domVideos.includes(url)) domVideos.push(url)
@@ -971,8 +1110,22 @@ async function scrapeOzonProduct(): Promise<ScrapedProduct | null> {
     if (t && t.length < 50 && !domTags.includes(t)) domTags.push(t)
   })
 
-  const mergedAttributes = mergeProductAttributes(apiData?.attributes, domData.attributes)
-  const inferredSpecList = extractPhysicalSpecFromAttributes(mergedAttributes)
+  const collectedFacts = mergeCollectedFacts(apiData?.facts, domData.facts)
+  const jsonLdVariants = extractJsonLdVariants(jsonLdDocuments)
+  const mergedVariants = mergeOzonVariants(apiData?.variants, jsonLdVariants)
+  // DOM 中明确展示的 SKU 且页面/API 均未声明多 Offer 时，它就是无变体维度的单 Offer。
+  // 这是页面事实的表达，不使用 sourceId 或默认值构造 SKU。
+  if (mergedVariants.length === 0 && sku && !variantSummary) {
+    mergedVariants.push({ sku, values: [], sourcePath: 'DOM Артикул/SKU' })
+  }
+  const variantSkus = new Set(mergedVariants.map((variant) => variant.sku))
+  const verifiedApiSkuList = (apiData?.skuList || []).filter((item) => !item.sku || variantSkus.has(item.sku))
+  const mergedSkuList = mergeSkuLists(
+    verifiedApiSkuList,
+    sku ? [{ sku, barcode: '' }] : [],
+    mergedVariants.map((variant) => ({ sku: variant.sku, barcode: variant.barcode || '' })),
+  )
+  const inferredSpecList = extractPhysicalSpecFromFacts(collectedFacts)
   const mergedSpec = mergePhysicalSpec(apiData?.specList?.[0], inferredSpecList[0])
   const mergedSpecList = mergedSpec ? [mergedSpec] : []
   const domLogistics = extractLogisticsFromDocument(document)
@@ -992,12 +1145,12 @@ async function scrapeOzonProduct(): Promise<ScrapedProduct | null> {
     category: apiData?.category || domData.category,
     sellerName: apiData?.sellerName || domData.sellerName,
     sellerUrl: apiData?.sellerUrl || '',
-    attributes: mergedAttributes,
     description: (apiData?.description && apiData.description.length > 10 ? apiData.description : domData.description),
     sourceUrl: location.href,
     scrapedAt: new Date().toISOString(),
     videoUrls: (apiData?.videoUrls?.length ? apiData.videoUrls : domVideos),
-    skuList: apiData?.skuList || [],
+    skuList: mergedSkuList,
+    variants: mergedVariants,
     specList: mergedSpecList,
     tags: (apiData?.tags?.length ? apiData.tags : domTags),
     ozonCategoryId: apiData?.ozonCategoryId || 0,
@@ -1328,7 +1481,7 @@ async function scrollAndCollect(
           if (stableRounds >= MAX_STABLE) {
             resolveTick()
             return
-        }
+          }
         } else {
           stableRounds = 0
         }
@@ -1388,7 +1541,7 @@ const OZON_INTERNAL_API = 'https://www.ozon.ru/api/entrypoint-api.bx/page/json/v
  * HTML 降级采集:通过 fetch 商品页面 HTML,解析 DOM 提取数据
  * 当内部 JSON API 返回 403 时使用
  */
-async function fetchProductDetailFromHtml(sourceId: string, sourceUrl?: string): Promise<Partial<ScrapedProduct> | null> {
+async function fetchProductDetailFromHtml(sourceId: string, sourceUrl?: string): Promise<CollectorProduct | null> {
   // 使用真实的产品页面 URL,构造错误的 URL (如 /product/-12345/) 会 404
   const productUrl = sourceUrl || `https://www.ozon.ru/product/${sourceId}/`
   try {
@@ -1405,12 +1558,12 @@ async function fetchProductDetailFromHtml(sourceId: string, sourceUrl?: string):
     }
     const html = await resp.text()
 
-    const result: Partial<ScrapedProduct> = {
+    const result: CollectorProduct = {
       platform: 'ozon',
       sourceId,
       currency: 'RUB',
-      attributes: [],
       images: [],
+      facts: [],
     }
 
     // ── 策略 A: 解析 <script type="application/ld+json"> (SEO 结构化数据) ──
@@ -1474,8 +1627,8 @@ async function fetchProductDetailFromHtml(sourceId: string, sourceUrl?: string):
       const descEl = doc.querySelector('[data-widget="webDescription"]')
       result.description = descEl?.textContent?.trim() || ''
     }
-    // 属性
-    if (!result.attributes!.length) {
+    // 特征
+    if (!result.facts!.length) {
       const attrsContainers = doc.querySelectorAll('[data-widget*="Characteristics"], [data-widget*="characteristics"], [data-widget*="Properties"], [data-widget*="Specifications"]')
       for (const attrsContainer of Array.from(attrsContainers)) {
         const rows = attrsContainer.querySelectorAll('tr, li, [class*="row"], dl > div')
@@ -1484,7 +1637,7 @@ async function fetchProductDetailFromHtml(sourceId: string, sourceUrl?: string):
           if (cells.length >= 2) {
             const name = cells[0]?.textContent?.trim()
             const value = Array.from(cells).slice(1).map((cell) => cell.textContent?.trim() || '').filter(Boolean).join(', ')
-            addProductAttribute(result.attributes!, name, value)
+            addCollectedFact(result.facts!, name, value)
           }
         }
       }
@@ -1503,8 +1656,8 @@ async function fetchProductDetailFromHtml(sourceId: string, sourceUrl?: string):
       }
     }
 
-    result.attributes = mergeProductAttributes(result.attributes)
-    result.specList = extractPhysicalSpecFromAttributes(result.attributes || [])
+    result.facts = mergeCollectedFacts(result.facts)
+    result.specList = extractPhysicalSpecFromFacts(result.facts || [])
     const htmlLogistics = extractLogisticsFromDocument(doc)
     result.warehouse = result.warehouse || htmlLogistics.warehouse || ''
     result.warehouseId = result.warehouseId || htmlLogistics.warehouseId || ''
@@ -1525,7 +1678,7 @@ async function fetchProductDetailFromHtml(sourceId: string, sourceUrl?: string):
  * sourceId 如 "1425179442"
  * 返回的 JSON 结构中有 "widgetStates" 包含所有 widget 数据
  */
-async function fetchProductDetailFromApi(sourceId: string, sourceUrl?: string): Promise<Partial<ScrapedProduct> | null> {
+async function fetchProductDetailFromApi(sourceId: string, sourceUrl?: string): Promise<CollectorProduct | null> {
   // 内容脚本直接 fetch（同源请求，携带 cookie）
   const candidatePaths: string[] = []
   try {
@@ -1566,21 +1719,23 @@ async function fetchProductDetailFromApi(sourceId: string, sourceUrl?: string): 
 /**
  * 解析 Ozon 内部 API 的 JSON 响应,提取结构化商品数据
  */
-function parseInternalApiResponse(data: any, sourceId: string): Partial<ScrapedProduct> | null {
-  const result: Partial<ScrapedProduct> = {
+function parseInternalApiResponse(data: any, sourceId: string): CollectorProduct | null {
+  const result: CollectorProduct = {
     platform: 'ozon',
     sourceId,
     currency: 'RUB',
-    attributes: [],
     images: [],
     videoUrls: [],
     skuList: [],
+    variants: [],
     specList: [],
+    facts: [],
   }
 
   const states = data?.widgetStates || data || {}
   const allKeys = Object.keys(states)
   const decodedWidgets = decodedOzonStateEntries(states)
+  result.variants = extractOzonVariants(decodedWidgets.map(([, widget]) => widget))
 
   // ── Step 1: 按 widget key 匹配提取 ──
   // 数据结构参考: 后端 ozon_product_scraper.py 中的解析逻辑
@@ -1594,7 +1749,7 @@ function parseInternalApiResponse(data: any, sourceId: string): Partial<ScrapedP
     const normalizedWidgetKey = key.toLowerCase()
     // 类目只从明确 breadcrumb widget 解析；不从任意 Category/category key 猜测，避免误采内部推荐分类。
     if (normalizedWidgetKey.includes('haract') || normalizedWidgetKey.includes('roper') || normalizedWidgetKey.includes('pecif') || normalizedWidgetKey.includes('webfull')) {
-      extractAttributePairsFromObject(widget, result.attributes!)
+      extractFactPairsFromObject(widget, result.facts!)
     }
 
     // --- 标题: webProductHeading ---
@@ -1659,7 +1814,7 @@ function parseInternalApiResponse(data: any, sourceId: string): Partial<ScrapedP
       if (typeof d === 'string' && d.length > 10) result.description = d.slice(0, 2000)
     }
 
-    // --- 属性/特征: webShortCharacteristics / webCharacteristics / webFullCharacteristics ---
+    // --- 特征/特征: webShortCharacteristics / webCharacteristics / webFullCharacteristics ---
     // Ozon has multiple characteristics widgets with DIFFERENT data structures:
     //   webShortCharacteristics — 3-5 "highlight" attrs at top of page
     //     Structure A: { characteristics: [{ title: { textRs: [...] }, values: [{ text: "..." }] }] }
@@ -1710,7 +1865,7 @@ function parseInternalApiResponse(data: any, sourceId: string): Partial<ScrapedP
           if (!value) value = ch.value || ch.text || ''
 
           if (name && String(name).length > 1) {
-            addProductAttribute(result.attributes!, name, value)
+            addCollectedFact(result.facts!, name, value)
             if (!result.brand && /^бренд$/i.test(String(name).trim())) {
               result.brand = String(value).trim()
             }
@@ -1736,7 +1891,7 @@ function parseInternalApiResponse(data: any, sourceId: string): Partial<ScrapedP
                 for (const v of prop.values) { if (v?.text) { pValue = v.text; break } }
               }
               if (pName && String(pName).length > 1) {
-                addProductAttribute(result.attributes!, pName, pValue)
+                addCollectedFact(result.facts!, pName, pValue)
                 if (!result.brand && /^бренд$/i.test(String(pName).trim())) {
                   result.brand = String(pValue).trim()
                 }
@@ -1767,7 +1922,7 @@ function parseInternalApiResponse(data: any, sourceId: string): Partial<ScrapedP
               for (const v of prop.values) { if (v?.text) { pValue = v.text; break } }
             }
             if (pName && String(pName).length > 1) {
-              addProductAttribute(result.attributes!, pName, pValue)
+              addCollectedFact(result.facts!, pName, pValue)
               if (!result.brand && /^бренд$/i.test(String(pName).trim())) {
                 result.brand = String(pValue).trim()
               }
@@ -1794,7 +1949,7 @@ function parseInternalApiResponse(data: any, sourceId: string): Partial<ScrapedP
               for (const v of prop.values) { if (v?.text) { pValue = v.text; break } }
             }
             if (pName && String(pName).length > 1) {
-              addProductAttribute(result.attributes!, pName, pValue)
+              addCollectedFact(result.facts!, pName, pValue)
             }
           }
         }
@@ -1828,15 +1983,20 @@ function parseInternalApiResponse(data: any, sourceId: string): Partial<ScrapedP
   }
   if (data && data !== states) collectOzonValueSignals(data, result, ['root'])
 
-  // 不从标题或面包屑猜测品牌。品牌必须来自 webBrand/brand 链接/JSON-LD/属性中的「Бренд」。
+  // SKU 清单与完整变体采用同一结构化事实源，避免递归语义扫描采入 productId 等非 SKU 标识。
+  if (result.variants.length > 0) {
+    result.skuList = result.variants.map((variant) => ({ sku: variant.sku, barcode: variant.barcode || '' }))
+  }
 
-  result.attributes = mergeProductAttributes(result.attributes)
+  // 不从标题或面包屑猜测品牌。品牌必须来自 webBrand/brand 链接/JSON-LD/特征中的「Бренд」。
 
-  // ── Step 4: 从属性中提取物理规格、标识符、折扣、库存 → JSON arrays ──
+  result.facts = mergeCollectedFacts(result.facts)
+
+  // ── Step 4: 从特征中提取物理规格、标识符、折扣、库存 → JSON arrays ──
   const specAccum: ScrapedProduct['specList'][number] = { weight_g: 0, depth_mm: 0, height_mm: 0, width_mm: 0 }
-  if (result.attributes && result.attributes.length > 0) {
-    for (const attr of result.attributes) {
-      if (!isTrustedPhysicalAttribute(attr)) continue
+  if (result.facts && result.facts.length > 0) {
+    for (const attr of result.facts) {
+      if (!isTrustedPhysicalFact(attr)) continue
 
       const name = (attr.name || '').toLowerCase().trim()
       const val = attr.value || ''
@@ -1911,7 +2071,7 @@ function parseInternalApiResponse(data: any, sourceId: string): Partial<ScrapedP
   if (specAccum.weight_g || specAccum.depth_mm || specAccum.height_mm || specAccum.width_mm || specAccum.package_weight_g || specAccum.package_depth_mm || specAccum.package_height_mm || specAccum.package_width_mm || specAccum.color || specAccum.size) {
     result.specList!.push(specAccum)
   }
-  const inferredSpecList = extractPhysicalSpecFromAttributes(result.attributes || [])
+  const inferredSpecList = extractPhysicalSpecFromFacts(result.facts || [])
   const mergedSpec = mergePhysicalSpec(result.specList?.[0], inferredSpecList[0])
   result.specList = mergedSpec ? [mergedSpec] : []
 
@@ -1926,7 +2086,7 @@ function parseInternalApiResponse(data: any, sourceId: string): Partial<ScrapedP
           result.discount = disc
           break
         }
-      } catch {}
+      } catch { }
     }
   }
 
@@ -1941,7 +2101,7 @@ function parseInternalApiResponse(data: any, sourceId: string): Partial<ScrapedP
           result.stock = stockText
           break
         }
-      } catch {}
+      } catch { }
     }
   }
 
@@ -1956,13 +2116,13 @@ function parseInternalApiResponse(data: any, sourceId: string): Partial<ScrapedP
           if (url && typeof url === 'string' && url.startsWith('http')) {
             if (!result.videoUrls!.includes(url)) result.videoUrls!.push(url)
           }
-        } catch {}
+        } catch { }
       }
     }
   }
 
 
-  return result.images!.length > 0 || result.title || result.attributes!.length > 0 ? appendOzonMetrics(result) : null
+  return result.images!.length > 0 || result.title || result.facts!.length > 0 ? appendOzonMetrics(result) : null
 }
 
 /**
@@ -1973,8 +2133,8 @@ function parseInternalApiResponse(data: any, sourceId: string): Partial<ScrapedP
 async function enrichProductsFromApi(
   products: Array<{ id: number; sourceId: string; sourceUrl: string }>,
   onProgress: (done: number, total: number, current: string) => void,
-): Promise<Array<{ id: number; data: Partial<ScrapedProduct> }>> {
-  const results: Array<{ id: number; data: Partial<ScrapedProduct> }> = []
+): Promise<Array<{ id: number; data: CollectorProduct }>> {
+  const results: Array<{ id: number; data: CollectorProduct }> = []
   const DELAY_MIN = 2000  // 最短延时 2 秒
   const DELAY_MAX = 5000  // 最长延时 5 秒
 
@@ -2035,7 +2195,7 @@ export default defineContentScript({
       if (message.action === 'enrichProducts') {
         const products = message.products || []
         enrichProductsFromApi(products, (done, total, current) => {
-          browser.runtime.sendMessage({ action: 'enrichProgress', done, total, current }).catch(() => {})
+          browser.runtime.sendMessage({ action: 'enrichProgress', done, total, current }).catch(() => { })
         }).then((results) => {
           sendResponse({ success: true, results })
         }).catch((e) => {
@@ -2058,7 +2218,16 @@ export default defineContentScript({
       // 采集单个商品详情
       if (message.action === 'scrape') {
         scrapeOzonProduct().then((product) => {
-          sendResponse({ success: !!product, data: product })
+          sendResponse({
+            success: !!product,
+            data: product,
+            error: product ? '' : '未找到 Ozon 商品 ID 或商品详情数据',
+          })
+        }).catch((error) => {
+          sendResponse({
+            success: false,
+            error: error instanceof Error ? error.message : String(error),
+          })
         })
         return true // 异步响应
       }
@@ -2097,12 +2266,12 @@ export default defineContentScript({
             category: '',
             sellerName: c.sellerName || '',
             sellerUrl: '',
-            attributes: [],
-            description: '',
+                  description: '',
             sourceUrl: c.sourceUrl,
             scrapedAt: new Date().toISOString(),
             videoUrls: [],
             skuList: [],
+            variants: [],
             specList: [],
             tags: [],
             ozonCategoryId: 0,
@@ -2152,14 +2321,14 @@ export default defineContentScript({
                   sellerName: detail.sellerName || p.sellerName,
                   description: detail.description || p.description,
                   images: (detail.images && detail.images.length > 0) ? detail.images : p.images,
-                  attributes: mergeProductAttributes(detail.attributes, p.attributes),
                   specList: (() => {
-                    const attrs = mergeProductAttributes(detail.attributes, p.attributes)
-                    const inferred = extractPhysicalSpecFromAttributes(attrs)
+                    const facts = mergeCollectedFacts(detail.facts, (p as CollectorProduct).facts)
+                    const inferred = extractPhysicalSpecFromFacts(facts)
                     const spec = mergePhysicalSpec(detail.specList?.[0], inferred[0])
                     return spec ? [spec] : []
                   })(),
                   skuList: detail.skuList || p.skuList,
+                  variants: detail.variants || p.variants,
                   videoUrls: detail.videoUrls || p.videoUrls,
                   tags: detail.tags || p.tags,
                   ozonCategoryId: detail.ozonCategoryId || p.ozonCategoryId,

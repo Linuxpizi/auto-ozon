@@ -1,6 +1,6 @@
-import type { ScrapedProduct } from '@/utils/types'
-import { injectFloatingButton } from '@/utils/floating-button'
-import { isPddDetailPage, isPddListPage, scrapePddProduct, scanPddListCards, type ListCardPdd } from '@/scrapers/platforms/pdd'
+import type { ScrapedProduct } from '@/lib/utils/types'
+import { injectFloatingButton } from '@/lib/utils/floating-button'
+import { isPddDetailPage, isPddListPage, scrapePddProduct, scanPddListCards, type ListCardPdd } from '@/lib/scrapers/pdd'
 
 export default defineContentScript({
   matches: [
@@ -144,12 +144,12 @@ function cardToProduct(card: ListCardPdd): ScrapedProduct {
     category: '',
     sellerName: '',
     sellerUrl: '',
-    attributes: [],
     description: '',
     sourceUrl: card.sourceUrl,
     scrapedAt: new Date().toISOString(),
     videoUrls: [],
-    skuList: [{ sku: card.sourceId, barcode: '' }],
+    skuList: [],
+    variants: [],
     specList: [],
     tags: ['PDD'],
     ozonCategoryId: 0,
@@ -157,7 +157,7 @@ function cardToProduct(card: ListCardPdd): ScrapedProduct {
     discount: '',
     stock: '',
     priceRanges: [],
-    minOrderQty: 1,
+    minOrderQty: 0,
     supplierUrl: '',
     tradeQuantity: 0,
   }

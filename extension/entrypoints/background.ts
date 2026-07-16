@@ -1,6 +1,6 @@
-import type { ScrapedProduct } from '@/utils/types'
-import { getSettings } from '@/utils/storage'
-import { syncProducts, fetchBackendProducts, deleteBackendProduct, checkBackendHealth } from '@/utils/api'
+import type { ScrapedProduct } from '@/lib/utils/types'
+import { getSettings } from '@/lib/utils/storage'
+import { syncProducts, fetchBackendProducts, deleteBackendProduct, checkBackendHealth } from '@/lib/utils/api'
 
 /** 更新 badge 显示后端未匹配数量 */
 async function updateBadge() {

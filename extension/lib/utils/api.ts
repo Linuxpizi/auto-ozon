@@ -1,4 +1,5 @@
 import type { ScrapedProduct } from './types'
+import { assertCompleteProduct } from './product-data'
 import { getSettings } from './storage'
 
 /** 获取后端 API 基础地址 */
@@ -9,11 +10,12 @@ async function getBaseUrl(): Promise<string> {
 
 /** 批量同步采集商品到后端 */
 export async function syncProducts(products: ScrapedProduct[]): Promise<{ created: number; skipped: number }> {
+  const completeProducts = products.map(assertCompleteProduct)
   const baseUrl = await getBaseUrl()
   const resp = await fetch(`${baseUrl}/api/browser-sync/sync-products`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ products }),
+    body: JSON.stringify({ products: completeProducts }),
   })
   if (!resp.ok) throw new Error(`同步失败: ${resp.status} ${resp.statusText}`)
   return resp.json()

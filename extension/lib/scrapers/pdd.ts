@@ -1,6 +1,7 @@
-import type { ProductAttribute, ScrapedProduct } from '@/utils/types'
+import type { ProductVariant, ScrapedProduct } from '@/lib/utils/types'
 
 type SpecRecord = { weight_g: number; depth_mm: number; height_mm: number; width_mm: number; [key: string]: any }
+type SpecValue = { name: string; value: string }
 
 const MAX_SCAN_DEPTH = 12
 
@@ -316,7 +317,7 @@ function valueText(value: any): string {
   return clean(value)
 }
 
-function pushNameValue(attrs: ProductAttribute[], item: any, source: string) {
+function pushNameValue(specs: SpecValue[], item: any) {
   if (!item || typeof item !== 'object') return
   const name = pickString(item, [
     'parent_name', 'parentName', 'parent_spec_name', 'parentSpecName',
@@ -330,7 +331,7 @@ function pushNameValue(attrs: ProductAttribute[], item: any, source: string) {
     ?? (name !== pickString(item, ['name']) ? item.name : '')
   const value = valueText(rawValue)
   if (name && value) {
-    pushAttr(attrs, name, value)
+    pushSpecValue(specs, name, value)
   }
 }
 
@@ -356,14 +357,14 @@ function collectSkuObjects(roots: unknown[]): PddSkuLike[] {
   return skus.slice(0, 200)
 }
 
-function extractSkuSpecs(sku: PddSkuLike): ProductAttribute[] {
-  const attrs: ProductAttribute[] = []
+function extractSkuSpecs(sku: PddSkuLike): SpecValue[] {
+  const specsOut: SpecValue[] = []
   const specs = [sku.specs, sku.spec, sku.specList, sku.spec_list, sku.properties, sku.property, sku.attrs, sku.attrList, sku.attr_list].find(Array.isArray) || []
-  for (const item of specs) pushNameValue(attrs, item, 'sku.specs')
+  for (const item of specs) pushNameValue(specsOut, item)
   for (const key of ['颜色', '色号', '尺码', '尺寸', '规格', '款式', '型号', '容量', '重量', '毛重', '净重', 'color', 'size', 'style', 'model', 'weight']) {
-    if (sku[key]) pushAttr(attrs, key, sku[key])
+    if (sku[key]) pushSpecValue(specsOut, key, sku[key])
   }
-  return attrs
+  return specsOut
 }
 
 function inferSpecKey(name: string): string {
@@ -375,10 +376,10 @@ function inferSpecKey(name: string): string {
   return clean(name)
 }
 
-function applyPhysicalSpec(spec: SpecRecord, attrs: ProductAttribute[]) {
-  for (const attr of attrs) {
-    const name = attr.name.toLowerCase()
-    const value = attr.value
+function applyPhysicalSpec(spec: SpecRecord, values: SpecValue[]) {
+  for (const item of values) {
+    const name = item.name.toLowerCase()
+    const value = item.value
     if (!spec.weight_g && /(重量|毛重|净重|净含量|容量|weight)/i.test(name)) spec.weight_g = parseWeightToGrams(value)
     if (!spec.color && /(颜色|色号|color)/i.test(name) && value.length <= 120) spec.color = value
     if (!spec.size && /(尺码|尺寸|规格|型号|容量|净含量|size)/i.test(name) && value.length <= 180) spec.size = value
@@ -596,64 +597,55 @@ function extractSeller(roots: unknown[]): { name: string; url: string } {
   return { name: clean(domName || names[0] || ''), url: mallLink?.href || '' }
 }
 
-function pushAttr(attrs: ProductAttribute[], name: string, value: unknown) {
+function pushSpecValue(specs: SpecValue[], name: string, value: unknown) {
   const n = clean(name).replace(/[：:]+$/, '')
   const v = clean(Array.isArray(value) ? value.join(' / ') : value)
   if (!n || !v || n === v || v.length > 300) return
-  if (!attrs.some((a) => a.name === n && a.value === v)) attrs.push({ name: n, value: v })
+  if (!specs.some((item) => item.name === n && item.value === v)) specs.push({ name: n, value: v })
 }
 
-function extractAttributes(roots: unknown[]): ProductAttribute[] {
-  const attrs: ProductAttribute[] = []
-  const category = extractCategory(roots)
-  if (category) pushAttr(attrs, '产品类别', category)
+function extractSpecValues(roots: unknown[]): SpecValue[] {
+  const specs: SpecValue[] = []
 
   // 真实 PDD 详情页登录态/风控态下，SKU 常只在点击「发起拼单/选择规格」后的弹层 DOM 中出现。
-  // 这里把弹层维度作为上传必需的规格属性采集，并同步给 specList 做物理规格回填。
+  // 这里只提取 SKU/物理规格，结果写入 variants 与 specList，不再形成通用商品属性。
   for (const group of extractDomSkuGroups()) {
-    pushAttr(attrs, group.name, group.values.join(' / '))
+    pushSpecValue(specs, group.name, group.values.join(' / '))
   }
 
-  // 0) 优先读取 PDD 商品对象中的类目、商品参数和 SKU 规格。
+  // 优先读取 PDD 商品对象中的 SKU 规格。
   for (const node of collectGoodsNodes(roots)) {
-    for (const key of ['properties', 'property', 'attrs', 'attrList', 'attr_list', 'parameters', 'paramList', 'param_list', 'goods_property', 'goodsProperty']) {
-      if (Array.isArray(node[key])) node[key].forEach((item: any) => pushNameValue(attrs, item, `goods.${key}`))
-    }
     for (const key of ['specs', 'specList', 'spec_list', 'sku_specs', 'skuSpecs']) {
-      if (Array.isArray(node[key])) node[key].forEach((item: any) => pushNameValue(attrs, item, `goods.${key}`))
-    }
-
-    for (const key of ['goods_name', 'goodsName', 'brand', 'brand_name', 'brandName', 'model', 'model_name', 'modelName']) {
-      const value = pickString(node, [key])
-      if (value && /brand/i.test(key)) pushAttr(attrs, '品牌', value)
-      if (value && /model/i.test(key)) pushAttr(attrs, '型号', value)
+      if (Array.isArray(node[key])) node[key].forEach((item: any) => pushNameValue(specs, item))
     }
   }
 
   for (const sku of collectSkuObjects(roots)) {
-    for (const attr of extractSkuSpecs(sku)) pushAttr(attrs, attr.name, attr.value)
+    for (const item of extractSkuSpecs(sku)) pushSpecValue(specs, item.name, item.value)
   }
 
-  // 1) PDD 接口/内嵌数据中的 specs、properties、goodsProperty 等。
+  // PDD 接口/内嵌数据中的 SKU/spec 列表。
   for (const root of roots) {
     walk(root, (key, value) => {
-      if (!Array.isArray(value) || !/(spec|prop|attr|property|parameter|sku)/i.test(key)) return
+      if (!Array.isArray(value) || !/(spec|sku)/i.test(key)) return
       value.forEach((item: any) => {
         if (!item || typeof item !== 'object') return
-        pushNameValue(attrs, item, key)
+        pushNameValue(specs, item)
       })
     })
   }
 
-  // 2) DOM 参数块，兼容「颜色：黑色」「重量 0.5kg」等结构。
-  document.querySelectorAll('li, tr, [class*="param"], [class*="spec"], [class*="property"], [class*="attr"]').forEach((el) => {
+  // DOM 规格块，兼容「颜色：黑色」「重量：0.5kg」等结构。
+  document.querySelectorAll('li, tr, [class*="spec"], [class*="sku"]').forEach((el) => {
     const raw = clean(el.textContent)
     if (!raw || raw.length > 160) return
     const parts = raw.split(/[：:]/)
-    if (parts.length >= 2) pushAttr(attrs, parts[0], parts.slice(1).join(':'))
+    if (parts.length >= 2 && /(颜色|色号|尺码|尺寸|规格|款式|型号|容量|净含量|重量|毛重|净重|color|size|weight)/i.test(parts[0])) {
+      pushSpecValue(specs, parts[0], parts.slice(1).join(':'))
+    }
   })
 
-  // 3) 规格选择区：颜色/尺码/款式等上传必须参数。
+  // 规格选择区：颜色/尺码/款式等。
   document.querySelectorAll('[class*="sku"], [class*="spec"], [class*="selector"]').forEach((block) => {
     const blockText = clean(block.textContent)
     if (!/(颜色|尺码|尺寸|规格|款式|型号|重量|容量)/.test(blockText) || blockText.length > 500) return
@@ -661,10 +653,10 @@ function extractAttributes(roots: unknown[]): ProductAttribute[] {
     const values = Array.from(block.querySelectorAll('button, li, [role="button"], [class*="item"], [class*="value"]'))
       .map((el) => clean(el.textContent))
       .filter((v) => v && v.length <= 40 && !/(已选|请选择|库存)/.test(v))
-    if (values.length) pushAttr(attrs, label, uniq(values).join(' / '))
+    if (values.length) pushSpecValue(specs, label, uniq(values).join(' / '))
   })
 
-  return attrs.slice(0, 80)
+  return specs.slice(0, 80)
 }
 
 function extractSkuList(roots: unknown[]): Array<{ sku: string; barcode: string }> {
@@ -685,9 +677,28 @@ function extractSkuList(roots: unknown[]): Array<{ sku: string; barcode: string 
   return skus.slice(0, 100)
 }
 
-function extractSpecList(attrs: ProductAttribute[]): SpecRecord[] {
+function extractVariants(roots: unknown[]): ProductVariant[] {
+  return collectSkuObjects(roots).flatMap((sku) => {
+    const skuId = pickString(sku, ['sku_id', 'skuId', 'skuID', 'sku_id_str', 'skuIdStr'])
+    const values = extractSkuSpecs(sku).map(({ name, value }) => ({ name, value }))
+    if (!/^\d{5,}$/.test(skuId) || values.length === 0) return []
+
+    const rawPrice = pickNumber(sku, ['group_price', 'groupPrice', 'price', 'normal_price', 'normalPrice'])
+    const rawStock = pickNumber(sku, ['quantity', 'stock', 'stock_quantity', 'stockQuantity'])
+    return [{
+      sku: skuId,
+      ...(pickString(sku, ['barcode', 'barCode']) ? { barcode: pickString(sku, ['barcode', 'barCode']) } : {}),
+      values,
+      ...(rawPrice > 0 ? { price: rawPrice } : {}),
+      ...(rawStock >= 0 ? { stock: rawStock } : {}),
+      ...(pickString(sku, ['thumb_url', 'thumbUrl', 'image', 'imageUrl']) ? { imageUrl: pickString(sku, ['thumb_url', 'thumbUrl', 'image', 'imageUrl']) } : {}),
+    }]
+  }).slice(0, 100)
+}
+
+function extractSpecList(values: SpecValue[]): SpecRecord[] {
   const spec: SpecRecord = { weight_g: 0, depth_mm: 0, height_mm: 0, width_mm: 0 }
-  applyPhysicalSpec(spec, attrs)
+  applyPhysicalSpec(spec, values)
   return Object.values(spec).some(Boolean) || spec.color || spec.size ? [spec] : []
 }
 
@@ -698,13 +709,13 @@ function splitSpecValues(value: string): string[] {
     .filter((item) => item && item.length <= 120 && !isActionText(item)))
 }
 
-function buildDomSpecRecords(attrs: ProductAttribute[]): SpecRecord[] {
+function buildDomSpecRecords(values: SpecValue[]): SpecRecord[] {
   const groups = extractDomSkuGroups()
   if (!groups.length) {
-    for (const attr of attrs) {
-      if (!/(颜色|色号|尺码|尺寸|规格|款式|型号|容量|净含量|重量|毛重|净重|color|size|weight)/i.test(attr.name)) continue
-      const values = splitSpecValues(attr.value)
-      if (values.length) groups.push({ name: attr.name, values })
+    for (const item of values) {
+      if (!/(颜色|色号|尺码|尺寸|规格|款式|型号|容量|净含量|重量|毛重|净重|color|size|weight)/i.test(item.name)) continue
+      const options = splitSpecValues(item.value)
+      if (options.length) groups.push({ name: item.name, values: options })
     }
   }
 
@@ -713,12 +724,12 @@ function buildDomSpecRecords(attrs: ProductAttribute[]): SpecRecord[] {
   return mainGroup.values.slice(0, 100).map((value) => {
     const spec: SpecRecord = { weight_g: 0, depth_mm: 0, height_mm: 0, width_mm: 0 }
     spec[inferSpecKey(mainGroup.name)] = value
-    applyPhysicalSpec(spec, [...attrs, { name: mainGroup.name, value }])
+    applyPhysicalSpec(spec, [...values, { name: mainGroup.name, value }])
     return spec
   }).filter((spec) => Object.values(spec).some(Boolean) || spec.color || spec.size || spec.capacity || spec.style)
 }
 
-function extractPddSpecList(roots: unknown[], attrs: ProductAttribute[]): SpecRecord[] {
+function extractPddSpecList(roots: unknown[], values: SpecValue[]): SpecRecord[] {
   const skuSpecs = collectSkuObjects(roots)
     .map((sku) => {
       const spec: SpecRecord = {
@@ -728,9 +739,9 @@ function extractPddSpecList(roots: unknown[], attrs: ProductAttribute[]): SpecRe
         height_mm: 0,
         width_mm: 0,
       }
-      const skuAttrs = extractSkuSpecs(sku)
-      for (const attr of skuAttrs) spec[inferSpecKey(attr.name)] = attr.value
-      applyPhysicalSpec(spec, [...attrs, ...skuAttrs])
+      const skuValues = extractSkuSpecs(sku)
+      for (const item of skuValues) spec[inferSpecKey(item.name)] = item.value
+      applyPhysicalSpec(spec, [...values, ...skuValues])
 
       const price = pickNumber(sku, ['group_price', 'groupPrice', 'price', 'normal_price', 'normalPrice'])
       if (price) spec.price = price
@@ -743,11 +754,11 @@ function extractPddSpecList(roots: unknown[], attrs: ProductAttribute[]): SpecRe
   if (skuSpecs.length) {
     return skuSpecs.slice(0, 100)
   }
-  const domSpecs = buildDomSpecRecords(attrs)
+  const domSpecs = buildDomSpecRecords(values)
   if (domSpecs.length) {
     return domSpecs
   }
-  return extractSpecList(attrs)
+  return extractSpecList(values)
 }
 
 function extractDescription(): string {
@@ -766,11 +777,11 @@ export async function scrapePddProduct(): Promise<ScrapedProduct | null> {
   await ensureSkuPanelOpen()
 
   const roots = collectDataRoots()
-  const attributes = extractAttributes(roots)
+  const specValues = extractSpecValues(roots)
   const seller = extractSeller(roots)
   const skuList = extractSkuList(roots)
-  const specList = extractPddSpecList(roots, attributes)
-  if (!skuList.some((s) => s.sku === sourceId)) skuList.unshift({ sku: sourceId, barcode: '' })
+  const variants = extractVariants(roots)
+  const specList = extractPddSpecList(roots, specValues)
 
   const product: ScrapedProduct = {
     platform: 'pdd',
@@ -782,18 +793,18 @@ export async function scrapePddProduct(): Promise<ScrapedProduct | null> {
     images: extractImages(roots),
     rating: 0,
     reviewCount: 0,
-    brand: attributes.find((a) => /品牌|brand/i.test(a.name))?.value || '',
+    brand: '',
     category: extractCategory(roots),
     sellerName: seller.name,
     sellerUrl: seller.url,
-    attributes,
     description: extractDescription(),
     sourceUrl: location.href,
     scrapedAt: new Date().toISOString(),
     videoUrls: Array.from(document.querySelectorAll('video source, video')).map((v) => (v as HTMLVideoElement).src || '').filter(Boolean),
     skuList,
+    variants,
     specList,
-    tags: ['PDD', ...attributes.filter((a) => /颜色|尺码|尺寸|规格|重量|类目|分类|产品类别/.test(a.name)).map((a) => a.name)].slice(0, 20),
+    tags: ['PDD'],
     ozonCategoryId: 0,
     ozonTypeId: 0,
     discount: text('[class*="coupon"], [class*="discount"]'),

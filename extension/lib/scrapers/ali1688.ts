@@ -1,4 +1,4 @@
-import type { ProductAttribute, ScrapedProduct } from '@/utils/types'
+import type { ProductVariant, ScrapedProduct } from '@/lib/utils/types'
 
 // ─── 通用工具 ───────────────────────────────────────────────
 
@@ -50,8 +50,14 @@ interface InitDataOffer {
     quantity?: number
     skuImgUrl?: string
   }>
+  skuProps?: Array<{
+    prop?: string
+    propName?: string
+    name?: string
+    value?: Array<{ value?: string; name?: string; valueId?: string | number; vid?: string | number }>
+    values?: Array<{ value?: string; name?: string; valueId?: string | number; vid?: string | number }>
+  }>
   imageList?: string[]
-  attributes?: Array<{ name: string; value: string }>
   tradeQuantity?: number
   bookableQuantity?: number
   minOrderQuantity?: number
@@ -283,10 +289,44 @@ function extractSkus(initData: InitDataOffer | null): ScrapedProduct['skuList'] 
   if (initData?.skuList?.length) {
     return initData.skuList.map((s) => ({
       sku: s.skuId || '',
-      barcode: s.propPath || '',
+      barcode: '',
     }))
   }
   return []
+}
+
+function extractVariants(initData: InitDataOffer | null): ProductVariant[] {
+  if (!initData?.skuList?.length) return []
+
+  const valueMap = new Map<string, { name: string; value: string }>()
+  for (const group of initData.skuProps || []) {
+    const name = (group.propName || group.prop || group.name || '').trim()
+    for (const item of group.value || group.values || []) {
+      const id = String(item.valueId ?? item.vid ?? '').trim()
+      const value = (item.name || item.value || '').trim()
+      if (id && name && value) valueMap.set(id, { name, value })
+    }
+  }
+
+  return initData.skuList.flatMap((item) => {
+    const sku = item.skuId?.trim() || ''
+    const values = (item.propPath || '')
+      .split(/[;>]/)
+      .flatMap((part) => {
+        const [rawName, rawValue] = part.split(':').map((value) => value.trim())
+        if (rawName && rawValue && !/^\d+$/.test(rawName)) return [{ name: rawName, value: rawValue }]
+        const mapped = valueMap.get(rawValue || rawName)
+        return mapped ? [mapped] : []
+      })
+    if (!sku || values.length === 0) return []
+    return [{
+      sku,
+      values,
+      ...(parsePrice(item.price || '') > 0 ? { price: parsePrice(item.price || '') } : {}),
+      ...(typeof item.quantity === 'number' ? { stock: item.quantity } : {}),
+      ...(item.skuImgUrl ? { imageUrl: item.skuImgUrl } : {}),
+    }]
+  })
 }
 
 function extractMinOrderQty(initData: InitDataOffer | null): number {
@@ -312,7 +352,7 @@ function extractMinOrderQty(initData: InitDataOffer | null): number {
     const match = text.replace(/\s/g, '').match(/(\d+)/)
     if (match) return parseInt(match[1])
   }
-  return 1
+  return 0
 }
 
 function extractTradeQuantity(initData: InitDataOffer | null): number {
@@ -340,107 +380,12 @@ function extractTradeQuantity(initData: InitDataOffer | null): number {
   return 0
 }
 
-function extractAttributes(initData: InitDataOffer | null): ProductAttribute[] {
-  // Priority: INIT_DATA > DOM
-  if (initData?.attributes?.length) {
-    return initData.attributes
-      .filter((a) => a.name && a.value)
-      .map((a) => ({ name: a.name, value: a.value }))
-  }
-
-  const attrs: ProductAttribute[] = []
-
-  // ── Priority 1: Ant-design table rows (most reliable on modern 1688) ──
-  const antTableRows = document.querySelectorAll('.ant-descriptions-view tr, .ant-table-content tr')
-  antTableRows.forEach((row) => {
-    const cells = row.querySelectorAll('td, th')
-    if (cells.length >= 2) {
-      const name = cells[0].textContent?.trim().replace(/[::]$/, '') || ''
-      const value = cells[1].textContent?.trim() || ''
-      if (name && value && name !== value) attrs.push({ name, value })
-    }
-  })
-  if (attrs.length > 0) return attrs
-
-  // ── Priority 2: LI items inside attribute containers ──
-  const attrLis = document.querySelectorAll('[class*="obj-attr"] li, [class*="attr-list"] li, .detail-attributes-list li, [class*="detail-info"] li')
-  attrLis.forEach((li) => {
-    const children = Array.from(li.children)
-    if (children.length >= 2) {
-      const name = children[0].textContent?.trim().replace(/[::]$/, '') || ''
-      const value = children[1].textContent?.trim() || ''
-      if (name && value && name !== value) attrs.push({ name, value })
-    }
-  })
-  if (attrs.length > 0) return attrs
-
-  // ── Priority 3: DL format ──
-  document.querySelectorAll('.obj-attr dl, [class*="attribute"] dl').forEach((row) => {
-    const dt = row.querySelector('dt')
-    const dd = row.querySelector('dd')
-    if (dt && dd) {
-      const name = dt.textContent?.trim().replace(/[::]$/, '') || ''
-      const value = dd.textContent?.trim() || ''
-      if (name && value) attrs.push({ name, value })
-    }
-  })
-  if (attrs.length > 0) return attrs
-
-  // ── Priority 4: Any 2-column table with short name / longer value ──
-  document.querySelectorAll('table').forEach((table) => {
-    table.querySelectorAll('tr').forEach((row) => {
-      const cells = row.querySelectorAll('td')
-      if (cells.length === 2) {
-        const name = cells[0].textContent?.trim().replace(/[::]$/, '') || ''
-        const value = cells[1].textContent?.trim() || ''
-        if (name && value && name !== value && name.length <= 20 && value.length <= 100) {
-          attrs.push({ name, value })
-        }
-      }
-    })
-  })
-
-  return attrs
-}
-
-function extractSpecList(attrs: ProductAttribute[]): Array<{ weight_g: number; depth_mm: number; height_mm: number; width_mm: number; [key: string]: any }> {
+function extractSpecList(): Array<{ weight_g: number; depth_mm: number; height_mm: number; width_mm: number; [key: string]: any }> {
   const spec: { weight_g: number; depth_mm: number; height_mm: number; width_mm: number; [key: string]: any } = {
     weight_g: 0,
     depth_mm: 0,
     height_mm: 0,
     width_mm: 0,
-  }
-
-  for (const attr of attrs) {
-    const name = attr.name.toLowerCase()
-    const val = attr.value
-
-    // 重量提取: 支持 kg/g/克/千克
-    if (name.includes('重量') || name.includes('毛重') || name.includes('净重')) {
-      const kgMatch = val.match(/([\d.]+)\s*(?:kg|千克)/i)
-      const gMatch = val.match(/([\d.]+)\s*(?:g|克)/i)
-      if (kgMatch) {
-        spec.weight_g = Math.round(parseFloat(kgMatch[1]) * 1000)
-      } else if (gMatch) {
-        spec.weight_g = Math.round(parseFloat(gMatch[1]))
-      } else {
-        const num = parseFloat(val.replace(/[^\d.]/g, ''))
-        if (!isNaN(num) && num > 0) {
-          // Default to grams if no unit
-          spec.weight_g = num > 100 ? Math.round(num) : Math.round(num * 1000)
-        }
-      }
-    }
-
-    // 尺寸提取
-    if (name.includes('尺寸') || name.includes('长宽高') || name.includes('规格')) {
-      const dimMatch = val.match(/([\d.]+)\s*[×x*]\s*([\d.]+)\s*[×x*]\s*([\d.]+)/i)
-      if (dimMatch) {
-        spec.depth_mm = Math.round(parseFloat(dimMatch[1]))
-        spec.width_mm = Math.round(parseFloat(dimMatch[2]))
-        spec.height_mm = Math.round(parseFloat(dimMatch[3]))
-      }
-    }
   }
 
   return [spec]
@@ -452,10 +397,7 @@ function extractBrand(): string {
   const domBrand = brandEl?.textContent?.trim() || ''
   if (domBrand) return domBrand
 
-  // Fallback: extract from attributes - look for "品牌" key
-  const attrs = extractAttributes(null)
-  const brandAttr = attrs.find(a => a.name.includes('品牌'))
-  return brandAttr?.value || ''
+  return ''
 }
 
 function extractCategory(): string {
@@ -584,7 +526,6 @@ export function scrape1688Product(): ScrapedProduct | null {
   if (!offerId) return null
 
   const initData = getInitData()
-  const attrs = extractAttributes(initData)
 
   return {
     platform: '1688',
@@ -600,13 +541,13 @@ export function scrape1688Product(): ScrapedProduct | null {
     category: extractCategory(),
     sellerName: extractSellerName(initData),
     sellerUrl: extractSellerUrl(),
-    attributes: attrs,
     description: extractDescription(),
     sourceUrl: location.href,
     scrapedAt: new Date().toISOString(),
     videoUrls: extractVideoUrls(),
     skuList: extractSkus(initData),
-    specList: extractSpecList(attrs),
+    variants: extractVariants(initData),
+    specList: extractSpecList(),
     ozonCategoryId: 0,
     ozonTypeId: 0,
     // 1688-specific

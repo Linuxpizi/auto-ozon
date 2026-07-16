@@ -1,8 +1,8 @@
 {
-  "name": "auto-ozon",
-  "displayName": "auto-ozon v0.1.0",
+  "name": "auto-ozon-extension",
+  "displayName": "Auto Ozon Collector",
   "version": "0.1.0",
-  "description": "auto-ozon — Ozon/WB/1688/PDD 浏览器数据采集插件",
+  "description": "Ozon、Wildberries、1688 与拼多多商品数据采集扩展",
   "type": "module",
   "scripts": {
     "dev": "wxt",
@@ -10,10 +10,11 @@
     "build:chrome": "wxt build -b chrome",
     "typecheck": "wxt prepare && vue-tsc --noEmit",
     "prepare": "wxt prepare",
-    "zip": "wxt zip && node -e \"const fs=require('node:fs');const p=require('./package.json');const from='.output/'+p.name+'-'+p.version+'-chrome.zip';const to='.output/'+p.name+'-v'+p.version+'-chrome.zip';if(fs.existsSync(from))fs.renameSync(from,to)\"",
-    "zip:chrome": "npm run zip"
+    "zip": "wxt zip",
+    "zip:chrome": "wxt zip -b chrome"
   },
   "dependencies": {
+    "@vicons/ionicons5": "^0.13.0",
     "naive-ui": "^2.42.0",
     "vue": "^3.5.16"
   },

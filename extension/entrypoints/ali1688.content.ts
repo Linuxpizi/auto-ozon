@@ -1,12 +1,12 @@
-import type { ScrapedProduct } from '@/utils/types'
-import { injectFloatingButton } from '@/utils/floating-button'
+import type { ScrapedProduct } from '@/lib/utils/types'
+import { injectFloatingButton } from '@/lib/utils/floating-button'
 import {
   is1688DetailPage,
   is1688ListPage,
   scrape1688Product,
   scan1688ListCards,
   type ListCard1688,
-} from '@/scrapers/platforms/ali1688'
+} from '@/lib/scrapers/ali1688'
 
 export default defineContentScript({
   matches: [
@@ -242,12 +242,12 @@ async function runListScraping(
           salesCount: 0,
           shippingInfo: '',
           location: '',
-          attributes: [],
           description: '',
           sourceUrl: item.sourceUrl,
           scrapedAt: new Date().toISOString(),
           videoUrls: [],
           skuList: [],
+          variants: [],
           specList: [],
           ozonCategoryId: 0,
           ozonTypeId: 0,
@@ -298,12 +298,12 @@ async function runListScraping(
       category: '',
       sellerName: '',
       sellerUrl: '',
-      attributes: [],
       description: '',
       sourceUrl: item.sourceUrl,
       scrapedAt: new Date().toISOString(),
       videoUrls: [],
       skuList: [],
+      variants: [],
       specList: [],
       ozonCategoryId: 0,
       ozonTypeId: 0,

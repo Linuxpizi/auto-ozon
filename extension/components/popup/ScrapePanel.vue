@@ -5,16 +5,20 @@ import {
   ArrowForwardOutline,
   CheckmarkCircleOutline,
   CubeOutline,
+  KeyOutline,
   OpenOutline,
   ScanOutline,
 } from '@vicons/ionicons5'
 import type { Platform, ScrapedProduct } from '@/lib/utils/types'
+import { bindOzonShopCookie } from '@/lib/utils/ozon-cookie'
 
 const message = useMessage()
 const platform = ref<Platform>('ozon')
 const currentUrl = ref('')
 const supported = ref(false)
 const scraping = ref(false)
+const bindingCookie = ref(false)
+const boundClientId = ref('')
 const result = ref<ScrapedProduct | null>(null)
 const error = ref('')
 
@@ -74,6 +78,20 @@ async function openPlatform() {
   const urls: Record<Platform, string> = { ozon: 'https://www.ozon.ru/', wb: 'https://www.wildberries.ru/', '1688': 'https://www.1688.com/', pdd: 'https://yangkeduo.com/' }
   await browser.tabs.create({ url: urls[platform.value] })
 }
+async function bindCookie() {
+  bindingCookie.value = true
+  try {
+    const response = await bindOzonShopCookie()
+    if (!response.success) {
+      message.error(response.error)
+      return
+    }
+    boundClientId.value = response.clientId
+    message.success('Ozon 店铺 Cookie 已保存到本地服务')
+  } finally {
+    bindingCookie.value = false
+  }
+}
 onMounted(inspectTab)
 </script>
 
@@ -104,6 +122,21 @@ onMounted(inspectTab)
 
       <NAlert v-if="!supported" type="info" :show-icon="true" class="panel-alert">请打开 Ozon、Wildberries、1688 或拼多多商品页。</NAlert>
       <NAlert v-if="error" type="error" closable class="panel-alert" @close="error = ''">{{ error }}</NAlert>
+    </NCard>
+
+    <NCard size="small">
+      <template #header>
+        <div class="card-title"><NIcon :component="KeyOutline" /><span>Ozon 店铺授权</span></div>
+      </template>
+      <div class="cookie-bind">
+        <div>
+          <strong>{{ boundClientId ? '店铺已绑定' : '保存当前登录 Cookie' }}</strong>
+          <span>{{ boundClientId ? `Client ID: ${boundClientId}` : '仅写入本机服务，不上传远端' }}</span>
+        </div>
+        <NButton secondary type="primary" :loading="bindingCookie" @click="bindCookie">
+          {{ bindingCookie ? '保存中' : '绑定 Cookie' }}
+        </NButton>
+      </div>
     </NCard>
 
     <NCard size="small">
@@ -141,6 +174,10 @@ onMounted(inspectTab)
 .status-copy span { color: #8b8e9f; font-size: 10px; }
 .scrape-button { height: 42px; margin-top: 12px; box-shadow: 0 6px 16px rgba(91, 92, 240, .18); }
 .panel-alert { margin-top: 10px; }
+.cookie-bind { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.cookie-bind > div { min-width: 0; display: flex; flex-direction: column; gap: 3px; }
+.cookie-bind strong { color: #303247; font-size: 12px; }
+.cookie-bind span { overflow: hidden; color: #8b8e9f; font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
 .platform-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; }
 .result { display: grid; grid-template-columns: 58px minmax(0,1fr); gap: 11px; align-items: center; }
 .result img, .result-placeholder { width: 58px; height: 58px; border-radius: 11px; background: #eef0f5; }

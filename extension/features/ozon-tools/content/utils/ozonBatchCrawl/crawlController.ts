@@ -18,7 +18,7 @@ import {
 } from './crawlRunner'
 import { exportCrawlToExcel } from './crawlExporter'
 import { copyListingSkuPriceFormat } from './copyFormat'
-import { bindOzonShopCookie } from './crawlCookieBind'
+import { bindOzonShopCookie } from '@/lib/utils/ozon-cookie'
 import { resetCrawlScannerState } from './crawlScanner'
 import { getLocalCrawlStartMode } from './autoCrawlFields'
 import { isOzonListLikePage, resolveOzonPageType } from '../ozonList/ozonPageContext'

@@ -484,19 +484,6 @@ export class ApiService {
         return { code: 200, msg: 'success' };
     }
 
-    /** 保存店铺 Cookie（clientId + 全量 ozon.ru cookie 字符串 + sso.ozon.ru cookie） */
-    async saveShopCookie(data: { clientId: string; gfcookie: string; ssoCookie?: string }): Promise<ApiResponse> {
-        const url = `${API_CONFIG.LOCAL_API_BASE_URL}/browser-sync/ozon-cookies`;
-        return this.request(url, {
-            method: 'PUT',
-            data: {
-                client_id: data.clientId,
-                ozon_cookie: data.gfcookie,
-                sso_cookie: data.ssoCookie || '',
-                source: 'browser-extension',
-            },
-        });
-    }
 }
 
 // 导出单例

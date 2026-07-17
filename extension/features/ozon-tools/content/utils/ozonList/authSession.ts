@@ -22,8 +22,7 @@ import {
 
 const CARD_SELECTOR = '.mjgd_ozon_sku_card, .e1fbcs'
 
-/** 与 background/cookieSync.TRIGGER_SILENT_COOKIE_SYNC 保持一致；勿直接 import cookieSync，避免 SW 逻辑打进 content 包 */
-const TRIGGER_SILENT_COOKIE_SYNC = 'TRIGGER_SILENT_COOKIE_SYNC'
+import { TRIGGER_SILENT_COOKIE_SYNC } from '@/lib/utils/ozon-cookie'
 
 /** 仅在 Ozon 零售站请求 background 静默保存 Ozon Cookie，成功失败均无 UI */
 export function requestSilentCookieBind(): void {

@@ -8,6 +8,55 @@ async function getBaseUrl(): Promise<string> {
   return settings.apiBaseUrl.replace(/\/+$/, '')
 }
 
+export interface OzonCookieSnapshot {
+  client_id: string
+  source: string
+  status: string
+  has_ozon_cookie: boolean
+  has_sso_cookie: boolean
+  updated_at: string
+}
+
+const LOOPBACK_HOSTS = new Set(['localhost', '127.0.0.1', '::1'])
+
+export async function saveOzonCookieSnapshot(data: {
+  clientId: string
+  ozonCookie: string
+  ssoCookie?: string
+}): Promise<OzonCookieSnapshot> {
+  const baseUrl = await getBaseUrl()
+  let hostname = ''
+  try {
+    hostname = new URL(baseUrl).hostname.toLowerCase()
+  } catch {
+    throw new Error('本地服务地址无效')
+  }
+  if (!LOOPBACK_HOSTS.has(hostname)) {
+    throw new Error('为保护 Cookie，仅允许保存到本机服务')
+  }
+
+  const response = await fetch(`${baseUrl}/api/browser-sync/ozon-cookies`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      client_id: data.clientId,
+      ozon_cookie: data.ozonCookie,
+      sso_cookie: data.ssoCookie || '',
+      source: 'browser-extension',
+    }),
+  })
+  if (!response.ok) {
+    let detail = `${response.status} ${response.statusText}`.trim()
+    try {
+      const body = await response.json()
+      if (typeof body?.detail === 'string') detail = body.detail
+      else if (typeof body?.msg === 'string') detail = body.msg
+    } catch { /* use HTTP status */ }
+    throw new Error(`本地服务保存失败: ${detail}`)
+  }
+  return response.json()
+}
+
 /** 批量同步采集商品到后端 */
 export async function syncProducts(products: ScrapedProduct[]): Promise<{ created: number; skipped: number }> {
   const completeProducts = products.map(assertCompleteProduct)

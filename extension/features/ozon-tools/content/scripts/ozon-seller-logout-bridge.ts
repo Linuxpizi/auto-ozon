@@ -4,8 +4,7 @@
  */
 
 const LOGOUT_EVENT = 'bcs_seller_logout'
-/** 与 background/cookieHandler.INTERCEPT_SELLER_LOGOUT 保持一致 */
-const INTERCEPT_SELLER_LOGOUT = 'INTERCEPT_SELLER_LOGOUT'
+import { INTERCEPT_SELLER_LOGOUT } from '@/lib/utils/ozon-cookie'
 
 /** 同页只转发一次，配合 MAIN 侧 notified，双重防抖 */
 let forwarded = false

@@ -2,7 +2,7 @@
 import { onMounted, ref } from 'vue'
 import { apiService, API_CONFIG } from '../utils/api'
 import { resolveAssetUrl } from '../utils/runtime'
-import { GET_COOKIES_ACTION } from '../background/cookieHandler'
+import { bindOzonShopCookie } from '@/lib/utils/ozon-cookie'
 import fallbackLogo from '../assets/img/newlogo.png'
 
 const logoUrl = resolveAssetUrl('src/assets/img/newlogo.png', fallbackLogo)
@@ -193,46 +193,13 @@ async function onGetClientId() {
 
 // ==================== 上传店铺 Cookie 到本地服务 ====================
 async function onSaveCookie() {
-  const tab = await getActiveTab()
-  if (!tab?.url || tab.url.indexOf('api-keys') === -1) {
-    alert('非法页面，请前往指定页面保存Cookie！')
+  const result = await bindOzonShopCookie()
+  if (result.success) {
+    clientId.value = result.clientId
+    alert('保存店铺成功！')
     return
   }
-
-  if (!clientId.value) {
-    alert('请先获取或填写clientId！')
-    return
-  }
-
-  let cookieStr = ''
-  try {
-    const resp = await sendBg<{ cookies?: string }>({ action: GET_COOKIES_ACTION })
-    cookieStr = resp?.cookies || ''
-  } catch {
-    cookieStr = ''
-  }
-
-  if (!cookieStr) {
-    const shouldRedirect = confirm('智能检测，刷新当前页面后，再重新保存Cookie，点击确定自动刷新！')
-    if (shouldRedirect && tab.id != null) {
-      chromeApi.tabs.reload(tab.id)
-    }
-    return
-  }
-
-  try {
-    const res: any = await apiService.saveShopCookie({
-      clientId: clientId.value,
-      gfcookie: cookieStr,
-    })
-    if (res > 0 || res?.code === 200) {
-      alert('保存店铺成功！')
-    } else {
-      alert(res?.msg || '保存失败')
-    }
-  } catch (e: any) {
-    alert(e?.message || '本地服务不可用，请检查后端是否已启动')
-  }
+  alert(result.error)
 }
 
 onMounted(() => {

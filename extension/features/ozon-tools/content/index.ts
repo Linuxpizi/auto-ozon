@@ -2,10 +2,10 @@ import { createApp } from 'vue'
 import App from './App.vue'
 import store from './store'
 // 原 Ozon 扩展构建产物中的完整组件样式与 Element Plus 主题。
-// 恢复版的业务样式已经合并到 ozonReplica.css，避免再次引用源码包中不存在的
+// 迁移后的业务样式已经合并到 ozonTools.css，避免再次引用源码包中不存在的
 // SCSS 入口；静态图片和字体按需求不迁移，对应资源请求失败不影响核心交互。
 import './styles/ozonVendor.css'
-import './styles/ozonReplica.css'
+import './styles/ozonTools.css'
 import { initFollowSellerPopupOnce } from './utils/ozonList/followSellerPopup'
 import { initCardTooltipsOnce } from './utils/ozonList/cardTooltips'
 import { initCorpTranslateOnce } from './utils/ozonList/sellerInfo'
@@ -72,6 +72,7 @@ const app = createApp(App)
 app.use(store)
 
 app.mount(container)
+
 
 
 

@@ -103,7 +103,8 @@ export function useOzonMenuActions() {
       case 'bind_cookie':
         ozonMenuLoadingAction.value = 'bind_cookie'
         try {
-          await bindOzonShopCookie()
+          const result = await bindOzonShopCookie()
+          showToast(result.success ? '保存店铺成功！' : result.error, result.success ? 3000 : 4000)
         } finally {
           ozonMenuLoadingAction.value = null
         }

@@ -2165,6 +2165,16 @@ async function enrichProductsFromApi(
 export default defineContentScript({
   matches: ['*://*.ozon.ru/*'],
   async main() {
+    // 启动完整 Ozon 工具（卡片、利润计算、真实价、MP 图表、字段偏好等）。
+    // 不在模块顶层静态导入，避免与采集 content script 的启动时序互相阻塞。
+    if (!document.getElementById('mjgd-extension-app')) {
+      try {
+        await import('@/features/ozon-tools/content')
+      } catch (error) {
+        console.error('[Ozon Local] 本地工具界面初始化失败:', error)
+      }
+    }
+
     // SPA 导航时动态更新 pageType (Ozon 是 SPA,URL 变化不触发 content script 重载)
     let pageType = detectPageType()
 

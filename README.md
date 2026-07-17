@@ -166,7 +166,40 @@ npm run dev
 
 浏览器打开 `http://localhost:5173`，在「店铺管理」中添加 Ozon 店铺的 `Client-Id` 和 `Api-Key`，系统即开始工作。
 
-### 4. powerpaint
+### 4. Ozon 本地浏览器工具（免第三方 ERP 认证）
+
+仓库中的扩展以本机 FastAPI 为服务端，不需要第三方 ERP 登录、Token 或额度密钥。它保留 Ozon 商品采集、贴卡、图片工具、利润计算、上架工作台、Seller/SSO Cookie 同步以及 background 跨域请求代理。
+
+```bash
+cd extension
+npm install
+npm run build:chrome
+```
+
+构建完成后，在 `chrome://extensions` 开启开发者模式，选择“加载已解压的扩展程序”，目录指向 `extension/.output/chrome-mv3`。
+
+开发模式使用 `npm run dev`。默认地址如下，也可在构建扩展前通过环境变量覆盖：
+
+| 配置 | 默认值 | 作用 |
+| --- | --- | --- |
+| `VITE_LOCAL_API_BASE_URL` | `http://localhost:9000/api` | 本地 FastAPI API |
+| `VITE_LOCAL_FRONTEND_URL` | `http://localhost:5173` | 本地配置、选品页面 |
+| `VITE_LOCAL_VISION_BASE_URL` | `http://localhost:9000/api/v1/image` | 本地图片处理 API |
+| `VITE_LOCAL_SSE_BASE_URL` | `http://localhost:9000/api/sse` | 本地 SSE API |
+
+扩展 popup 中填写 Ozon `Client-Id` 后可手动上传当前浏览器的 Seller/SSO Cookie，也会通过定时任务静默同步。Cookie 明文只保存在本机数据库；检查接口仅返回是否存在，不返回秘密值。
+
+如本地 API 需要额外鉴权，可在扩展的 `chrome.storage.local` 中写入 `local_api_auth`。代理只会向 `localhost`、`127.0.0.1` 或 `::1` 注入该凭证；即使调用方误用 `local_auth` preset，远程 URL 也不会携带本地凭证。
+
+Ozon 类目树直接使用所选店铺的 `Client-Id` / `Api-Key` 调用官方 Seller API。佣金费率会随 Ozon 政策变化，项目不下载第三方 ERP 数据；可将当前有效费率保存为数组或 `{"result": [...]}` JSON，并配置：
+
+```bash
+export OZON_COMMISSION_TREE_PATH=/absolute/path/to/commission-tree.json
+```
+
+未配置佣金树时返回空树，商品卡利润模块继续使用 Ozon 商品数据中的三档真实佣金作为回退。
+
+### 5. powerpaint
 
 # 1. 安装依赖
 cd backend && pip install torch diffusers huggingface_hub transformers accelerate Pillow

@@ -6,10 +6,13 @@ export default defineConfig({
   manifest: {
     name: packageJson.displayName,
     description: packageJson.description,
-    permissions: ['storage', 'activeTab', 'tabs', 'scripting'],
+    permissions: ['storage', 'activeTab', 'tabs', 'scripting', 'cookies', 'alarms'],
     host_permissions: [
       'https://www.ozon.ru/*',
       'https://ozon.ru/*',
+      'https://seller.ozon.ru/*',
+      'https://sso.ozon.ru/*',
+      'https://*.ozon.ru/*',
       'https://www.wildberries.ru/*',
       'https://wildberries.ru/*',
       'https://detail.1688.com/*',
@@ -20,7 +23,16 @@ export default defineConfig({
       'https://pinduoduo.com/*',
       'https://*.pinduoduo.com/*',
       'http://localhost:9000/*',
+      'http://127.0.0.1:9000/*',
     ],
+    externally_connectable: {
+      matches: [
+        'http://localhost/*',
+        'http://localhost:5173/*',
+        'http://127.0.0.1/*',
+        'http://127.0.0.1:5173/*',
+      ],
+    },
     action: {
       default_icon: {
         '16': 'icon-16.png',

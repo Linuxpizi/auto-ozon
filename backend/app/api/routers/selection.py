@@ -7,6 +7,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, File
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
+from app.core.config import OZON_COMMISSION_TREE_PATH
 from app.core.db import get_db
 
 logger = logging.getLogger(__name__)
@@ -731,6 +732,41 @@ def get_ozon_categories(
     except Exception as e:
         logger.error("Failed to get category tree: %s", str(e))
         raise HTTPException(status_code=502, detail=f"获取分类失败: {str(e)}")
+
+
+@router.get("/ozon-commission-tree")
+def get_ozon_commission_tree():
+    """读取用户本机维护的 Ozon 类目佣金树。
+
+    费率会随 Ozon 政策变化，因此项目不内置或远程下载第三方 ERP 的费率。
+    可通过 ``OZON_COMMISSION_TREE_PATH`` 指定 JSON 文件。文件既可直接是节点
+    数组，也可使用 ``{"result": [...]}`` 包装格式。未配置时返回空树，让扩展
+    继续使用商品卡片接口返回的三档真实佣金数据。
+    """
+    path = OZON_COMMISSION_TREE_PATH
+    if not path.is_file():
+        return {
+            "result": [],
+            "configured": False,
+            "source": "local",
+        }
+
+    try:
+        with path.open("r", encoding="utf-8") as file:
+            payload = json.load(file)
+    except (OSError, UnicodeError, json.JSONDecodeError) as exc:
+        logger.error("Failed to read local Ozon commission tree %s: %s", path, exc)
+        raise HTTPException(status_code=500, detail="本地 Ozon 佣金树文件无法读取或 JSON 格式无效")
+
+    nodes = payload if isinstance(payload, list) else payload.get("result") if isinstance(payload, dict) else None
+    if not isinstance(nodes, list):
+        raise HTTPException(status_code=500, detail="本地 Ozon 佣金树必须是数组或包含 result 数组")
+
+    return {
+        "result": nodes,
+        "configured": True,
+        "source": "local",
+    }
 
 
 @router.post("/price-calc")

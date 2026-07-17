@@ -1,6 +1,7 @@
 import type { ScrapedProduct } from '@/lib/utils/types'
 import { getSettings } from '@/lib/utils/storage'
 import { syncProducts, fetchBackendProducts, deleteBackendProduct, checkBackendHealth } from '@/lib/utils/api'
+import { setupReplicaBackground } from '../ozon-replica/src/background'
 
 /** 更新 badge 显示后端未匹配数量 */
 async function updateBadge() {
@@ -18,6 +19,9 @@ async function updateBadge() {
 }
 
 export default defineBackground(() => {
+
+  // Full restored feature set, without the former remote login/session flow.
+  setupReplicaBackground()
 
   // 初始化 badge
   updateBadge()

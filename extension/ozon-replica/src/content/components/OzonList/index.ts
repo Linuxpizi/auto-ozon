@@ -1,0 +1,1 @@
+export { default as OzonListHost } from './OzonListHost.vue'

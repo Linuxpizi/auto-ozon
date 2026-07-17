@@ -56,6 +56,10 @@ def override_get_db(test_db: Session) -> Generator[None, None, None]:
 
 @pytest.fixture(scope="function")
 def test_app(override_get_db: None) -> Generator[TestClient, None, None]:
-    """FastAPI TestClient with overridden DB dependency."""
-    with TestClient(app) as client:
-        yield client
+    """FastAPI TestClient with overridden DB dependency.
+
+    Route unit tests do not need APScheduler. Avoid entering the production
+    lifespan here: the module-level AsyncIOScheduler is bound to the first
+    TestClient event loop and cannot safely be restarted on later test loops.
+    """
+    yield TestClient(app)

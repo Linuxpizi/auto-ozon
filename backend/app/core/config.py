@@ -8,6 +8,16 @@ BACKEND_DIR = BASE_DIR.parent  # backend/
 load_dotenv(BACKEND_DIR / ".env")
 DATABASE_URL = f"sqlite:///{BASE_DIR / 'ozon.db'}"
 
+# Optional local Ozon commission data.  The repository intentionally does not
+# bundle third-party rate tables; operators can export an official/current
+# JSON tree to this path without making the extension depend on a remote ERP.
+OZON_COMMISSION_TREE_PATH = Path(
+    os.getenv(
+        "OZON_COMMISSION_TREE_PATH",
+        str(BACKEND_DIR / "static" / "ozon" / "commission-tree.json"),
+    )
+).expanduser()
+
 # ── DeepSeek / LLM Configuration ────────────────────────────────────────
 # 使用的腾讯云
 DEEPSEEK_API_KEY = os.getenv("DEEPSEEK_API_KEY", "")

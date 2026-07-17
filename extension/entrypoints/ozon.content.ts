@@ -2161,7 +2161,17 @@ async function enrichProductsFromApi(
 
 export default defineContentScript({
   matches: ['*://*.ozon.ru/*'],
-  main() {
+  async main() {
+
+    // 零售采集与本地 Ozon 工具共用同一 content entry，避免注册两个同域脚本。
+    // Replica 自身用固定容器 ID 防重；初始化失败不应影响基础采集能力。
+    if (!document.getElementById('mjgd-extension-app')) {
+      try {
+        await import('../ozon-replica/src/content')
+      } catch (error) {
+        console.error('[Ozon Local] 本地工具界面初始化失败:', error)
+      }
+    }
 
     // SPA 导航时动态更新 pageType (Ozon 是 SPA,URL 变化不触发 content script 重载)
     let pageType = detectPageType()

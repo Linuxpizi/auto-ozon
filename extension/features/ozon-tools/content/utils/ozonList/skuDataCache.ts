@@ -1,7 +1,6 @@
 // 全局 SKU 数据缓存（对齐旧版 C.goodsSaleData）
-// 每张卡片走 loadSkuData 时把 /system/sku/skuss/new 的 res.data 落到这里，
-// 之后急速上架弹窗、选品规则导出等需要拿 createDate / commission / 月销 等字段时
-// 优先查缓存，避免重复请求。
+// 每张卡片走 loadSkuData 时把 Ozon Page1/Page2 的可验证指标落到这里，
+// 后续消费者优先查缓存，避免重复请求。公开响应没有的经营指标保持 undefined。
 //
 // 与旧版差异：
 //   - 旧版用数组 push，靠 SKU 比对取数；新版直接用 Map<sku, data> O(1) 查

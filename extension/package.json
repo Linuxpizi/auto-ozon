@@ -9,6 +9,7 @@
     "build": "wxt build",
     "build:chrome": "wxt build -b chrome",
     "typecheck": "wxt prepare && vue-tsc --noEmit",
+    "test:metrics": "node --test tests/ozonMetricCollector.test.cjs",
     "prepare": "wxt prepare",
     "zip": "wxt zip",
     "zip:chrome": "wxt zip -b chrome"

@@ -1,6 +1,10 @@
 import { apiService } from '../../../utils/api'
 import { API_CONFIG } from '../../../utils/api-config'
 import { shopsClawlerLimiter, newClawlerLimiter } from './requestRateLimiter'
+import {
+  pickWidgetArray,
+  type OzonWidgetStateValue,
+} from '../ozonList/ozonWidgetState'
 
 /** 导出 enrichment 单请求超时（对齐旧版 8s race） */
 export const ENRICH_EXPORT_TIMEOUT_MS = 8000
@@ -119,25 +123,9 @@ export async function fetchCrawlerSkuData(
 
 /** 优先 webSellerList-*，否则第一个含非空 sellers 的 widget（对齐旧版 pickSellersFromOtherOffersWidgetStates） */
 export function pickSellersFromOtherOffersWidgetStates(
-  widgetStates: Record<string, string> | undefined,
+  widgetStates: Record<string, OzonWidgetStateValue> | undefined,
 ): OzonSellerOffer[] | null {
-  if (!widgetStates) return null
-  const keys = Object.keys(widgetStates)
-  const preferKeys = keys.filter((k) => k.startsWith('webSellerList-'))
-  const ordered = [...preferKeys, ...keys.filter((k) => !preferKeys.includes(k))]
-
-  for (const key of ordered) {
-    try {
-      const raw = widgetStates[key]
-      if (raw == null) continue
-      const parsed = typeof raw === 'string' ? JSON.parse(raw) : raw
-      const sellers = parsed?.sellers
-      if (Array.isArray(sellers) && sellers.length > 0) return sellers
-    } catch {
-      /* try next key */
-    }
-  }
-  return null
+  return pickWidgetArray(widgetStates, 'sellers', 'webSellerList-') as OzonSellerOffer[] | null
 }
 
 const followSellersInflight = new Map<string, Promise<OzonSellerOffer[] | null>>()
@@ -151,7 +139,7 @@ export async function fetchOtherOffersSellers(sku: string): Promise<OzonSellerOf
   if (inflight) return inflight
 
   const origin = /ozon\.kz/i.test(window.location.hostname)
-    ? 'https://www.ozon.kz'
+    ? 'https://ozon.kz'
     : 'https://www.ozon.ru'
   const apiUrl =
     `${origin}/api/entrypoint-api.bx/page/json/v2?url=%2Fmodal%2FotherOffersFromSellers%3Fproduct_id%3D`
@@ -162,7 +150,7 @@ export async function fetchOtherOffersSellers(sku: string): Promise<OzonSellerOf
       try {
         const res = await fetch(apiUrl, { credentials: 'include' })
         if (!res.ok) return null
-        const os = await res.json() as { widgetStates?: Record<string, string> }
+        const os = await res.json() as { widgetStates?: Record<string, OzonWidgetStateValue> }
         return pickSellersFromOtherOffersWidgetStates(os.widgetStates)
       } catch {
         return null

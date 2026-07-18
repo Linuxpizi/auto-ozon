@@ -73,8 +73,9 @@ export function formatFollowPriceWithCnyApprox(priceVal: unknown, unit = '₽'):
 }
 
 export function formatMonthlySalesRubLine(gmvSum: unknown, monthsales: unknown): string {
+  if (gmvSum === undefined || gmvSum === null || gmvSum === '') return '--'
   const rubNum = parseGmvRubNumber(gmvSum)
-  const rubRaw = gmvSum ?? '0'
+  const rubRaw = gmvSum
   const rubPart = rubNum >= 10000 ? `₽${(rubNum / 10000).toFixed(2)}万` : `₽${rubRaw}`
   if (rubNum === 0) return rubPart
   if (
@@ -104,9 +105,9 @@ export function formatPercentOneDecimal(v: unknown): string {
 }
 
 export function formatPercentTwoDecimalsFromRaw(v: unknown): string {
-  if (v === undefined || v === null || v === '') return '0.00%'
+  if (v === undefined || v === null || v === '') return '--'
   const n = parseFloat(String(v).replace(/%/g, '').trim())
-  if (!Number.isFinite(n)) return '0.00%'
+  if (!Number.isFinite(n)) return '--'
   const truncated = Math.floor(n * 100) / 100
   return `${truncated.toFixed(2)}%`
 }
@@ -119,14 +120,14 @@ export function formatFollowPriceRub(v: unknown): string {
 }
 
 export function formatCardCountWithCommas(v: unknown): string {
-  if (v === undefined || v === null || v === '') return '0'
+  if (v === undefined || v === null || v === '') return '--'
   const n = Number(
     String(v)
       .replace(/,/g, '')
       .replace(/\s/g, '')
       .trim(),
   )
-  if (!Number.isFinite(n)) return '0'
+  if (!Number.isFinite(n)) return '--'
   return Math.trunc(n).toLocaleString('en-US')
 }
 

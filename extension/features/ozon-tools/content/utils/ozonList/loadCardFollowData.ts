@@ -1,7 +1,6 @@
 import { needsCardFollowApi } from '../ozonCardSettings/cardFieldStore'
 import { fetchOtherOffersSellers } from '../ozonBatchCrawl/crawlSkuApi'
 import { extractPriceUnit, parseOzonPriceNumber } from '../ozonBatchCrawl/exportPriceUtils'
-import { loadExchangeRates } from '../ozonQuickShelve/exchangeRateStore'
 import { applySelectionTagForCard } from '../ozonSelectionRules'
 import { getCardListPriceText } from '../ozonSelectionRules/cardData'
 import { readDetailPriceText } from './detailPageContext'
@@ -27,17 +26,22 @@ export async function loadCardFollowData(card: HTMLElement, sku: string): Promis
   const token = ++followLoadSeq
   followLoadTokens.set(card, token)
 
-  // 跟卖价 ≈￥ 依赖 exchangeRateState.rates，但列表页此前从不加载汇率
-  // （只有急速上架弹窗 / 汇率设置会 loadExchangeRates），导致卡片用的是内存默认汇率而非
-  // 用户「汇率设置」值，≈￥ 与急速上架对不上。这里与卖家列表并发加载（命中本地缓存几乎零开销，
-  // loadExchangeRates 内部已做并发去重），确保渲染前 rates 已就绪。
-  const [sellers] = await Promise.all([
-    fetchOtherOffersSellers(sku),
-    loadExchangeRates().catch(() => null),
-  ])
+  const sellers = await fetchOtherOffersSellers(sku)
   if (!card.isConnected || followLoadTokens.get(card) !== token) return
 
-  if (!sellers?.length) {
+  // null 表示请求失败或响应无法验证，必须保留“未知”，不能伪造成 0 个跟卖。
+  if (sellers === null) {
+    applyFollowFieldsToCard(card, {
+      gnumber: null,
+      priceMin: null,
+      priceMax: null,
+      priceMinSku: '',
+      priceMaxSku: '',
+    })
+    return
+  }
+
+  if (sellers.length === 0) {
     if (getCardFollowSellers(card)?.length) return
     setCardFollowSellers(card, [])
     applyFollowFieldsToCard(card, {

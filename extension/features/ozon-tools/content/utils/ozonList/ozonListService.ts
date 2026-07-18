@@ -19,7 +19,6 @@ import {
   setCardGoodsData,
   setCardListPriceText,
 } from '../ozonSelectionRules'
-import { clearMpStatTable, scheduleRefreshMpStatTable } from '../ozonMpChart/mpStatTableService'
 import { syncListPageRealPriceFromHost } from '../ozonProfitCalc/wiring'
 import { cacheSkuData } from './skuDataCache'
 import { recordListSku, updateListSkuSales } from './listSkuAccumulator'
@@ -34,16 +33,7 @@ import {
 import { ensureListTileLayoutForCard } from './listCardLayout'
 
 const BATCH_SIZE = 3
-const SKU_PROBE = '123456'
-/** 探活通过后在此时间内跳过重复 sku=123456 请求 */
-const PROBE_OK_TTL_MS = 60_000
-/** 探活命中限频后在此时间内不再重试探活（对齐服务端账号级 60s 限频锁，避免 30s 时无谓再撞一次） */
-const PROBE_RATE_LIMIT_TTL_MS = 60_000
-
 let isLoading = false
-let lastProbeAt = 0
-let lastProbeOk = false
-let probeInFlight: Promise<'proceed' | 'abort'> | null = null
 
 configureListingAutoLoad({
   isIdle: () => !isLoading,
@@ -80,7 +70,10 @@ async function processItem(item: OzonListProductItem): Promise<void> {
     const data = await loadSkuData(item.sku)
     cacheSkuData(item.sku, data)
     // 补记销量到累加器（对齐旧版列表销量列 xl），供急速上架弹窗销量筛选/展示
-    updateListSkuSales(item.sku, `销量:${data.monthsales ?? 0}`)
+    updateListSkuSales(
+      item.sku,
+      data.monthsales == null || data.monthsales === '' ? '销量:--' : `销量:${data.monthsales}`,
+    )
     if (!item.host.contains(card)) return
     fillCardWithData(card, data)
     ensureListTileLayoutForCard(card)
@@ -151,7 +144,6 @@ export async function loadOzonListData(): Promise<{ processed: number }> {
   try {
     await processBatch(items, 0)
     bindCardCopyActions(document)
-    scheduleRefreshMpStatTable()
     return { processed: items.length }
   } catch (e) {
     if (e instanceof OzonSkuLoadError && e.message === '频率过快') {
@@ -188,59 +180,17 @@ export async function loadOzonDetailShelfData(): Promise<{ processed: number }> 
   }
 }
 
-/**
- * 对齐旧版 loadSkuData(123456) 探活：限频则中断，其它异常放行贴卡。
- * 短时缓存 + 并发合并，避免滚动/DOM 触发时重复打探活接口。
- */
-async function runSkuProbeIfNeeded(): Promise<'proceed' | 'abort'> {
-  const now = Date.now()
-  if (lastProbeOk && now - lastProbeAt < PROBE_OK_TTL_MS) {
-    return 'proceed'
-  }
-  if (!lastProbeOk && now - lastProbeAt < PROBE_RATE_LIMIT_TTL_MS) {
-    return 'abort'
-  }
-  if (probeInFlight) return probeInFlight
-
-  probeInFlight = (async () => {
-    try {
-      await loadSkuData(SKU_PROBE)
-      lastProbeAt = Date.now()
-      lastProbeOk = true
-      return 'proceed' as const
-    } catch (e) {
-      if (e instanceof OzonSkuLoadError && e.message === '频率过快') {
-        lastProbeAt = Date.now()
-        lastProbeOk = false
-        showToast('请求频率过快，请稍后再试', 4000)
-        return 'abort' as const
-      }
-      // 无店铺 Cookie 等：探活不因数据缺失中断贴卡
-      lastProbeAt = Date.now()
-      lastProbeOk = true
-      console.warn('[mjgd][ozonList] 探活非限频异常，继续贴卡:', (e as Error)?.message || e)
-      return 'proceed' as const
-    } finally {
-      probeInFlight = null
-    }
-  })()
-
-  return probeInFlight
-}
-
-/** 详情页「加载更多」：对齐旧版 loadSkuData(123456) 探活后再加载下方相似商品 */
+/** 详情页「加载更多」：直接采集待处理 SKU，不再发送固定 SKU 探活请求。 */
 export async function probeAndLoadDetailShelfData(): Promise<{ processed: number }> {
   if (resolveOzonPageType() !== 'detail') return { processed: 0 }
   if (shouldBlockListLoad()) return { processed: 0 }
   if (isLoading) return { processed: 0 }
   if (!collectPendingShelfItems().length) return { processed: 0 }
 
-  if ((await runSkuProbeIfNeeded()) === 'abort') return { processed: 0 }
-
   return loadOzonDetailShelfData()
 }
 
-/** 对齐旧版 loadSkuData(123456) 探活后再 loadDatas */
+/** 列表自动加载入口：直接扫描贴卡，不发送与当前商品无关的探活请求。 */
 export async function probeAndLoadOzonListData(): Promise<{ processed: number }> {
   if (!isOzonListLikePage(resolveOzonPageType())) return { processed: 0 }
   if (shouldBlockListLoad()) {
@@ -253,8 +203,6 @@ export async function probeAndLoadOzonListData(): Promise<{ processed: number }>
   }
   if (!collectPendingListItems().length) return { processed: 0 }
 
-  if ((await runSkuProbeIfNeeded()) === 'abort') return { processed: 0 }
-
   return loadOzonListData()
 }
 
@@ -265,7 +213,6 @@ export function startOzonListAutoScan() {
 
 export function stopOzonListAutoScan() {
   stopListingAutoLoad()
-  clearMpStatTable()
 }
 
 export function isOzonListLoading(): boolean {

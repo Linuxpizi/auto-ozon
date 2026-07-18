@@ -78,7 +78,7 @@ function buildCardHead(sku: string, productImg: string | undefined, options?: { 
   const loaded = options?.loaded ?? false
   const variant = loaded ? 'loaded' : 'placeholder'
   const logoSize = 20
-  const brandText = loaded ? 'Ozon 本地工具' : '加载中...'
+  const brandText = loaded ? 'Ozon 商品' : '加载中...'
   const logoHtml = `<img src="${localToolLogoUrl}" alt="" class="mjgd_ozon_card_logo" width="${logoSize}" height="${logoSize}" />`
   return `<div class="mjgd_ozon_card_head bcs-list-card-head bcs-list-card-head--${variant}">${logoHtml}<h3 class="bcs-list-card-brand"><span class="bcs-list-card-brand-full mjgd_ozon_card_loading">${brandText}</span><span class="bcs-list-card-brand-short">Ozon</span></h3>${buildCardToolButtons(sku, productImg, true)}</div>`
 }
@@ -311,14 +311,14 @@ export function fillCardWithData(card: HTMLElement, data: OzonSkuCardData) {
   setText(card, '.mjgd_ozon_field_article', dashIfEmpty(data.article))
   setText(card, '.mjgd_ozon_field_brand', dashIfEmpty(data.brand))
   setText(card, '.mjgd_ozon_field_catname', dashIfEmpty(data.catname))
-  setText(card, '.mjgd_ozon_field_monthsales', `月销量: ${data.monthsales ?? 0}`)
+  setText(card, '.mjgd_ozon_field_monthsales', `月销量: ${dashIfEmpty(data.monthsales)}`)
   setInnerHtml(card, '.mjgd_ozon_field_gmv', formatMonthlySalesRubLine(data.gmvSum, data.monthsales))
   setInnerHtml(card, '.mjgd_ozon_field_sales_dynamics', formatSalesDynamicsHtml(data.salesDynamics))
   setText(card, '.mjgd_ozon_field_drr', formatPercentTwoDecimalsFromRaw(data.drr))
-  setText(card, '.mjgd_ozon_field_promo_days', String(data.daysInPromo ?? '0'))
+  setText(card, '.mjgd_ozon_field_promo_days', dashIfEmpty(data.daysInPromo))
   setText(card, '.mjgd_ozon_field_promo_discount', formatPercentTwoDecimalsFromRaw(data.discount))
   setText(card, '.mjgd_ozon_field_promo_conv', formatPercentTwoDecimalsFromRaw(data.promoRevenueShare))
-  setText(card, '.mjgd_ozon_field_paid_promo', String(data.daysWithTrafarets ?? '0'))
+  setText(card, '.mjgd_ozon_field_paid_promo', dashIfEmpty(data.daysWithTrafarets))
   if (data.gnumber != null && data.gnumber !== '') {
     setText(card, '.mjgd_ozon_field_gnumber', String(data.gnumber))
   }
@@ -341,7 +341,7 @@ export function fillCardWithData(card: HTMLElement, data: OzonSkuCardData) {
   // 上架时间在 30 天内时，在 Ozon 商品格子/详情容器右上角叠加「NEW」角标
   applyNewProductBadge(card, data.createDate)
   const brandFull = card.querySelector('.bcs-list-card-brand-full')
-  if (brandFull) brandFull.textContent = 'Ozon 本地工具'
+  if (brandFull) brandFull.textContent = data.brand || 'Ozon 商品'
   // 对齐旧版列表：头部始终保持 placeholder 样式，不切换 head--loaded（避免负偏移把顶栏按钮顶出卡片）
   if (data.gnumber != null || data.priceMin != null || data.priceMax != null) {
     applyFollowFieldsToCard(card, {
@@ -383,13 +383,12 @@ export interface FollowFieldsPatch {
 }
 
 function productOrigin(): string {
-  return /ozon\.kz/i.test(window.location.hostname) ? 'https://www.ozon.kz' : 'https://www.ozon.ru'
+  return /ozon\.kz/i.test(window.location.hostname) ? 'https://ozon.kz' : 'https://www.ozon.ru'
 }
 
 /** 更新跟卖列表/最低价/最高价 DOM */
 export function applyFollowFieldsToCard(card: HTMLElement, patch: FollowFieldsPatch) {
-  const gnumber = patch.gnumber ?? 0
-  setText(card, '.mjgd_ozon_field_gnumber', String(gnumber))
+  setText(card, '.mjgd_ozon_field_gnumber', dashIfEmpty(patch.gnumber))
 
   const minSku = String(patch.priceMinSku || '')
   const maxSku = String(patch.priceMaxSku || '')
@@ -436,13 +435,13 @@ export function markCardFillFailed(card: HTMLElement) {
     el.textContent = '--'
   })
   const gnumber = card.querySelector('.mjgd_ozon_field_gnumber')
-  if (gnumber?.textContent?.includes('加载中')) gnumber.textContent = '0'
+  if (gnumber?.textContent?.includes('加载中')) gnumber.textContent = '--'
   const followVals = card.querySelectorAll('.mjgd_ozon_field_price_min, .mjgd_ozon_field_price_max')
   followVals.forEach((el) => {
     if (el.textContent?.includes('加载中')) el.textContent = '--'
   })
   const brandFull = card.querySelector('.bcs-list-card-brand-full')
-  if (brandFull) brandFull.textContent = 'Ozon 本地工具'
+  if (brandFull) brandFull.textContent = 'Ozon 商品'
 }
 
 /** webAspects 变体现价原文 → 复制用价格（解析卢布/币种文本，失败则去空格原样返回） */

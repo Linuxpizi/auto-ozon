@@ -47,6 +47,16 @@ export interface OzonSkuCardData {
   avgprice?: OzonCardScalar
   createDate?: string
   commission?: OzonSkuCommission | null
+  /** Ozon 商城商品页公开字段；不等同于历史均价、促销分析或展示量。 */
+  title?: string
+  currentPrice?: string
+  originalPrice?: string
+  currentDiscount?: string
+  rating?: OzonCardScalar
+  reviewCount?: OzonCardScalar
+  characteristics?: unknown[]
+  page2Loaded?: boolean
+  metricSource?: string
   [key: string]: unknown
 }
 

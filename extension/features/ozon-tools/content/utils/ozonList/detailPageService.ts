@@ -15,7 +15,6 @@ import {
   findDetailCardHost,
   readDetailPriceText,
 } from './detailPageContext'
-import { startMpChart, stopMpChart } from '../ozonMpChart/mpChartService'
 import {
   bindCardCopyActions,
   fillCardWithData,
@@ -50,7 +49,6 @@ function disconnectHostObserver() {
 export function stopDetailPageCard() {
   clearHostRetry()
   disconnectHostObserver()
-  stopMpChart()
   removeOzonRealPriceBox()
   activeSku = null
   cachedData = null
@@ -157,7 +155,6 @@ function scheduleHostRetry(sku: string) {
     void injectDetailCard(sku).then((ok) => {
       if (ok) {
         clearHostRetry()
-        startMpChart(sku)
         setupHostObserver(sku)
       } else if (attempts >= HOST_RETRY_MAX) {
         clearHostRetry()
@@ -194,9 +191,6 @@ export async function startDetailPageCard(): Promise<void> {
     activeSku = sku
     clearSellerInfoCache()
   }
-
-  // 与贴卡解耦：对齐旧版 addBlueBox，SKU 就绪即启动 MP 图表
-  startMpChart(sku)
 
   const ok = await injectDetailCard(sku)
   if (ok) {

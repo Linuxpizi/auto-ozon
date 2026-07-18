@@ -1,46 +1,12 @@
-import { fetchSkuShops } from '../ozonBatchCrawl/crawlSkuApi'
 import { applyCardFieldLayout, isCardFieldEnabled, isCardFieldPreferenceLoaded } from '../ozonCardSettings/cardFieldStore'
 import { applySelectionTagForCard } from '../ozonSelectionRules'
 import { formatPackagingDimsLong, formatPackagingWeightG } from '../ozonListShared/formatters'
 import { loadSellerInfoToCard, watchSellerInfoForCard } from './sellerInfo'
+import { collectOzonSkuMetrics, type OzonCharacteristic } from './ozonMetricCollector'
+import { parsePackagingAttrs, type PackagingInfo } from './ozonPackagingParser'
 import {
   notifyInlineProfitPackagingFilled,
-  notifyInlineProfitCategories,
 } from '../ozonProfitCalc/inlineProfitCalc'
-
-const ATTR_LENGTH = '9454'
-const ATTR_WIDTH = '9455'
-const ATTR_HEIGHT = '9456'
-const ATTR_WEIGHT = '4497'
-const ATTR_SUBJECT_TAGS = '23171'
-
-export interface PackagingInfo {
-  length: string
-  width: string
-  height: string
-  weight: string
-  subjectTags: string
-}
-
-function parsePackagingAttrs(attrs: Array<{ key: string; value: string }> | null): PackagingInfo {
-  const info: PackagingInfo = {
-    length: '',
-    width: '',
-    height: '',
-    weight: '',
-    subjectTags: '',
-  }
-  if (!attrs?.length) return info
-
-  for (const a of attrs) {
-    if (a.key === ATTR_LENGTH) info.length = a.value
-    else if (a.key === ATTR_WIDTH) info.width = a.value
-    else if (a.key === ATTR_HEIGHT) info.height = a.value
-    else if (a.key === ATTR_WEIGHT) info.weight = a.value
-    else if (a.key === ATTR_SUBJECT_TAGS) info.subjectTags = a.value
-  }
-  return info
-}
 
 /**
  * 仅「详情主卡」才补全店铺ID / 公司名称 / 主题标签三行。详情主卡在注入时会被打上
@@ -61,7 +27,7 @@ function isInlineProfitPanelVisible(card: HTMLElement): boolean {
   return !!panel && panel.style.display !== 'none'
 }
 
-/** 包装/主题标签字段或利润面板可见时才需请求 /system/sku/shops */
+/** 包装/主题标签字段或利润面板可见时才需解析 Ozon Page2 属性。 */
 export function needsCardShopsApi(card: HTMLElement): boolean {
   if (!isCardFieldPreferenceLoaded()) return true
   if (isCardFieldEnabled('dimensions') || isCardFieldEnabled('weight')) return true
@@ -158,7 +124,7 @@ function applyPackagingToCard(card: HTMLElement, info: PackagingInfo) {
   }
 }
 
-/** 列表/详情卡片补全长宽高、重量、主题标签（/system/sku/shops） */
+/** 列表/详情卡片从 Ozon Page2 characteristics 补全长宽高、重量、主题标签。 */
 export async function loadCardExtraData(card: HTMLElement, sku: string): Promise<void> {
   if (!card.isConnected || !sku) return
 
@@ -178,24 +144,22 @@ export async function loadCardExtraData(card: HTMLElement, sku: string): Promise
 
   const loadPromise = (async () => {
     try {
-      const { attributes, categories } = await fetchSkuShops(sku)
+      const data = await collectOzonSkuMetrics(sku)
       if (!card.isConnected) return
 
-      card.dataset.shopsLoaded = '1'
-
-      // 同步给 MAIN 世界 buildEditUploadData 复用（对齐旧版 crawler 写 bcsVariantBuilder._skuShopsAttributes）
-      try {
-        document.dispatchEvent(
-          new CustomEvent('bcs-cache-sku-shops', {
-            detail: { sku, categories, attributes },
-          }),
-        )
-      } catch {
-        /* ignore */
-      }
-
-      const info = parsePackagingAttrs(attributes)
+      const characteristics = Array.isArray(data.characteristics)
+        ? data.characteristics as OzonCharacteristic[]
+        : []
+      const info = parsePackagingAttrs(characteristics)
       applyPackagingToCard(card, info)
+      // Page2 失败时保留可重试状态，不能把一次临时失败固化成永久空字段。
+      if (data.page2Loaded === true) {
+        card.dataset.shopsLoaded = '1'
+        delete card.dataset.shopsLoadFailed
+      } else {
+        delete card.dataset.shopsLoaded
+        card.dataset.shopsLoadFailed = '1'
+      }
       applyCardFieldLayout(card)
       // 包装数据到位后重新打标，使尺寸/重量规则可命中
       applySelectionTagForCard(card)
@@ -206,11 +170,6 @@ export async function loadCardExtraData(card: HTMLElement, sku: string): Promise
         h_mm: info.height,
         weight_g: info.weight,
       })
-      // 同步 categories 给内嵌利润计算器（用于 OSS 类目树匹配佣金率）
-      if (categories && categories.length) {
-        notifyInlineProfitCategories(sku, categories)
-      }
-
       if (isDetailMainCard(card)) {
         await loadSellerInfoToCard(card)
         applyCardFieldLayout(card)

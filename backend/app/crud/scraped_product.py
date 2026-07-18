@@ -9,6 +9,44 @@ def get_scraped_product(db: Session, record_id: int):
     return db.query(ScrapedProductRecord).filter(ScrapedProductRecord.id == record_id).first()
 
 
+def get_ozon_product_by_sku(db: Session, sku: str) -> Optional[ScrapedProductRecord]:
+    """按 Ozon 商品 ID 或已采集 SKU 精确查找记录。
+
+    ``sku_list`` 是 JSON 数组。这里在 Python 中完成兼容匹配，避免 SQLite、
+    PostgreSQL 等数据库的 JSON 查询语法差异。
+    """
+    normalized_sku = str(sku).strip()
+    if not normalized_sku:
+        return None
+
+    direct = (
+        db.query(ScrapedProductRecord)
+        .filter(
+            ScrapedProductRecord.platform == "ozon",
+            ScrapedProductRecord.source_id == normalized_sku,
+        )
+        .order_by(ScrapedProductRecord.updated_at.desc(), ScrapedProductRecord.created_at.desc())
+        .first()
+    )
+    if direct:
+        return direct
+
+    rows = (
+        db.query(ScrapedProductRecord)
+        .filter(ScrapedProductRecord.platform == "ozon")
+        .order_by(ScrapedProductRecord.updated_at.desc(), ScrapedProductRecord.created_at.desc())
+        .all()
+    )
+    for row in rows:
+        sku_list = row.sku_list or []
+        if not isinstance(sku_list, list):
+            continue
+        for item in sku_list:
+            if isinstance(item, dict) and str(item.get("sku") or "").strip() == normalized_sku:
+                return row
+    return None
+
+
 def get_scraped_products(
     db: Session,
     skip: int = 0,

@@ -1,37 +1,22 @@
 import { createRouter, createWebHistory } from "vue-router";
-import DashboardView from "../views/DashboardView.vue";
-import StoreManagementView from "../views/StoreManagementView.vue";
-import OrdersView from "../views/OrdersView.vue";
-import StoreFinanceView from "../views/StoreFinanceView.vue";
-import NotFoundView from "../views/NotFoundView.vue";
-
-import TaskConfigView from "../views/TaskConfigView.vue";
-import ProductManagementView from "../views/ProductManagementView.vue";
-import IntelligenceView from "../views/IntelligenceView.vue";
-import ProductSelectionView from "../views/ProductSelectionView.vue";
-import ReturnOrdersView from "../views/ReturnOrdersView.vue";
-import FeishuConfigView from "../views/FeishuConfigView.vue";
-import UploadManagementView from "../views/UploadManagementView.vue";
-import LogisticsView from "../views/LogisticsView.vue";
-import AuthView from "../views/AuthView.vue";
 import { useAuthStore } from "../store/auth";
 
 const routes = [
-  { path: "/login", name: "Login", component: AuthView, meta: { guestOnly: true } },
-  { path: "/", name: "Dashboard", component: DashboardView, meta: { requiresAuth: true } },
-  { path: "/stores", name: "StoreManagement", component: StoreManagementView, meta: { requiresAuth: true } },
-  { path: "/orders", name: "Orders", component: OrdersView, meta: { requiresAuth: true } },
-  { path: "/return-orders", name: "ReturnOrders", component: ReturnOrdersView, meta: { requiresAuth: true } },
-  { path: "/finances", name: "StoreFinance", component: StoreFinanceView, meta: { requiresAuth: true } },
-  { path: "/products", name: "ProductManagement", component: ProductManagementView, meta: { requiresAuth: true } },
+  { path: "/login", name: "Login", component: () => import("../views/AuthView.vue"), meta: { guestOnly: true } },
+  { path: "/", name: "Dashboard", component: () => import("../views/DashboardView.vue"), meta: { requiresAuth: true } },
+  { path: "/stores", name: "StoreManagement", component: () => import("../views/StoreManagementView.vue"), meta: { requiresAuth: true } },
+  { path: "/orders", name: "Orders", component: () => import("../views/OrdersView.vue"), meta: { requiresAuth: true } },
+  { path: "/return-orders", name: "ReturnOrders", component: () => import("../views/ReturnOrdersView.vue"), meta: { requiresAuth: true } },
+  { path: "/finances", name: "StoreFinance", component: () => import("../views/StoreFinanceView.vue"), meta: { requiresAuth: true } },
+  { path: "/products", name: "ProductManagement", component: () => import("../views/ProductManagementView.vue"), meta: { requiresAuth: true } },
   { path: "/precision-listing", name: "PrecisionListing", redirect: "/selection", meta: { requiresAuth: true } },
-  { path: "/intelligence", name: "Intelligence", component: IntelligenceView, meta: { requiresAuth: true } },
-  { path: "/selection", name: "ProductSelection", component: ProductSelectionView, meta: { requiresAuth: true } },
-  { path: "/upload-management", name: "UploadManagement", component: UploadManagementView, meta: { requiresAuth: true } },
-  { path: "/logistics", name: "Logistics", component: LogisticsView, meta: { requiresAuth: true } },
-  { path: "/task-configs", name: "TaskConfig", component: TaskConfigView, meta: { requiresAuth: true } },
-  { path: "/feishu-config", name: "FeishuConfig", component: FeishuConfigView, meta: { requiresAuth: true } },
-  { path: "/:pathMatch(.*)*", name: "NotFound", component: NotFoundView },
+  { path: "/intelligence", name: "Intelligence", component: () => import("../views/IntelligenceView.vue"), meta: { requiresAuth: true } },
+  { path: "/selection", name: "ProductSelection", component: () => import("../views/ProductSelectionView.vue"), meta: { requiresAuth: true } },
+  { path: "/upload-management", name: "UploadManagement", component: () => import("../views/UploadManagementView.vue"), meta: { requiresAuth: true } },
+  { path: "/logistics", name: "Logistics", component: () => import("../views/LogisticsView.vue"), meta: { requiresAuth: true } },
+  { path: "/task-configs", name: "TaskConfig", component: () => import("../views/TaskConfigView.vue"), meta: { requiresAuth: true } },
+  { path: "/feishu-config", name: "FeishuConfig", component: () => import("../views/FeishuConfigView.vue"), meta: { requiresAuth: true } },
+  { path: "/:pathMatch(.*)*", name: "NotFound", component: () => import("../views/NotFoundView.vue") },
 ];
 
 const router = createRouter({

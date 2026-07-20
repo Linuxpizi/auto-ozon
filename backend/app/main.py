@@ -10,7 +10,7 @@ from app.api.routers import dashboard, order, store, monitor, listing, finance, 
 from app.api.routers import prompt_template, title_optimize, product_optimize, image_prompt, ai_text, ai_image
 from app.api.routers import exchange_rate
 from app.api.routers import return_order, feishu_config, powerpaint
-from app.api.routers import image_edit, image_version, auth
+from app.api.routers import image_edit, image_version, auth, ozonbox
 from app.api.dependencies import get_current_user
 from app.core.db import engine, Base
 from app.services.scheduler_service import lifespan as scheduler_lifespan
@@ -141,6 +141,46 @@ def _ensure_scraped_product_columns():
         logger.warning("Auto-migration skipped: %s", e)
 
 _ensure_scraped_product_columns()
+
+
+def _ensure_upload_draft_columns():
+    """Add nullable Ozonbox fact columns and its partial idempotency index."""
+    import sqlite3 as _sqlite3
+    from app.core.config import DATABASE_URL
+    from app.models.upload_draft import UploadDraft
+
+    if not DATABASE_URL.startswith("sqlite:///"):
+        return
+    db_path = DATABASE_URL.replace("sqlite:///", "", 1)
+    conn = _sqlite3.connect(db_path)
+    try:
+        cur = conn.cursor()
+        cur.execute('SELECT name FROM sqlite_master WHERE type = "table" AND name = "upload_drafts"')
+        if cur.fetchone() is None:
+            return
+        cur.execute('PRAGMA table_info("upload_drafts")')
+        existing = {row[1] for row in cur.fetchall()}
+        for column in UploadDraft.__table__.columns:
+            if column.name in existing:
+                continue
+            if not column.nullable or column.primary_key:
+                # This migration only adds nullable facts; Base.metadata handles
+                # fresh databases and legacy non-null columns need a real plan.
+                continue
+            column_type = str(column.type.compile(dialect=engine.dialect))
+            cur.execute(f'ALTER TABLE "upload_drafts" ADD COLUMN "{column.name}" {column_type}')
+            logger.info("DB migration: added column upload_drafts.%s %s", column.name, column_type)
+        cur.execute(
+            "CREATE UNIQUE INDEX IF NOT EXISTS uq_upload_draft_ozonbox_source_key "
+            "ON upload_drafts(store_id, source_type, source_product_key) "
+            "WHERE source_product_key IS NOT NULL"
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+_ensure_upload_draft_columns()
 # ────────────────────────────────────────────────────────────────────────
 
 
@@ -191,6 +231,7 @@ def health():
 # require the same dependency so the web app and extension cannot bypass login.
 app.include_router(auth.router, prefix="/api/auth", tags=["auth"])
 AUTH_DEPENDENCIES = [Depends(get_current_user)]
+app.include_router(ozonbox.router, prefix="/api", tags=["ozonbox"])
 
 app.include_router(store.router, prefix="/api/stores", tags=["stores"], dependencies=AUTH_DEPENDENCIES)
 app.include_router(order.router, prefix="/api/orders", tags=["orders"], dependencies=AUTH_DEPENDENCIES)

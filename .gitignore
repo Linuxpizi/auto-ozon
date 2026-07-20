@@ -40,4 +40,5 @@ backend/tests/test_ozon_api.py
 */.wxt/
 
 bcs-ozon
-ozonbox
+/ozonbox/
+/backend/test.db

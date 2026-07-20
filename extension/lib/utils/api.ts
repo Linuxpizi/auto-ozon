@@ -1,4 +1,13 @@
 import type { AuthSession, AuthUser, ScrapedProduct } from './types'
+import type {
+  OzonboxCategoryResult,
+  OzonboxEnvelope,
+  OzonboxPackageShopFacts,
+  OzonboxProductRecord,
+  OzonboxProductRecordSaved,
+  OzonboxStore,
+} from '@/lib/ozonbox/contract'
+import { assertOzonboxEnvelope, assertOzonboxProductRecord } from '@/lib/ozonbox/contract'
 import { assertCompleteProduct } from './product-data'
 import { clearAuthSession, getAuthSession, getSettings, saveAuthSession } from './storage'
 
@@ -28,6 +37,12 @@ async function request<T>(path: string, options: RequestInit = {}, authenticated
   return resp.status === 204 ? undefined as T : await resp.json() as T
 }
 
+async function ozonboxRequest<T>(path: string, options: RequestInit = {}): Promise<T> {
+  const response = assertOzonboxEnvelope<T>(await request<unknown>(path, options))
+  if (response.code !== 200) throw new Error(response.message || 'Ozonbox 请求失败')
+  return response.data
+}
+
 export async function login(email: string, password: string): Promise<AuthSession> {
   const session = await request<AuthSession>('/auth/login', {
     method: 'POST',
@@ -50,6 +65,51 @@ export async function register(email: string, password: string, name?: string): 
 
 export async function getCurrentUser(): Promise<AuthUser> {
   return request<AuthUser>('/auth/me')
+}
+
+export async function listOzonboxStores(): Promise<OzonboxStore[]> {
+  return ozonboxRequest<OzonboxStore[]>('/store/list')
+}
+
+export async function queryOzonboxLocalCategory(
+  storeId: number,
+  productId: number,
+): Promise<OzonboxCategoryResult> {
+  return ozonboxRequest<OzonboxCategoryResult>(`/online-product/info?storeId=${storeId}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ product_id: [productId] }),
+  })
+}
+
+export async function queryOzonboxLiveCategory(
+  clientId: string,
+  productId: number,
+): Promise<OzonboxCategoryResult> {
+  return ozonboxRequest<OzonboxCategoryResult>(`/ozon/products/info?clientId=${encodeURIComponent(clientId)}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ product_id: productId }),
+  })
+}
+
+export async function queryOzonboxPackageFacts(sku: string): Promise<OzonboxPackageShopFacts[]> {
+  return ozonboxRequest<OzonboxPackageShopFacts[]>('/system/sku/shops', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ sku }),
+  })
+}
+
+export async function saveOzonboxProductRecord(
+  record: OzonboxProductRecord,
+): Promise<OzonboxProductRecordSaved> {
+  const completeRecord = assertOzonboxProductRecord(record)
+  return ozonboxRequest<OzonboxProductRecordSaved>('/product-record/save', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(completeRecord),
+  })
 }
 
 /** 批量同步采集商品到后端 */

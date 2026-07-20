@@ -1,4 +1,15 @@
-from sqlalchemy import Column, Integer, String, Float, Text, DateTime, JSON, func, ForeignKey
+from sqlalchemy import (
+    Column,
+    DateTime,
+    Float,
+    ForeignKey,
+    Index,
+    Integer,
+    JSON,
+    String,
+    Text,
+    func,
+)
 from app.core.db import Base
 
 
@@ -60,3 +71,37 @@ class UploadDraft(Base):
 
     created_at = Column(DateTime, server_default=func.now())
     updated_at = Column(DateTime, onupdate=func.now())
+
+    # ── Ozonbox collection facts ──
+    # These columns are deliberately nullable.  The legacy upload pipeline has
+    # defaults for price and logistics fields, but those defaults are not facts
+    # and must never be used for a browser-collected Ozon product.
+    source_product_key = Column(String(128), nullable=True, comment="Ozon productId used as idempotency key")
+    ozonbox_record_name = Column(String(512), nullable=True)
+    ozonbox_product_id = Column(String(128), nullable=True)
+    ozonbox_source_url = Column(String(2048), nullable=True)
+    ozonbox_sku = Column(String(256), nullable=True)
+    ozonbox_title = Column(String(1024), nullable=True)
+    ozonbox_title_ru = Column(String(1024), nullable=True)
+    ozonbox_description = Column(Text, nullable=True)
+    ozonbox_description_ru = Column(Text, nullable=True)
+    ozonbox_tags = Column(Text, nullable=True)
+    ozonbox_images = Column(JSON, nullable=True)
+    ozonbox_price = Column(Float, nullable=True)
+    ozonbox_specs = Column(JSON, nullable=True)
+    ozonbox_variants = Column(JSON, nullable=True)
+    ozonbox_variant_attr_ids = Column(JSON, nullable=True)
+    ozonbox_category_path = Column(String(1024), nullable=True)
+    ozonbox_category_id = Column(Integer, nullable=True)
+    ozonbox_type_id = Column(Integer, nullable=True)
+    ozonbox_description_category_id = Column(Integer, nullable=True)
+
+    __table_args__ = (
+        Index(
+            "uq_upload_draft_ozonbox_source_key",
+            "store_id",
+            "source_type",
+            "source_product_key",
+            unique=True,
+        ),
+    )

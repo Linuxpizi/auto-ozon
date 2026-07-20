@@ -21,8 +21,10 @@ import {
 } from '@vicons/ionicons5'
 import RecordsPanel from '@/components/popup/RecordsPanel.vue'
 import ScrapePanel from '@/components/popup/ScrapePanel.vue'
-import { checkBackendHealth, login, register } from '@/lib/utils/api'
-import { clearAuthSession, getAuthSession } from '@/lib/utils/storage'
+import OzonboxPanel from '@/components/popup/OzonboxPanel.vue'
+import { isOzonProductUrl } from '@/lib/ozonbox/url'
+import { checkBackendHealth, getCurrentUser, login, register } from '@/lib/utils/api'
+import { clearAuthSession, getAuthSession, saveAuthSession } from '@/lib/utils/storage'
 import type { AuthSession } from '@/lib/utils/types'
 import packageJson from '@/package.json'
 
@@ -58,6 +60,12 @@ const connectionType = computed(() => backendOk.value === null ? 'pending' : bac
 const connectionIcon = computed(() => backendOk.value === null ? CloudOutline : backendOk.value ? CloudDoneOutline : CloudOfflineOutline)
 const isRegister = computed(() => authMode.value === 'register')
 const userLabel = computed(() => session.value?.user.name || session.value?.user.email || '')
+const isOzonProductPage = ref(false)
+
+async function inspectActivePage() {
+  const [tab] = await browser.tabs.query({ active: true, currentWindow: true })
+  isOzonProductPage.value = isOzonProductUrl(tab?.url || '')
+}
 
 async function refreshBackend() {
   backendOk.value = null
@@ -65,9 +73,26 @@ async function refreshBackend() {
 }
 
 async function refreshSession() {
-  session.value = await getAuthSession()
-  if (session.value) await refreshBackend()
-  else backendOk.value = null
+  const storedSession = await getAuthSession()
+  session.value = storedSession
+  if (!storedSession) {
+    backendOk.value = null
+    return
+  }
+
+  try {
+    const currentUser = await getCurrentUser()
+    const refreshedSession = { ...storedSession, user: currentUser }
+    session.value = refreshedSession
+    await saveAuthSession(refreshedSession)
+    await refreshBackend()
+  } catch {
+    // getCurrentUser() 已通过公共 request wrapper 处理 401；网络错误时保留本地会话，
+    // 让现有工作区继续显示离线状态，而不是把非认证错误误判为退出登录。
+    session.value = await getAuthSession()
+    if (session.value) await refreshBackend()
+    else backendOk.value = null
+  }
 }
 
 function validateAuth(): string | null {
@@ -107,7 +132,10 @@ async function logout() {
   backendOk.value = null
 }
 
-onMounted(refreshSession)
+onMounted(() => {
+  refreshSession()
+  inspectActivePage()
+})
 watch(activeTab, (tab) => tab === 'records' && session.value && refreshBackend())
 </script>
 
@@ -168,7 +196,10 @@ watch(activeTab, (tab) => tab === 'records' && session.value && refreshBackend()
           </section>
 
           <NTabs v-else v-model:value="activeTab" type="segment" animated class="app-tabs">
-            <NTabPane name="scrape" tab="采集中心"><ScrapePanel /></NTabPane>
+            <NTabPane name="scrape" tab="采集中心">
+              <OzonboxPanel v-if="isOzonProductPage" />
+              <ScrapePanel v-else />
+            </NTabPane>
             <NTabPane name="records" tab="采集记录"><RecordsPanel /></NTabPane>
           </NTabs>
         </main>

@@ -1,9 +1,13 @@
 import { computed, ref } from "vue";
 import { defineStore } from "pinia";
 import { login as loginRequest, register as registerRequest, type AuthUser } from "../api/auth";
-
-const TOKEN_KEY = "access_token";
-const USER_KEY = "auth_user";
+import {
+  AUTH_SESSION_CLEARED_EVENT,
+  TOKEN_KEY,
+  USER_KEY,
+  clearStoredAuthSession,
+  getStoredAccessToken,
+} from "../auth/session";
 
 function readUser(): AuthUser | null {
   const raw = localStorage.getItem(USER_KEY);
@@ -17,7 +21,7 @@ function readUser(): AuthUser | null {
 }
 
 export const useAuthStore = defineStore("auth", () => {
-  const token = ref(localStorage.getItem(TOKEN_KEY));
+  const token = ref(getStoredAccessToken());
   const user = ref<AuthUser | null>(readUser());
   const isAuthenticated = computed(() => Boolean(token.value));
 
@@ -41,11 +45,15 @@ export const useAuthStore = defineStore("auth", () => {
   }
 
   function logout() {
+    clearStoredAuthSession();
+  }
+
+  function handleAuthExpired() {
     token.value = null;
     user.value = null;
-    localStorage.removeItem(TOKEN_KEY);
-    localStorage.removeItem(USER_KEY);
   }
+
+  window.addEventListener(AUTH_SESSION_CLEARED_EVENT, handleAuthExpired);
 
   return { token, user, isAuthenticated, login, register, logout };
 });

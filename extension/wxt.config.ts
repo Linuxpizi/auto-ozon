@@ -10,6 +10,7 @@ export default defineConfig({
     host_permissions: [
       'https://www.ozon.ru/*',
       'https://ozon.ru/*',
+      'https://seller.ozon.ru/*',
       'https://www.wildberries.ru/*',
       'https://wildberries.ru/*',
       'https://detail.1688.com/*',

@@ -1,3 +1,5 @@
+import { clearStoredAuthSession, getStoredAccessToken } from "../auth/session";
+
 export const API_BASE = "http://127.0.0.1:9000/api";
 export const API_ORIGIN = API_BASE.replace(/\/api\/?$/, "");
 const DEFAULT_TIMEOUT_MS = 300_000;
@@ -18,25 +20,25 @@ function resolveRequestTimeout(options?: RequestInit): number {
   return Number.isFinite(parsed) && parsed > 0 ? parsed : DEFAULT_TIMEOUT_MS;
 }
 
-async function request<T = any>(path: string, options?: RequestInit): Promise<T> {
+async function requestResponse(path: string, options?: RequestInit): Promise<Response> {
   const controller = new AbortController();
   const timeoutMs = resolveRequestTimeout(options);
   const timeoutId = window.setTimeout(() => controller.abort(), timeoutMs);
   try {
     const headers = new Headers(options?.headers || undefined);
-    const token = localStorage.getItem("access_token");
+    const token = getStoredAccessToken();
     if (token) headers.set("Authorization", `Bearer ${token}`);
     const res = await fetch(`${API_BASE}${path}`, {
       ...options,
       headers,
       signal: options?.signal || controller.signal,
     });
+    if (res.status === 401) clearStoredAuthSession();
     if (!res.ok) {
       const err = await res.json().catch(() => ({ detail: res.statusText }));
       throw new Error(err.detail || `请求失败 (${res.status})`);
     }
-    if (res.status === 204) return undefined as T;
-    return res.json();
+    return res;
   } catch (err: any) {
     if (err?.name === "AbortError") {
       throw new Error(`请求超时：服务端或上游 AI 超过 ${Math.round(timeoutMs / 1000)} 秒未响应，请稍后重试`);
@@ -45,6 +47,12 @@ async function request<T = any>(path: string, options?: RequestInit): Promise<T>
   } finally {
     window.clearTimeout(timeoutId);
   }
+}
+
+async function request<T = any>(path: string, options?: RequestInit): Promise<T> {
+  const res = await requestResponse(path, options);
+  if (res.status === 204) return undefined as T;
+  return res.json();
 }
 
 export async function apiGet<T = any>(path: string, params?: Record<string, string | number | undefined | null>): Promise<T> {
@@ -99,15 +107,7 @@ export async function apiDownload(path: string, filename: string, params?: Recor
       if (val !== undefined && val !== "") q.set(key, String(val));
     }
   }
-  const url = `${API_BASE}${path}${q.toString() ? "?" + q : ""}`;
-  const headers = new Headers();
-  const token = localStorage.getItem("access_token");
-  if (token) headers.set("Authorization", `Bearer ${token}`);
-  const res = await fetch(url, { headers });
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({ detail: res.statusText }));
-    throw new Error(err.detail || `请求失败 (${res.status})`);
-  }
+  const res = await requestResponse(`${path}${q.toString() ? "?" + q : ""}`);
   const blob = await res.blob();
   const blobUrl = URL.createObjectURL(blob);
   const a = document.createElement("a");

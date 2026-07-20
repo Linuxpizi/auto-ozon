@@ -1,6 +1,41 @@
 import type { ScrapedProduct } from '@/lib/utils/types'
+import type {
+  OzonboxCollectedProduct,
+  OzonboxRuntimeMessage,
+  OzonboxSellerApiResponse,
+} from '@/lib/ozonbox/contract'
+import { isOzonProductUrl, isOzonUrl } from '@/lib/ozonbox/url'
 import { getAuthSession, getSettings } from '@/lib/utils/storage'
-import { syncProducts, fetchBackendProducts, deleteBackendProduct, checkBackendHealth } from '@/lib/utils/api'
+import {
+  syncProducts,
+  fetchBackendProducts,
+  deleteBackendProduct,
+  checkBackendHealth,
+  queryOzonboxPackageFacts,
+} from '@/lib/utils/api'
+
+const OZON_CONTENT_SCRIPT = '/content-scripts/ozon.js'
+const SELLER_URL_PATTERN = 'https://seller.ozon.ru/*'
+
+function isSellerUrl(value: string): boolean {
+  try {
+    const url = new URL(value)
+    return url.protocol === 'https:' && url.hostname === 'seller.ozon.ru'
+  } catch {
+    return false
+  }
+}
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error)
+}
+
+function requirePositiveIntegerString(value: unknown, field: string): string {
+  if (typeof value !== 'string' || !/^[1-9]\d*$/.test(value.trim())) {
+    throw new Error(`${field} 必须是真实的正整数`)
+  }
+  return value.trim()
+}
 
 /** 更新 badge 显示后端未匹配数量 */
 async function updateBadge() {
@@ -33,6 +68,40 @@ export default defineBackground(() => {
 
   // 监听来自 content script 和 popup 的消息
   browser.runtime.onMessage.addListener((message, sender, sendResponse) => {
+    if ((message as Partial<OzonboxRuntimeMessage>).type === 'COLLECT_PRODUCT') {
+      collectOzonProductInTab((message as { tabId?: number }).tabId ?? sender.tab?.id).then((product) => {
+        sendResponse({ success: true, data: product })
+      }).catch((error: unknown) => {
+        sendResponse({ success: false, error: errorMessage(error) })
+      })
+      return true
+    }
+
+    if ((message as Partial<OzonboxRuntimeMessage>).type === 'OZONBOX_READ_SELLER_ID') {
+      readOzonSellerId().then((sellerId) => {
+        sendResponse({ sellerId })
+      }).catch((error: unknown) => {
+        sendResponse({ error: errorMessage(error) })
+      })
+      return true
+    }
+
+    if ((message as Partial<OzonboxRuntimeMessage>).type === 'OZONBOX_FETCH_SELLER_ANALYTICS') {
+      const request = message as OzonboxRuntimeMessage & { type: 'OZONBOX_FETCH_SELLER_ANALYTICS' }
+      fetchSellerAnalytics(request.sku, request.shopId).then(sendResponse).catch((error: unknown) => {
+        sendResponse({ error: errorMessage(error) })
+      })
+      return true
+    }
+
+    if ((message as Partial<OzonboxRuntimeMessage>).type === 'OZONBOX_FETCH_PACKAGE_FACTS') {
+      const request = message as OzonboxRuntimeMessage & { type: 'OZONBOX_FETCH_PACKAGE_FACTS' }
+      queryOzonboxPackageFacts(request.sku).then(sendResponse).catch((error: unknown) => {
+        sendResponse({ error: errorMessage(error) })
+      })
+      return true
+    }
+
     // Content script 上报采集数据 → 直接保存到后端
     if (message.action === 'productScraped') {
       handleProductScraped(message.data).then((result) => {
@@ -122,14 +191,15 @@ export default defineBackground(() => {
     if (!(await isAuthenticated())) return
 
     const url = tab.url
-    const isOzon = /ozon\.ru/.test(url) && /\/\d+\/?$/.test(url)
+    // Ozon has an explicit popup-driven flow.  Automatic collection would
+    // require an implicit target store, so it is intentionally excluded.
     const isWB = /wildberries\.ru/.test(url) && /\/\d+\/?$/.test(url)
     const is1688 = /detail\.1688\.com\/offer\//.test(url) || /s\.1688\.com\/selloffer/.test(url) || /s\.1688\.com\/offer_search/.test(url)
     const isPdd = /(yangkeduo|pinduoduo)\.com/.test(url) && (/goods\.html/i.test(url) || /[?&](goods_id|goodsId)=\d+/.test(url))
 
-    if (isOzon || isWB || is1688 || isPdd) {
+    if (isWB || is1688 || isPdd) {
       try {
-        const file = isPdd ? '/content-scripts/pdd.js' : is1688 ? '/content-scripts/ali1688.js' : isOzon ? '/content-scripts/ozon.js' : '/content-scripts/wb.js'
+        const file = isPdd ? '/content-scripts/pdd.js' : is1688 ? '/content-scripts/ali1688.js' : '/content-scripts/wb.js'
         await browser.scripting.executeScript({
           target: { tabId },
           files: [file],
@@ -159,7 +229,6 @@ async function handleProductScraped(product: ScrapedProduct) {
 function getContentScriptFile(url: string): string | null {
   if (/1688\.com/.test(url)) return '/content-scripts/ali1688.js'
   if (/yangkeduo\.com|pinduoduo\.com/.test(url)) return '/content-scripts/pdd.js'
-  if (/ozon\.ru/.test(url)) return '/content-scripts/ozon.js'
   if (/wildberries\.ru/.test(url)) return '/content-scripts/wb.js'
   return null
 }
@@ -188,12 +257,17 @@ async function ensureContentScript(tabId: number, url?: string): Promise<boolean
 async function triggerScrapeInTab(tabId: number) {
   try {
     if (!(await isAuthenticated())) return authRequired()
-    const [tab] = await browser.tabs.query({ active: true, currentWindow: true })
-    const targetId = tabId || tab?.id
+    const [activeTab] = await browser.tabs.query({ active: true, currentWindow: true })
+    const targetId = tabId || activeTab?.id
     if (!targetId) return { success: false, error: '无活动标签页' }
 
-    // ★ 关键修复:确保 content script 已注入,解决偶尔为空的问题
-    const injected = await ensureContentScript(targetId, tab.url)
+    const tab = tabId ? await browser.tabs.get(targetId) : activeTab
+    if (tab?.url && isOzonProductUrl(tab.url)) {
+      const product = await collectOzonProductInTab(targetId)
+      return { success: true, data: product }
+    }
+
+    const injected = await ensureContentScript(targetId, tab?.url)
     if (!injected) return { success: false, error: '无法注入采集脚本,请刷新页面后重试' }
 
     const resp = await browser.tabs.sendMessage(targetId, { action: 'scrape' })
@@ -208,6 +282,127 @@ async function triggerScrapeInTab(tabId: number) {
   } catch (e) {
     return { success: false, error: String(e) }
   }
+}
+
+async function collectOzonProductInTab(tabId?: number): Promise<OzonboxCollectedProduct> {
+  if (!(await isAuthenticated())) throw new Error(authRequired().error)
+  if (!tabId) throw new Error('没有可采集的 Ozon 标签页')
+
+  const tab = await browser.tabs.get(tabId)
+  if (!tab.url || !isOzonProductUrl(tab.url)) {
+    throw new Error('当前页面不是严格匹配的 Ozon 商品详情页')
+  }
+
+  const request: OzonboxRuntimeMessage = { type: 'COLLECT_PRODUCT' }
+  try {
+    return await browser.tabs.sendMessage(tabId, request) as OzonboxCollectedProduct
+  } catch (firstError: unknown) {
+    try {
+      await browser.scripting.executeScript({ target: { tabId }, files: [OZON_CONTENT_SCRIPT] })
+      await new Promise((resolve) => setTimeout(resolve, 300))
+      return await browser.tabs.sendMessage(tabId, request) as OzonboxCollectedProduct
+    } catch (secondError: unknown) {
+      throw new Error(`无法启动 Ozon 采集脚本：${errorMessage(secondError)}；首次尝试：${errorMessage(firstError)}`)
+    }
+  }
+}
+
+async function findSellerTab(explicitTabId?: number): Promise<chrome.tabs.Tab> {
+  if (explicitTabId) {
+    const tab = await browser.tabs.get(explicitTabId)
+    if (!tab.url || !isSellerUrl(tab.url)) throw new Error('指定标签页不是 Ozon 卖家后台')
+    return tab
+  }
+  const tabs = await browser.tabs.query({ url: SELLER_URL_PATTERN })
+  const sellerTabs = tabs.filter((candidate) => candidate.id && candidate.url && isSellerUrl(candidate.url))
+  const tab = sellerTabs.find((candidate) => candidate.active) ?? sellerTabs[0]
+  if (!tab) throw new Error('未找到已打开的 Ozon 卖家后台标签页')
+  return tab
+}
+
+async function readOzonSellerId(explicitTabId?: number): Promise<string> {
+  const tab = await findSellerTab(explicitTabId)
+  if (!tab.id) throw new Error('Ozon 卖家标签页缺少 ID')
+  const result = await browser.scripting.executeScript({
+    target: { tabId: tab.id },
+    func: () => {
+      const names = ['contentId', 'sc_company_id', 'company_id', 'companyId', 'seller_id', 'sellerId']
+      const values: string[] = []
+      for (const name of names) {
+        const meta = document.querySelector(`meta[name="${name}"], meta[property="${name}"]`)
+        if (meta?.getAttribute('content')) values.push(meta.getAttribute('content') as string)
+        const element = document.querySelector(`[data-${name.replace(/_/g, '-')}]`)
+        if (element?.getAttribute(`data-${name.replace(/_/g, '-')}`)) values.push(element.getAttribute(`data-${name.replace(/_/g, '-')}`) as string)
+        const localValue = localStorage.getItem(name)
+        if (localValue) values.push(localValue)
+        const cookie = document.cookie.split(';').map((item) => item.trim()).find((item) => item.startsWith(`${name}=`))
+        if (cookie) values.push(cookie.slice(name.length + 1))
+      }
+      return values.find((value) => /^[1-9]\d*$/.test(value.trim()))?.trim()
+    },
+  })
+  const sellerId = result[0]?.result
+  return requirePositiveIntegerString(sellerId, 'sellerId')
+}
+
+async function fetchSellerApi(
+  sku: string,
+  shopId: string,
+  pageType: 'what-to-sell' | 'products',
+  endpoint: string,
+  body: Record<string, unknown>,
+  explicitTabId?: number,
+): Promise<OzonboxSellerApiResponse> {
+  const tab = await findSellerTab(explicitTabId)
+  if (!tab.id) throw new Error('Ozon 卖家标签页缺少 ID')
+  requirePositiveIntegerString(String(sku), 'sku')
+  const companyId = requirePositiveIntegerString(String(shopId), 'shopId')
+  const headers = {
+    'content-type': 'application/json',
+    'x-o3-app-name': 'seller-ui',
+    'x-o3-company-id': companyId,
+    'x-o3-language': 'zh-Hans',
+    'x-o3-page-type': pageType,
+  }
+
+  // The seller API must run in the seller tab's page context.  A service
+  // worker fetch does not reliably carry the seller page's authenticated
+  // cookie/session context and is answered with 403 by Ozon.
+  const result = await browser.scripting.executeScript({
+    target: { tabId: tab.id },
+    args: [{ endpoint, headers, body }],
+    func: async (request: {
+      endpoint: string
+      headers: Record<string, string>
+      body: Record<string, unknown>
+    }) => {
+      const response = await fetch(request.endpoint, {
+        method: 'POST',
+        headers: request.headers,
+        body: JSON.stringify(request.body),
+        credentials: 'include',
+      })
+      const data = await response.json().catch(() => null)
+      return { data, status: response.status, ok: response.ok }
+    },
+  })
+
+  const payload = result[0]?.result
+  if (!payload || typeof payload !== 'object') {
+    throw new Error('Ozon 卖家接口未返回有效响应')
+  }
+  return payload as OzonboxSellerApiResponse
+}
+
+function fetchSellerAnalytics(sku: string, shopId: string, tabId?: number) {
+  return fetchSellerApi(
+    sku,
+    shopId,
+    'what-to-sell',
+    'https://seller.ozon.ru/api/site/seller-analytics/what_to_sell/data/v3',
+    { limit: '50', offset: '0', filter: { stock: 'any_stock', sku: String(sku) }, sort: { key: 'sum_gmv_desc' } },
+    tabId,
+  )
 }
 
 async function handleBatchSync(products: ScrapedProduct[]) {
@@ -290,14 +485,27 @@ async function checkCurrentPage() {
     if (!tab?.url) return { isSupported: false }
 
     const url = tab.url
-    const isOzon = /ozon\.ru/.test(url)
+    const isOzon = isOzonUrl(url)
     const isWB = /wildberries\.ru/.test(url)
     const is1688 = /1688\.com/.test(url)
     const isPdd = /(yangkeduo|pinduoduo)\.com/.test(url)
 
     if (!isOzon && !isWB && !is1688 && !isPdd) return { isSupported: false }
 
-    const platform = isOzon ? 'ozon' : isWB ? 'wb' : is1688 ? '1688' : 'pdd'
+    if (isOzon) {
+      const isProductPage = isOzonProductUrl(url)
+      return {
+        isSupported: isProductPage,
+        platform: 'ozon',
+        isProductPage,
+        isListPage: false,
+        pageType: isProductPage ? 'product' : 'unknown',
+        tabId: tab.id,
+        url,
+      }
+    }
+
+    const platform = isWB ? 'wb' : is1688 ? '1688' : 'pdd'
 
     // ★ 关键修复:确保 content script 已注入再检测,避免偶尔返回空
     await ensureContentScript(tab.id!, url)

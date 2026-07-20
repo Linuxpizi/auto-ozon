@@ -38,3 +38,6 @@ backend/tests/test_ozon_api.py
 
 */.output/
 */.wxt/
+
+bcs-ozon
+ozonbox

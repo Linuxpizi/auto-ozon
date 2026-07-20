@@ -1,7 +1,7 @@
-import type { OzonMetrics, ProductVariant, ProductVariantValue, ScrapedProduct } from '@/lib/utils/types'
+import type { OzonMetrics, ProductFact, ProductVariant, ProductVariantValue, ScrapedProduct } from '@/lib/utils/types'
 
-interface CollectedFact { name: string; value: string; sourcePath?: string }
-type CollectorProduct = Partial<ScrapedProduct> & { facts?: CollectedFact[] }
+type CollectedFact = ProductFact
+type CollectorProduct = Partial<ScrapedProduct>
 import { injectFloatingButton } from '@/lib/utils/floating-button'
 import {
   randomDelay, normalDelay, microPause, readingPause, occasionalLongPause,
@@ -58,28 +58,48 @@ function decodedOzonStateEntries(states: any): Array<[string, any]> {
 
 function readOzonVariantValues(node: any): ProductVariantValue[] {
   const candidates = [node?.characteristics, node?.properties, node?.aspects, node?.variantValues]
+  const values: ProductVariantValue[] = []
+  const seen = new Set<string>()
   for (const candidate of candidates) {
     if (!Array.isArray(candidate)) continue
-    const values = candidate.flatMap((item: any) => {
+    for (const item of candidate) {
       const name = normalizeText(item?.name ?? item?.title ?? item?.label ?? item?.propertyName)
-      const value = normalizeText(item?.value ?? item?.text ?? item?.selectedValue ?? item?.propertyValue)
-      return name && value ? [{ name, value }] : []
-    })
-    if (values.length > 0) return values
+      const value = normalizeText(
+        item?.value ?? item?.text ?? item?.selectedValue ?? item?.propertyValue
+        ?? item?.values ?? item?.propertyValues,
+      )
+      const key = `${name.toLocaleLowerCase()}\u0000${value.toLocaleLowerCase()}`
+      if (name && value && !seen.has(key)) {
+        seen.add(key)
+        values.push({ name, value })
+      }
+    }
   }
-  return []
+  return values
 }
 
 function readOzonVariant(node: any): ProductVariant | null {
   if (!node || typeof node !== 'object' || Array.isArray(node)) return null
-  const sku = normalizeText(node.sku ?? node.offerId ?? node.offerID ?? node.article ?? node.productId)
   const values = readOzonVariantValues(node)
-  if (!sku || values.length === 0) return null
+  // productId 在推荐卡片等节点中也大量存在；只有节点带明确变体维度时才允许作为 SKU 降级值。
+  const explicitSku = normalizeText(node.sku ?? node.offerId ?? node.offerID ?? node.article)
+  const sku = explicitSku || (values.length > 0 ? normalizeText(node.productId) : '')
+  if (!sku) return null
   const barcode = normalizeText(node.barcode ?? node.gtin ?? node.ean).replace(/\s/g, '')
-  const price = parsePrice(normalizeText(node.finalPrice ?? node.currentPrice ?? node.price))
-  const oldPrice = parsePrice(normalizeText(node.oldPrice ?? node.originalPrice))
-  const stock = Number(node.stock ?? node.quantity ?? node.availableQuantity)
-  const imageUrl = normalizeOzonMediaUrl(normalizeText(node.imageUrl ?? node.image ?? node.picture))
+  const price = parsePrice(normalizeText(
+    node.finalPrice ?? node.currentPrice ?? node.actionPrice ?? node.salePrice ?? node.price,
+  ))
+  const oldPrice = parsePrice(normalizeText(
+    node.oldPrice ?? node.originalPrice ?? node.basePrice ?? node.fullPrice,
+  ))
+  const stockText = normalizeText(node.stock ?? node.quantity ?? node.availableQuantity)
+  const stock = stockText ? Number(stockText) : Number.NaN
+  const imageUrl = normalizeOzonMediaUrl(normalizeText(
+    node.imageUrl ?? node.image?.url ?? node.image?.src ?? node.image ?? node.picture?.url ?? node.picture,
+  ))
+  // 无维度的记录必须至少包含明确 SKU 和一个可核验字段，避免把普通内容节点当成变体。
+  if (values.length === 0 && !barcode && price <= 0 && oldPrice <= 0
+    && !(Number.isFinite(stock) && stock >= 0) && !looksLikeImageUrl(imageUrl)) return null
   return {
     sku,
     ...(barcode ? { barcode } : {}),
@@ -163,11 +183,46 @@ function mergeOzonVariants(...groups: Array<ProductVariant[] | undefined>): Prod
       const sku = normalizeText(variant.sku)
       if (!sku) continue
       const existing = bySku.get(sku)
-      // 相同 SKU 优先保留变体维度更完整的事实记录。
-      if (!existing || (variant.values?.length || 0) > (existing.values?.length || 0)) bySku.set(sku, variant)
+      if (!existing) {
+        bySku.set(sku, { ...variant, sku, values: mergeOzonVariantValues(variant.values) })
+        continue
+      }
+      // 仅在完全相同的 SKU 内合并互补事实。分组靠前的数据源优先，后续数据只补缺，
+      // 防止 JSON-LD 的商品级价格覆盖 widgetStates 中该 SKU 的明确价格。
+      bySku.set(sku, {
+        sku,
+        ...(existing.barcode || variant.barcode ? { barcode: existing.barcode || variant.barcode } : {}),
+        values: mergeOzonVariantValues(existing.values, variant.values),
+        ...(existing.price !== undefined || variant.price !== undefined
+          ? { price: existing.price ?? variant.price } : {}),
+        ...(existing.oldPrice !== undefined || variant.oldPrice !== undefined
+          ? { oldPrice: existing.oldPrice ?? variant.oldPrice } : {}),
+        ...(existing.stock !== undefined || variant.stock !== undefined
+          ? { stock: existing.stock ?? variant.stock } : {}),
+        ...(existing.imageUrl || variant.imageUrl ? { imageUrl: existing.imageUrl || variant.imageUrl } : {}),
+        ...(existing.sourcePath || variant.sourcePath
+          ? { sourcePath: existing.sourcePath || variant.sourcePath } : {}),
+      })
     }
   }
   return Array.from(bySku.values())
+}
+
+function mergeOzonVariantValues(...groups: Array<ProductVariantValue[] | undefined>): ProductVariantValue[] {
+  const result: ProductVariantValue[] = []
+  const seen = new Set<string>()
+  for (const values of groups) {
+    for (const item of values || []) {
+      const name = normalizeText(item?.name)
+      const value = normalizeText(item?.value)
+      if (!name || !value) continue
+      const key = `${name.toLocaleLowerCase()}\u0000${value.toLocaleLowerCase()}`
+      if (seen.has(key)) continue
+      seen.add(key)
+      result.push({ name, value })
+    }
+  }
+  return result
 }
 
 function extractOzonVariants(node: any, depth = 0, result: ProductVariant[] = []): ProductVariant[] {
@@ -178,7 +233,14 @@ function extractOzonVariants(node: any, depth = 0, result: ProductVariant[] = []
   }
   if (typeof node !== 'object') return result
   const variant = readOzonVariant(node)
-  if (variant && !result.some((item) => item.sku === variant.sku)) result.push(variant)
+  if (variant) {
+    const existingIndex = result.findIndex((item) => normalizeText(item.sku) === normalizeText(variant.sku))
+    if (existingIndex < 0) result.push(variant)
+    else {
+      const merged = mergeOzonVariants([result[existingIndex]!], [variant])
+      if (merged[0]) result[existingIndex] = merged[0]
+    }
+  }
   for (const value of Object.values(node)) extractOzonVariants(value, depth + 1, result)
   return result
 }
@@ -400,6 +462,35 @@ function mergeCollectedFacts(...groups: Array<CollectedFact[] | undefined>): Col
     for (const attr of group || []) addCollectedFact(merged, attr.name, attr.value, (attr as any).sourcePath)
   }
   return merged
+}
+
+const COLOR_FACT_NAME = /(颜色|color|цвет)/i
+
+/** 只从明确的颜色事实和真实变体维度生成颜色列表，不根据标题猜测。 */
+function deriveColorList(
+  facts: CollectedFact[] | undefined,
+  variants: ProductVariant[] | undefined,
+): string[] {
+  const colors: string[] = []
+  const addColorValues = (rawValue: unknown) => {
+    const normalized = normalizeText(rawValue)
+    if (!normalized) return
+    for (const value of normalized.split(/[,，、;；|\n]+|\s+\/\s+/)) {
+      const color = value.trim()
+      if (!color || color.length > 80) continue
+      if (!colors.some((item) => item.toLocaleLowerCase() === color.toLocaleLowerCase())) colors.push(color)
+    }
+  }
+
+  for (const fact of facts || []) {
+    if (COLOR_FACT_NAME.test(fact.name || '')) addColorValues(fact.value)
+  }
+  for (const variant of variants || []) {
+    for (const value of variant.values || []) {
+      if (COLOR_FACT_NAME.test(value.name || '')) addColorValues(value.value)
+    }
+  }
+  return colors
 }
 
 function mergeSkuLists(...groups: Array<ScrapedProduct['skuList'] | undefined>): ScrapedProduct['skuList'] {
@@ -1152,6 +1243,8 @@ async function scrapeOzonProduct(): Promise<ScrapedProduct | null> {
     skuList: mergedSkuList,
     variants: mergedVariants,
     specList: mergedSpecList,
+    facts: collectedFacts,
+    colorList: deriveColorList(collectedFacts, mergedVariants),
     tags: (apiData?.tags?.length ? apiData.tags : domTags),
     ozonCategoryId: apiData?.ozonCategoryId || 0,
     ozonTypeId: apiData?.ozonTypeId || 0,
@@ -1188,6 +1281,53 @@ interface ListCard {
   brand: string
   sellerName: string
   sourceUrl: string
+  bcsFacts: CollectedFact[]
+}
+
+/** 只识别由 BCS 明确标记的追加节点，避免把 Ozon 卡片原生内容当作 BCS 数据。 */
+function hasBcsMarker(el: Element): boolean {
+  return Array.from(el.attributes).some((attribute) => {
+    const name = attribute.name.toLowerCase()
+    if (name !== 'id' && name !== 'class' && !name.startsWith('data-')) return false
+    return name.includes('bcs') || attribute.value.toLowerCase().includes('bcs')
+  })
+}
+
+function isBcsNodeVisible(el: HTMLElement): boolean {
+  if (el.closest('[hidden], [aria-hidden="true"]')) return false
+  const style = window.getComputedStyle(el)
+  return style.display !== 'none' && style.visibility !== 'hidden' && style.visibility !== 'collapse' && style.opacity !== '0'
+}
+
+/** 提取商品卡片内 BCS 插件追加区域的可见文本，不读取 Ozon 原生卡片节点。 */
+function extractBcsCardFacts(cardEl: HTMLElement): CollectedFact[] {
+  const markedNodes = Array.from(cardEl.querySelectorAll('*'))
+    .filter((node): node is HTMLElement => node instanceof HTMLElement && hasBcsMarker(node))
+
+  // 同一 BCS 区域可能有多层节点都带标记，只读取最外层一次，避免重复。
+  const roots = markedNodes.filter((node) => !markedNodes.some((parent) => parent !== node && parent.contains(node)))
+  const facts: CollectedFact[] = []
+  const seen = new Set<string>()
+
+  for (const root of roots) {
+    if (!isBcsNodeVisible(root)) continue
+    const lines = root.innerText
+      .split(/\n+/)
+      .map((line) => line.replace(/\s+/g, ' ').trim())
+      .filter(Boolean)
+
+    for (const line of lines) {
+      const keyValue = line.match(/^(.{1,80}?)[：:]\s*(.+)$/)
+      const name = keyValue?.[1]?.trim() || 'BCS'
+      const value = keyValue?.[2]?.trim() || line
+      const key = `${name.toLowerCase()}\u0000${value.toLowerCase()}`
+      if (seen.has(key)) continue
+      seen.add(key)
+      facts.push({ name, value, sourcePath: 'BCS card' })
+    }
+  }
+
+  return facts
 }
 
 /** 从一个商品卡片 DOM 元素提取摘要 */
@@ -1276,8 +1416,9 @@ function parseCard(el: HTMLElement): ListCard | null {
   if (sellerEl) sellerName = sellerEl.textContent?.trim() || ''
 
   const fullUrl = new URL(href, location.origin).href
+  const bcsFacts = extractBcsCardFacts(el)
 
-  return { sourceId, title, price, oldPrice, imageUrl, rating, reviewCount, brand, sellerName, sourceUrl: fullUrl }
+  return { sourceId, title, price, oldPrice, imageUrl, rating, reviewCount, brand, sellerName, sourceUrl: fullUrl, bcsFacts }
 }
 
 /** 扫描页面上所有可见的商品卡片 */
@@ -1466,7 +1607,12 @@ async function scrollAndCollect(
         }
         const freshCards = scanListCards()
         for (const c of freshCards) {
-          allCards.set(c.sourceId, c)
+          const previous = allCards.get(c.sourceId)
+          allCards.set(c.sourceId, {
+            ...c,
+            // BCS 可能晚于 Ozon 卡片异步注入，后续扫描只补充而不清空已采集到的 BCS 信息。
+            bcsFacts: mergeCollectedFacts(previous?.bcsFacts, c.bcsFacts),
+          })
         }
         const totalCount = allCards.size
         onProgress(totalCount)
@@ -1657,6 +1803,7 @@ async function fetchProductDetailFromHtml(sourceId: string, sourceUrl?: string):
     }
 
     result.facts = mergeCollectedFacts(result.facts)
+    result.colorList = deriveColorList(result.facts, result.variants)
     result.specList = extractPhysicalSpecFromFacts(result.facts || [])
     const htmlLogistics = extractLogisticsFromDocument(doc)
     result.warehouse = result.warehouse || htmlLogistics.warehouse || ''
@@ -1991,6 +2138,7 @@ function parseInternalApiResponse(data: any, sourceId: string): CollectorProduct
   // 不从标题或面包屑猜测品牌。品牌必须来自 webBrand/brand 链接/JSON-LD/特征中的「Бренд」。
 
   result.facts = mergeCollectedFacts(result.facts)
+  result.colorList = deriveColorList(result.facts, result.variants)
 
   // ── Step 4: 从特征中提取物理规格、标识符、折扣、库存 → JSON arrays ──
   const specAccum: ScrapedProduct['specList'][number] = { weight_g: 0, depth_mm: 0, height_mm: 0, width_mm: 0 }
@@ -2273,6 +2421,8 @@ export default defineContentScript({
             skuList: [],
             variants: [],
             specList: [],
+            facts: c.bcsFacts,
+            colorList: deriveColorList(c.bcsFacts, []),
             tags: [],
             ozonCategoryId: 0,
             ozonTypeId: 0,
@@ -2313,6 +2463,8 @@ export default defineContentScript({
               const p = batch[i]
               const detail = await fetchProductDetailFromApi(p.sourceId, p.sourceUrl)
               if (detail) {
+                const mergedFacts = mergeCollectedFacts(detail.facts, p.facts)
+                const mergedVariants = mergeOzonVariants(detail.variants, p.variants)
                 batch[i] = {
                   ...p,
                   title: detail.title || p.title,
@@ -2322,13 +2474,14 @@ export default defineContentScript({
                   description: detail.description || p.description,
                   images: (detail.images && detail.images.length > 0) ? detail.images : p.images,
                   specList: (() => {
-                    const facts = mergeCollectedFacts(detail.facts, (p as CollectorProduct).facts)
-                    const inferred = extractPhysicalSpecFromFacts(facts)
+                    const inferred = extractPhysicalSpecFromFacts(mergedFacts)
                     const spec = mergePhysicalSpec(detail.specList?.[0], inferred[0])
                     return spec ? [spec] : []
                   })(),
-                  skuList: detail.skuList || p.skuList,
-                  variants: detail.variants || p.variants,
+                  facts: mergedFacts,
+                  colorList: deriveColorList(mergedFacts, mergedVariants),
+                  skuList: detail.skuList?.length ? detail.skuList : p.skuList,
+                  variants: mergedVariants,
                   videoUrls: detail.videoUrls || p.videoUrls,
                   tags: detail.tags || p.tags,
                   ozonCategoryId: detail.ozonCategoryId || p.ozonCategoryId,

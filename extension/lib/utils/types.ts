@@ -7,6 +7,13 @@ export interface ProductVariantValue {
   value: string
 }
 
+/** 从页面 DOM、结构化数据、平台接口或明确标记的插件节点采集到的事实。 */
+export interface ProductFact {
+  name: string
+  value: string
+  sourcePath?: string
+}
+
 /**
  * 商品的一个真实可售 SKU/变体组合。
  *
@@ -68,6 +75,10 @@ export interface ScrapedProduct {
   variants: ProductVariant[]
   /** 规格列表 [{weight_g, depth_mm, height_mm, width_mm, color, size, ...}] */
   specList: ProductSpec[]
+  /** 关于商品、特征及 BCS 追加信息等可追溯事实。 */
+  facts?: ProductFact[]
+  /** 从颜色事实和真实 SKU 变体维度汇总的颜色列表。 */
+  colorList?: string[]
   /** 商品标签 (品牌、分类、促销标签等) */
   tags?: string[]
 
@@ -195,6 +206,18 @@ export interface PluginSettings {
   '1688': PlatformScrapingConfig
   /** 拼多多采集条件 */
   pdd: PlatformScrapingConfig
+}
+
+export interface AuthUser {
+  id: number
+  email: string
+  name?: string | null
+}
+
+export interface AuthSession {
+  access_token: string
+  token_type: string
+  user: AuthUser
 }
 
 /** 列表采集的商品摘要(非完整商品数据) */

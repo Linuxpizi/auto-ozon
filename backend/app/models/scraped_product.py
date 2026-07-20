@@ -30,7 +30,10 @@ class ScrapedProductRecord(Base):
     # ── 多值字段 (JSON arrays) ──
     video_urls = Column(JSON, default=list, comment="视频 URL 列表")
     sku_list = Column(JSON, default=list, comment="SKU+条形码列表 [{sku, barcode}]")
+    variants = Column(JSON, default=list, comment="真实可售 SKU 及完整变体组合")
     spec_list = Column(JSON, default=list, comment="规格列表 [{weight_g, depth_mm, height_mm, width_mm, color, size, ...}]")
+    facts = Column(JSON, default=list, comment="页面/API/BCS 采集事实 [{name, value, sourcePath}]")
+    color_list = Column(JSON, default=list, comment="从事实与真实变体汇总的颜色列表")
 
     # ── Ozon 内部分类 ──
     ozon_category_id = Column(Integer, default=0, comment="Ozon description_category_id")

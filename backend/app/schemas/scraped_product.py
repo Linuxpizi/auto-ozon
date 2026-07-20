@@ -32,7 +32,10 @@ class ScrapedProductBase(BaseModel):
     # ── 多值字段 (JSON arrays) ──
     video_urls: List[str] = []
     sku_list: List[dict] = []          # [{"sku": "...", "barcode": "..."}]
+    variants: List[dict] = []          # [{"sku": "...", "values": [{"name": "颜色", "value": "黑色"}]}]
     spec_list: List[dict] = []         # [{"weight_g": 0, "depth_mm": 0, "height_mm": 0, "width_mm": 0, "color": "...", "size": "..."}]
+    facts: List[dict] = []              # [{"name": "...", "value": "...", "sourcePath": "BCS card"}]
+    color_list: List[str] = []
 
     # ── Ozon 内部分类 ──
     ozon_category_id: int = 0
@@ -45,7 +48,10 @@ class ScrapedProductBase(BaseModel):
     supplier_url: str = ""
     trade_quantity: int = 0
 
-    @field_validator("images", "video_urls", "sku_list", "spec_list", "price_ranges", mode="before")
+    @field_validator(
+        "images", "video_urls", "sku_list", "variants", "spec_list", "facts",
+        "color_list", "price_ranges", mode="before",
+    )
     @classmethod
     def normalize_list_fields(cls, value):
         if value is None or value == "":

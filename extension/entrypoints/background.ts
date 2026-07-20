@@ -1,5 +1,5 @@
 import type { ScrapedProduct } from '@/lib/utils/types'
-import { getSettings } from '@/lib/utils/storage'
+import { getAuthSession, getSettings } from '@/lib/utils/storage'
 import { syncProducts, fetchBackendProducts, deleteBackendProduct, checkBackendHealth } from '@/lib/utils/api'
 
 /** 更新 badge 显示后端未匹配数量 */
@@ -15,6 +15,15 @@ async function updateBadge() {
     // 后端不可用时清除 badge
     await browser.action.setBadgeText({ text: '' })
   }
+}
+
+async function isAuthenticated(): Promise<boolean> {
+  const session = await getAuthSession()
+  return Boolean(session?.access_token)
+}
+
+function authRequired() {
+  return { success: false, error: '请先登录插件' }
 }
 
 export default defineBackground(() => {
@@ -76,17 +85,16 @@ export default defineBackground(() => {
 
     // 从后端获取产品列表
     if (message.action === 'getProducts') {
-      fetchBackendProducts(message.platform, message.limit).then((resp) => {
-        sendResponse(resp)
+      getProductsForPopup(message.platform, message.limit).then((result) => {
+        sendResponse(result)
       })
       return true
     }
 
     // 从后端删除产品
     if (message.action === 'deleteProduct') {
-      deleteBackendProduct(message.id).then(() => {
-        updateBadge()
-        sendResponse({ success: true })
+      deleteProductForPopup(message.id).then((result) => {
+        sendResponse(result)
       })
       return true
     }
@@ -111,6 +119,7 @@ export default defineBackground(() => {
 
     const settings = await getSettings()
     if (!settings.autoScrape) return
+    if (!(await isAuthenticated())) return
 
     const url = tab.url
     const isOzon = /ozon\.ru/.test(url) && /\/\d+\/?$/.test(url)
@@ -133,6 +142,7 @@ export default defineBackground(() => {
 
 async function handleProductScraped(product: ScrapedProduct) {
   try {
+    if (!(await isAuthenticated())) return authRequired()
     const healthy = await checkBackendHealth()
     if (!healthy) {
       return { success: false, error: '后端不可用,请检查 backend 是否运行' }
@@ -177,6 +187,7 @@ async function ensureContentScript(tabId: number, url?: string): Promise<boolean
 
 async function triggerScrapeInTab(tabId: number) {
   try {
+    if (!(await isAuthenticated())) return authRequired()
     const [tab] = await browser.tabs.query({ active: true, currentWindow: true })
     const targetId = tabId || tab?.id
     if (!targetId) return { success: false, error: '无活动标签页' }
@@ -201,6 +212,7 @@ async function triggerScrapeInTab(tabId: number) {
 
 async function handleBatchSync(products: ScrapedProduct[]) {
   try {
+    if (!(await isAuthenticated())) return authRequired()
     const healthy = await checkBackendHealth()
     if (!healthy) {
       return { success: false, error: '后端不可用,请检查 backend 是否运行' }
@@ -227,6 +239,7 @@ async function stopScrapingInTab() {
 
 async function triggerListScrapeInTab(tabId?: number, maxItems = 50, scrollDelay = 1500, batchSize = 10) {
   try {
+    if (!(await isAuthenticated())) return authRequired()
     const [tab] = await browser.tabs.query({ active: true, currentWindow: true })
     const targetId = tabId || tab?.id
     if (!targetId) return { success: false, error: '无活动标签页' }
@@ -244,6 +257,26 @@ async function triggerListScrapeInTab(tabId?: number, maxItems = 50, scrollDelay
     })
 
     return resp || { success: false, error: '采集失败' }
+  } catch (e) {
+    return { success: false, error: String(e) }
+  }
+}
+
+async function getProductsForPopup(platform?: string, limit?: number) {
+  if (!(await isAuthenticated())) return authRequired()
+  try {
+    return await fetchBackendProducts(platform, limit)
+  } catch (e) {
+    return { success: false, error: String(e) }
+  }
+}
+
+async function deleteProductForPopup(recordId: number) {
+  if (!(await isAuthenticated())) return authRequired()
+  try {
+    await deleteBackendProduct(recordId)
+    await updateBadge()
+    return { success: true }
   } catch (e) {
     return { success: false, error: String(e) }
   }

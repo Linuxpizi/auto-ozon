@@ -3,7 +3,7 @@
     <n-message-provider>
       <n-dialog-provider>
         <n-notification-provider>
-          <n-layout has-sider style="min-height: 100vh;">
+          <n-layout v-if="!isAuthPage" has-sider style="min-height: 100vh;">
             <n-config-provider :theme-overrides="sidebarThemeOverrides">
               <Sidebar :is-dark="isDark" @toggle-theme="isDark = !isDark" />
             </n-config-provider>
@@ -14,6 +14,7 @@
               </main>
             </n-layout-content>
           </n-layout>
+          <router-view v-else />
         </n-notification-provider>
       </n-dialog-provider>
     </n-message-provider>
@@ -21,7 +22,8 @@
 </template>
 
 <script setup lang="ts">
-import { ref, watch } from "vue";
+import { computed, ref, watch } from "vue";
+import { useRoute } from "vue-router";
 import {
   NConfigProvider,
   NMessageProvider,
@@ -36,6 +38,8 @@ import Sidebar from "./components/Sidebar.vue";
 import ExchangeRateMarquee from "./components/ExchangeRateMarquee.vue";
 
 const isDark = ref(localStorage.getItem("theme") === "dark");
+const route = useRoute();
+const isAuthPage = computed(() => route.name === "Login");
 
 function applyTheme(dark: boolean) {
   document.documentElement.setAttribute("data-theme", dark ? "dark" : "");

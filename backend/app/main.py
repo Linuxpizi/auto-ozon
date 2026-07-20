@@ -2,7 +2,7 @@ import logging
 import traceback
 from contextlib import asynccontextmanager
 from pathlib import Path
-from fastapi import FastAPI, Request
+from fastapi import Depends, FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
@@ -10,7 +10,8 @@ from app.api.routers import dashboard, order, store, monitor, listing, finance, 
 from app.api.routers import prompt_template, title_optimize, product_optimize, image_prompt, ai_text, ai_image
 from app.api.routers import exchange_rate
 from app.api.routers import return_order, feishu_config, powerpaint
-from app.api.routers import image_edit, image_version
+from app.api.routers import image_edit, image_version, auth
+from app.api.dependencies import get_current_user
 from app.core.db import engine, Base
 from app.services.scheduler_service import lifespan as scheduler_lifespan
 
@@ -104,7 +105,10 @@ def _ensure_scraped_product_columns():
             typedef = f"{_column_type(column)}{_column_default(column)}"
             cur.execute(f'ALTER TABLE scraped_product_records ADD COLUMN "{column.name}" {typedef}')
             logger.info("DB migration: added column %s %s", column.name, typedef)
-        list_json_columns = ["images", "video_urls", "sku_list", "spec_list", "price_ranges", "matched_suppliers"]
+        list_json_columns = [
+            "images", "video_urls", "sku_list", "variants", "spec_list", "facts",
+            "color_list", "price_ranges", "matched_suppliers",
+        ]
         for column_name in list_json_columns:
             if column_name in existing or column_name in {c.name for c in ScrapedProductRecord.__table__.columns}:
                 cur.execute(f"UPDATE scraped_product_records SET {column_name} = '[]' WHERE {column_name} IS NULL")
@@ -177,34 +181,45 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-app.include_router(store.router, prefix="/api/stores", tags=["stores"])
-app.include_router(order.router, prefix="/api/orders", tags=["orders"])
-app.include_router(dashboard.router, prefix="/api/dashboard", tags=["dashboard"])
-app.include_router(monitor.router, prefix="/api/monitors", tags=["monitors"])
-app.include_router(listing.router, prefix="/api/listings", tags=["listings"])
-app.include_router(precision_listing.router, prefix="/api/precision-listing", tags=["precision-listing"])
-app.include_router(finance.router, prefix="/api/finances", tags=["finances"])
-app.include_router(task_config.router, prefix="/api/task-configs", tags=["task-configs"])
-app.include_router(intelligence.router, prefix="/api/intelligence", tags=["intelligence"])
-app.include_router(browser_sync.router, prefix="/api/browser-sync", tags=["browser-sync"])
-app.include_router(selection.router, prefix="/api/selection", tags=["selection"])
-app.include_router(upload.router, prefix="/api/upload", tags=["upload"])
-app.include_router(logistics.router, prefix="/api/logistics", tags=["logistics"])
+@app.get("/api/health", tags=["health"])
+def health():
+    """Public liveness endpoint used to distinguish offline from unauthenticated."""
+    return {"status": "ok"}
+
+
+# Authentication is intentionally public; all application/business routers below
+# require the same dependency so the web app and extension cannot bypass login.
+app.include_router(auth.router, prefix="/api/auth", tags=["auth"])
+AUTH_DEPENDENCIES = [Depends(get_current_user)]
+
+app.include_router(store.router, prefix="/api/stores", tags=["stores"], dependencies=AUTH_DEPENDENCIES)
+app.include_router(order.router, prefix="/api/orders", tags=["orders"], dependencies=AUTH_DEPENDENCIES)
+app.include_router(dashboard.router, prefix="/api/dashboard", tags=["dashboard"], dependencies=AUTH_DEPENDENCIES)
+app.include_router(monitor.router, prefix="/api/monitors", tags=["monitors"], dependencies=AUTH_DEPENDENCIES)
+app.include_router(listing.router, prefix="/api/listings", tags=["listings"], dependencies=AUTH_DEPENDENCIES)
+app.include_router(precision_listing.router, prefix="/api/precision-listing", tags=["precision-listing"], dependencies=AUTH_DEPENDENCIES)
+app.include_router(finance.router, prefix="/api/finances", tags=["finances"], dependencies=AUTH_DEPENDENCIES)
+app.include_router(task_config.router, prefix="/api/task-configs", tags=["task-configs"], dependencies=AUTH_DEPENDENCIES)
+app.include_router(intelligence.router, prefix="/api/intelligence", tags=["intelligence"], dependencies=AUTH_DEPENDENCIES)
+app.include_router(browser_sync.router, prefix="/api/browser-sync", tags=["browser-sync"], dependencies=AUTH_DEPENDENCIES)
+app.include_router(selection.router, prefix="/api/selection", tags=["selection"], dependencies=AUTH_DEPENDENCIES)
+app.include_router(upload.router, prefix="/api/upload", tags=["upload"], dependencies=AUTH_DEPENDENCIES)
+app.include_router(logistics.router, prefix="/api/logistics", tags=["logistics"], dependencies=AUTH_DEPENDENCIES)
 
 # ── Prompt Engine routes ──────────────────────────────────────────────
-app.include_router(title_optimize.router, prefix="/api/v1/title", tags=["prompt-engine"])
-app.include_router(product_optimize.router, prefix="/api/v1/product", tags=["prompt-engine"])
-app.include_router(image_prompt.router, prefix="/api/v1/image", tags=["prompt-engine"])
-app.include_router(prompt_template.router, prefix="/api/v1/prompts", tags=["prompt-templates"])
-app.include_router(ai_text.router, prefix="/api/v1/ai", tags=["ai-text"])
-app.include_router(ai_image.router, prefix="/api/v1/ai", tags=["ai-image"])
+app.include_router(title_optimize.router, prefix="/api/v1/title", tags=["prompt-engine"], dependencies=AUTH_DEPENDENCIES)
+app.include_router(product_optimize.router, prefix="/api/v1/product", tags=["prompt-engine"], dependencies=AUTH_DEPENDENCIES)
+app.include_router(image_prompt.router, prefix="/api/v1/image", tags=["prompt-engine"], dependencies=AUTH_DEPENDENCIES)
+app.include_router(prompt_template.router, prefix="/api/v1/prompts", tags=["prompt-templates"], dependencies=AUTH_DEPENDENCIES)
+app.include_router(ai_text.router, prefix="/api/v1/ai", tags=["ai-text"], dependencies=AUTH_DEPENDENCIES)
+app.include_router(ai_image.router, prefix="/api/v1/ai", tags=["ai-image"], dependencies=AUTH_DEPENDENCIES)
 
 # ── Exchange Rates ────────────────────────────────────────────────────
-app.include_router(exchange_rate.router, prefix="/api/v1", tags=["exchange-rates"])
-app.include_router(return_order.router, prefix="/api/return-orders", tags=["return-orders"])
-app.include_router(feishu_config.router, prefix="/api/feishu", tags=["feishu"])
-app.include_router(powerpaint.router, tags=["powerpaint"])  # prefix defined in router
+app.include_router(exchange_rate.router, prefix="/api/v1", tags=["exchange-rates"], dependencies=AUTH_DEPENDENCIES)
+app.include_router(return_order.router, prefix="/api/return-orders", tags=["return-orders"], dependencies=AUTH_DEPENDENCIES)
+app.include_router(feishu_config.router, prefix="/api/feishu", tags=["feishu"], dependencies=AUTH_DEPENDENCIES)
+app.include_router(powerpaint.router, tags=["powerpaint"], dependencies=AUTH_DEPENDENCIES)  # prefix defined in router
 
 # ── Image Edit routes ──────────────────────────────────────────────────
-app.include_router(image_edit.router, prefix="/api/v1/image", tags=["image-edit"])
-app.include_router(image_version.router, prefix="/api/v1/image", tags=["image-version"])
+app.include_router(image_edit.router, prefix="/api/v1/image", tags=["image-edit"], dependencies=AUTH_DEPENDENCIES)
+app.include_router(image_version.router, prefix="/api/v1/image", tags=["image-version"], dependencies=AUTH_DEPENDENCIES)

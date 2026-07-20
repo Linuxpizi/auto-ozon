@@ -23,8 +23,12 @@ async function request<T = any>(path: string, options?: RequestInit): Promise<T>
   const timeoutMs = resolveRequestTimeout(options);
   const timeoutId = window.setTimeout(() => controller.abort(), timeoutMs);
   try {
+    const headers = new Headers(options?.headers || undefined);
+    const token = localStorage.getItem("access_token");
+    if (token) headers.set("Authorization", `Bearer ${token}`);
     const res = await fetch(`${API_BASE}${path}`, {
       ...options,
+      headers,
       signal: options?.signal || controller.signal,
     });
     if (!res.ok) {
@@ -96,7 +100,10 @@ export async function apiDownload(path: string, filename: string, params?: Recor
     }
   }
   const url = `${API_BASE}${path}${q.toString() ? "?" + q : ""}`;
-  const res = await fetch(url);
+  const headers = new Headers();
+  const token = localStorage.getItem("access_token");
+  if (token) headers.set("Authorization", `Bearer ${token}`);
+  const res = await fetch(url, { headers });
   if (!res.ok) {
     const err = await res.json().catch(() => ({ detail: res.statusText }));
     throw new Error(err.detail || `请求失败 (${res.status})`);

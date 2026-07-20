@@ -248,6 +248,11 @@ def manual_trigger(task_key: str) -> str:
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """FastAPI lifespan context — initializes scheduler on startup, shuts down on exit."""
+    global scheduler
+    # AsyncIOScheduler keeps a reference to the event loop it was started on.
+    # Recreate it for every application lifespan so TestClient restarts and
+    # development reloads never reuse a closed loop from a previous run.
+    scheduler = AsyncIOScheduler()
     logger.info("Scheduler: initializing...")
     db = SessionLocal()
     try:

@@ -1,4 +1,5 @@
-from typing import List, Optional
+import json
+from typing import Any, List, Optional
 from sqlalchemy.orm import Session
 from sqlalchemy import func
 from app.models.scraped_product import ScrapedProductRecord
@@ -51,7 +52,10 @@ def create_scraped_product(db: Session, product: ScrapedProductCreate) -> Scrape
         scraped_at=product.scraped_at,
         video_urls=product.video_urls,
         sku_list=product.sku_list,
+        variants=product.variants,
         spec_list=product.spec_list,
+        facts=product.facts,
+        color_list=product.color_list,
         ozon_category_id=product.ozon_category_id,
         ozon_type_id=product.ozon_type_id,
         ozon_metrics=product.ozon_metrics,
@@ -79,6 +83,105 @@ def _is_enriched(new_val, old_val, field_type="str"):
     if field_type == "float":
         return new_val not in (None, 0.0)
     return bool(new_val) and new_val != old_val
+
+
+def _as_list(value: Any) -> list:
+    if isinstance(value, list):
+        return value
+    if isinstance(value, str):
+        try:
+            parsed = json.loads(value)
+            return parsed if isinstance(parsed, list) else []
+        except (TypeError, ValueError):
+            return []
+    return []
+
+
+def _merge_unique_strings(old_value: Any, new_value: Any) -> list[str]:
+    merged: list[str] = []
+    seen: set[str] = set()
+    for value in _as_list(old_value) + _as_list(new_value):
+        if not isinstance(value, str) or not value.strip():
+            continue
+        normalized = value.strip()
+        key = normalized.casefold()
+        if key not in seen:
+            seen.add(key)
+            merged.append(normalized)
+    return merged
+
+
+def _merge_facts(old_value: Any, new_value: Any) -> list[dict]:
+    merged: list[dict] = []
+    by_key: dict[tuple[str, str], dict] = {}
+    for fact in _as_list(old_value) + _as_list(new_value):
+        if not isinstance(fact, dict):
+            continue
+        name = str(fact.get("name") or "").strip()
+        value = str(fact.get("value") or "").strip()
+        if not name or not value:
+            continue
+        key = (name.casefold(), value.casefold())
+        existing = by_key.get(key)
+        source_path = fact.get("sourcePath") or fact.get("source_path")
+        if existing is not None:
+            if source_path and not existing.get("sourcePath"):
+                existing["sourcePath"] = source_path
+            continue
+        normalized = {"name": name, "value": value}
+        if source_path:
+            normalized["sourcePath"] = source_path
+        by_key[key] = normalized
+        merged.append(normalized)
+    return merged
+
+
+def _merge_variants(old_value: Any, new_value: Any) -> list[dict]:
+    merged: list[dict] = []
+    index_by_sku: dict[str, int] = {}
+    for variant in _as_list(old_value) + _as_list(new_value):
+        if not isinstance(variant, dict):
+            continue
+        sku = str(variant.get("sku") or "").strip()
+        if not sku:
+            continue
+        existing_index = index_by_sku.get(sku)
+        if existing_index is None:
+            index_by_sku[sku] = len(merged)
+            normalized = {**variant, "sku": sku}
+            normalized["values"] = _merge_variant_values([], variant.get("values"))
+            merged.append(normalized)
+            continue
+        existing = merged[existing_index]
+        # 新一轮采集中的显式非空字段可以更新旧事实（例如 SKU 最新价格/库存），
+        # 缺失或空字段不会清除已有值；所有操作都严格限制在同一个 SKU 内。
+        enriched = {**existing}
+        for field, value in variant.items():
+            if field in ("sku", "values"):
+                continue
+            if value is not None and value != "" and value != [] and value != {}:
+                enriched[field] = value
+        enriched["values"] = _merge_variant_values(existing.get("values"), variant.get("values"))
+        merged[existing_index] = enriched
+    return merged
+
+
+def _merge_variant_values(old_value: Any, new_value: Any) -> list[dict]:
+    merged: list[dict] = []
+    seen: set[tuple[str, str]] = set()
+    for item in _as_list(old_value) + _as_list(new_value):
+        if not isinstance(item, dict):
+            continue
+        name = str(item.get("name") or "").strip()
+        value = str(item.get("value") or "").strip()
+        if not name or not value:
+            continue
+        key = (name.casefold(), value.casefold())
+        if key in seen:
+            continue
+        seen.add(key)
+        merged.append({"name": name, "value": value})
+    return merged
 
 
 def bulk_create_scraped_products(
@@ -121,7 +224,10 @@ def bulk_create_scraped_products(
                 scraped_at=product.scraped_at,
                 video_urls=product.video_urls,
                 sku_list=product.sku_list,
+                variants=product.variants,
                 spec_list=product.spec_list,
+                facts=product.facts,
+                color_list=product.color_list,
                 ozon_category_id=product.ozon_category_id,
                 ozon_type_id=product.ozon_type_id,
                 ozon_metrics=product.ozon_metrics,
@@ -206,12 +312,7 @@ def bulk_create_scraped_products(
                 new_val = getattr(product, field)
                 if new_val:
                     old_val = getattr(record, field) or []
-                    if isinstance(old_val, str):
-                        import json as _j
-                        try:
-                            old_val = _j.loads(old_val)
-                        except Exception:
-                            old_val = []
+                    old_val = _as_list(old_val)
                     if not old_val:
                         setattr(record, field, new_val)
                         changed = True
@@ -226,6 +327,21 @@ def bulk_create_scraped_products(
                         elif new_val and isinstance(new_val[0], dict):
                             setattr(record, field, new_val)
                             changed = True
+
+            merged_facts = _merge_facts(record.facts, product.facts)
+            if merged_facts != _as_list(record.facts):
+                record.facts = merged_facts
+                changed = True
+
+            merged_colors = _merge_unique_strings(record.color_list, product.color_list)
+            if merged_colors != _as_list(record.color_list):
+                record.color_list = merged_colors
+                changed = True
+
+            merged_variants = _merge_variants(record.variants, product.variants)
+            if merged_variants != _as_list(record.variants):
+                record.variants = merged_variants
+                changed = True
 
             if product.ozon_metrics:
                 old_metrics = record.ozon_metrics or {}

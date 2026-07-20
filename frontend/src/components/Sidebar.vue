@@ -22,6 +22,14 @@
         />
       </div>
       <div class="sidebar-footer" @click.stop>
+        <div v-if="auth.user" class="user-summary">
+          <div class="user-avatar">{{ (auth.user.name || auth.user.email).charAt(0).toUpperCase() }}</div>
+          <div class="user-info">
+            <strong>{{ auth.user.name || "鲸智用户" }}</strong>
+            <span>{{ auth.user.email }}</span>
+          </div>
+          <button class="logout-button" title="退出登录" @click="logout">↪</button>
+        </div>
         <div class="theme-toggle" @click="$emit('toggleTheme')">
           <span v-if="isDark">☀️</span>
           <span v-else>🌙</span>
@@ -36,12 +44,14 @@
 import { computed, h } from "vue";
 import { useRouter, useRoute } from "vue-router";
 import { NMenu, NLayoutSider, type MenuOption } from "naive-ui";
+import { useAuthStore } from "../store/auth";
 
 const props = defineProps<{ isDark: boolean }>();
 defineEmits<{ toggleTheme: [] }>();
 
 const router = useRouter();
 const route = useRoute();
+const auth = useAuthStore();
 
 function renderIcon(emoji: string) {
   return () => h("span", { style: { fontSize: "18px", lineHeight: "1" } }, emoji);
@@ -68,6 +78,11 @@ const activeKey = computed(() => route.name as string);
 
 function handleMenuClick(key: string) {
   router.push({ name: key });
+}
+
+function logout() {
+  auth.logout();
+  router.replace({ name: "Login" });
 }
 </script>
 
@@ -116,6 +131,57 @@ function handleMenuClick(key: string) {
   z-index: 10;
   flex-shrink: 0;
 }
+
+.user-summary {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 8px 12px;
+  margin-bottom: 4px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  min-width: 0;
+}
+
+.user-avatar {
+  width: 28px;
+  height: 28px;
+  display: grid;
+  place-items: center;
+  flex-shrink: 0;
+  border-radius: 50%;
+  background: var(--accent);
+  color: #fff;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.user-info {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  flex: 1;
+}
+
+.user-info strong,
+.user-info span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.user-info strong { color: #fff; font-size: 12px; }
+.user-info span { color: var(--text-sidebar); font-size: 10px; margin-top: 2px; }
+
+.logout-button {
+  border: 0;
+  background: transparent;
+  color: var(--text-sidebar);
+  cursor: pointer;
+  font-size: 18px;
+  padding: 3px;
+}
+
+.logout-button:hover { color: #fff; }
 
 .theme-toggle {
   display: flex;

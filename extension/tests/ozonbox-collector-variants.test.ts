@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { parseHTML } from 'linkedom'
-import { readOfferSelector, readOzonVariantFacts } from '../lib/ozonbox/collector'
+import { readFactualBrand, readOfferSelector, readOzonVariantFacts } from '../lib/ozonbox/collector'
 import { toSelectionProduct } from '../lib/ozonbox/selection-product'
 import { assertCompleteProduct } from '../lib/utils/product-data'
 
@@ -8,6 +8,22 @@ const CURRENT_PRODUCT_ID = '2957860286'
 const ALTERNATE_PRODUCT_ID = '2957859292'
 const CURRENT_URL = `https://www.ozon.ru/product/current-${CURRENT_PRODUCT_ID}/`
 const ALTERNATE_URL = `https://www.ozon.ru/product/alternate-${ALTERNATE_PRODUCT_ID}/`
+
+const brandSpecs = [{ name: 'Brand', value: 'Spec Brand' }]
+assert.equal(readFactualBrand(' JSON-LD Brand ', brandSpecs), 'JSON-LD Brand')
+assert.equal(readFactualBrand({ name: ' Structured Brand ' }, brandSpecs), 'Structured Brand')
+
+for (const name of ['Brand', ' Бренд: ', '品牌：', 'Ｂｒａｎｄ ：']) {
+  assert.equal(readFactualBrand(undefined, [{ name, value: ' Exact Brand ' }]), 'Exact Brand')
+}
+
+assert.equal(readFactualBrand(undefined, [
+  { name: 'Brand name', value: 'Near Match' },
+  { name: 'Бренд товара', value: 'Near Match' },
+  { name: '品牌名称', value: 'Near Match' },
+  { name: 'Seller', value: 'Not a Brand' },
+]), undefined)
+assert.equal(readFactualBrand(undefined, [{ name: 'Brand', value: '' }]), undefined)
 
 function aspectsFixture(currentValue: string, targetValue: string, targetProductId: string, fromSku: string): Document {
   const { document } = parseHTML(`
@@ -186,6 +202,8 @@ const normalizedProduct = assertCompleteProduct(toSelectionProduct({
   recordName: 'Rich factual SKU',
   sku: 'SKU-RICH-1',
   title: 'Rich factual SKU',
+  brand: 'Factual Brand',
+  categoryPath: 'Электроника > Аксессуары',
   images: richVariant.images,
   price: 1299,
   specs: richVariant.supplierAttrs,
@@ -194,7 +212,10 @@ const normalizedProduct = assertCompleteProduct(toSelectionProduct({
   status: 'draft',
 }))
 
+assert.equal(normalizedProduct.brand, 'Factual Brand')
+assert.equal(normalizedProduct.category, 'Электроника > Аксессуары')
 assert.deepEqual(normalizedProduct.skuList, [{ sku: 'SKU-RICH-1', barcode: '' }])
+assert.equal('brand' in normalizedProduct.skuList[0]!, false)
 assert.deepEqual(normalizedProduct.variants, [{
   sku: 'SKU-RICH-1',
   values: [{ name: 'Объем, мл', value: '3' }],

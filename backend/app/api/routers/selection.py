@@ -711,12 +711,26 @@ def update_upload_status(product_id: int, db: Session = Depends(get_db)):
 
 @router.get("/ozon-categories")
 def get_ozon_categories(
-    store_id: int = Query(..., description="店铺ID (必填)"),
-    language: str = Query("ZH_HANS", description="语言: ZH_HANS/RU/EN"),
+    store_id: Optional[int] = Query(None, description="兼容旧客户端；本地读取不需要店铺"),
+    language: str = Query("ZH_HANS", description="本地分类语言，当前仅支持 ZH_HANS"),
     db: Session = Depends(get_db),
 ):
-    """获取 Ozon 商品分类树 - 必须传入 store_id"""
+    """从应用数据库读取完整中文 Ozon 分类树，不访问 Ozon。"""
+    from app.services.ozon_category_service import CHINESE_LANGUAGE, get_category_tree_snapshot
+
+    if language != CHINESE_LANGUAGE:
+        raise HTTPException(status_code=400, detail="本地分类库当前仅支持 ZH_HANS")
+    return get_category_tree_snapshot(db, language=language)
+
+
+@router.post("/ozon-categories/sync")
+def sync_ozon_categories(
+    store_id: int = Query(..., description="用于调用 Ozon 的店铺 ID"),
+    db: Session = Depends(get_db),
+):
+    """通过指定店铺凭证拉取完整中文分类，并原子替换本地快照。"""
     from app.models.store import Store
+    from app.services.ozon_category_service import CHINESE_LANGUAGE, replace_category_snapshot
     from app.services.ozon_client import OzonClient
 
     store = db.query(Store).filter(Store.id == store_id).first()
@@ -724,13 +738,20 @@ def get_ozon_categories(
         raise HTTPException(status_code=404, detail="未找到该店铺")
 
     client = OzonClient(client_id=store.client_id, api_key=store.api_key)
-
     try:
-        tree = client.get_category_tree(language=language)
-        return {"categories": tree}
-    except Exception as e:
-        logger.error("Failed to get category tree: %s", str(e))
-        raise HTTPException(status_code=502, detail=f"获取分类失败: {str(e)}")
+        tree = client.get_category_tree(language=CHINESE_LANGUAGE)
+        return replace_category_snapshot(
+            db,
+            tree,
+            source_store_id=store.id,
+            language=CHINESE_LANGUAGE,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+    except Exception as exc:
+        db.rollback()
+        logger.error("Failed to sync Ozon category tree: %s", str(exc))
+        raise HTTPException(status_code=502, detail=f"同步分类失败: {str(exc)}") from exc
 
 
 @router.post("/price-calc")

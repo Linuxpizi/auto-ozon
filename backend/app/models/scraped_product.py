@@ -29,7 +29,7 @@ class ScrapedProductRecord(Base):
     # ── 新增:物理规格 ──
     # ── 多值字段 (JSON arrays) ──
     video_urls = Column(JSON, default=list, comment="视频 URL 列表")
-    sku_list = Column(JSON, default=list, comment="SKU+条形码列表 [{sku, barcode}]")
+    sku_list = Column(JSON, default=list, comment="可编辑 SKU 列表 [{sku, barcode, name, price, stock, images}]")
     variants = Column(JSON, default=list, comment="真实可售 SKU 及完整变体组合")
     spec_list = Column(JSON, default=list, comment="规格列表 [{weight_g, depth_mm, height_mm, width_mm, color, size, ...}]")
     facts = Column(JSON, default=list, comment="页面/API/BCS 采集事实 [{name, value, sourcePath}]")

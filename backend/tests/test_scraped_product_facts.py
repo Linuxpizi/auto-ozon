@@ -13,6 +13,8 @@ def test_schema_normalizes_extension_payload() -> None:
             "platform": "ozon",
             "sourceId": "123456",
             "title": "Test product",
+            "brand": "Factual Brand",
+            "category": "Электроника > Аксессуары",
             "colorList": ["Black", "Blue"],
             "skuList": '[{"sku":"SKU-1","barcode":"460000000001"}]',
             "facts": '[{"name":"Color","value":"Black","sourcePath":"BCS card"}]',
@@ -22,6 +24,8 @@ def test_schema_normalizes_extension_payload() -> None:
     )
 
     assert product.source_id == "123456"
+    assert product.brand == "Factual Brand"
+    assert product.category == "Электроника > Аксессуары"
     assert product.color_list == ["Black", "Blue"]
     assert product.sku_list == [{"sku": "SKU-1", "barcode": "460000000001"}]
     assert product.facts == [
@@ -32,6 +36,59 @@ def test_schema_normalizes_extension_payload() -> None:
     ]
     assert isinstance(product.scraped_at, datetime)
     assert product.scraped_at.isoformat() == "2026-07-18T12:00:00+00:00"
+
+
+def test_bulk_upsert_persists_and_preserves_product_brand_and_source_category(test_db) -> None:
+    initial = ScrapedProductCreate.model_validate(
+        {
+            "platform": "ozon",
+            "sourceId": "brand-category-1",
+            "title": "Product with source facts",
+            "brand": "Initial Brand",
+            "category": "Электроника > Аксессуары",
+        }
+    )
+
+    created = bulk_create_scraped_products(test_db, [initial])
+    assert len(created) == 1
+    record = created[0]
+    assert record.brand == "Initial Brand"
+    assert record.category == "Электроника > Аксессуары"
+
+    omitted = ScrapedProductCreate.model_validate(
+        {
+            "platform": "ozon",
+            "sourceId": "brand-category-1",
+            "brand": "",
+            "category": "",
+        }
+    )
+    assert bulk_create_scraped_products(test_db, [omitted]) == []
+    test_db.refresh(record)
+    assert record.brand == "Initial Brand"
+    assert record.category == "Электроника > Аксессуары"
+
+    enriched = ScrapedProductCreate.model_validate(
+        {
+            "platform": "ozon",
+            "sourceId": "brand-category-1",
+            "brand": "Updated Factual Brand",
+            "category": "Электроника > Аксессуары > Кабели",
+        }
+    )
+    updated = bulk_create_scraped_products(test_db, [enriched])
+    assert updated == [record]
+    test_db.refresh(record)
+    assert record.brand == "Updated Factual Brand"
+    assert record.category == "Электроника > Аксессуары > Кабели"
+
+    persisted = (
+        test_db.query(ScrapedProductRecord)
+        .filter(ScrapedProductRecord.source_id == "brand-category-1")
+        .one()
+    )
+    assert persisted.brand == "Updated Factual Brand"
+    assert persisted.category == "Электроника > Аксессуары > Кабели"
 
 
 def test_bulk_upsert_preserves_and_enriches_collected_product_data(test_db) -> None:

@@ -13,6 +13,7 @@ from app.api.routers import return_order, feishu_config, powerpaint
 from app.api.routers import image_edit, image_version, auth, ozonbox
 from app.api.dependencies import get_current_user
 from app.core.db import engine, Base
+import app.models  # noqa: F401 - register every model before create_all
 from app.services.scheduler_service import lifespan as scheduler_lifespan
 
 logging.basicConfig(

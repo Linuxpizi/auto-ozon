@@ -16,6 +16,7 @@ class UploadDraftBase(BaseModel):
     type_id: int = 0
     category_name: str = ""
     offer_id: str = ""
+    barcode: str = ""
     name: str = ""
     description: str = ""
     price_cny: float = 0.0
@@ -35,6 +36,7 @@ class CreateDraftRequest(BaseModel):
     """从采集商品创建单个上架草稿"""
     store_id: int
     source_product_id: int
+    source_sku: str = ""
     description_category_id: int = 0
     type_id: int = 0
     category_name: str = ""
@@ -65,6 +67,7 @@ class UpdateDraftRequest(BaseModel):
     type_id: Optional[int] = None
     category_name: Optional[str] = None
     offer_id: Optional[str] = None
+    barcode: Optional[str] = None
     name: Optional[str] = None
     description: Optional[str] = None
     price_cny: Optional[float] = None

@@ -63,6 +63,8 @@ export interface OzonboxCollectedProduct {
   recordName: string
   sku?: string | null
   title: string
+  /** Factual product-level brand; absent when Ozon does not expose one. */
+  brand?: string | null
   titleRu?: string | null
   description?: string | null
   descriptionRu?: string | null
@@ -191,6 +193,7 @@ export function assertOzonboxProductRecord(value: unknown): OzonboxProductRecord
   nonEmptyString(value.sourceUrl, 'sourceUrl')
   nonEmptyString(value.recordName, 'recordName')
   nonEmptyString(value.title, 'title')
+  if (value.brand != null) nonEmptyString(value.brand, 'brand')
   positiveNumber(value.price, '商品价格')
   if (!Array.isArray(value.images) || !Array.isArray(value.specs) || !Array.isArray(value.variantAttrIds)) {
     throw new Error('商品图片、规格和变体属性 ID 必须是数组')

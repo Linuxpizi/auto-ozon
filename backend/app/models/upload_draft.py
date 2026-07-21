@@ -40,6 +40,7 @@ class UploadDraft(Base):
 
     # ── 商品核心数据 ──
     offer_id = Column(String(128), default="", comment="卖家自定义唯一 SKU")
+    barcode = Column(String(128), default="", comment="所选来源 SKU 条码")
     name = Column(String(512), default="", comment="Ozon 商品标题")
     description = Column(Text, default="", comment="Ozon 商品描述 (HTML)")
 

@@ -270,6 +270,7 @@ export function toSelectionProduct(value: unknown): ScrapedProduct {
     ...collected.variantsData.flatMap((variant) => variant.images.map(text)),
     ...collected.images.map(text),
   ])
+  const brand = text(collected.brand)
   const category = text(collected.categoryPath)
   const description = text(collected.description) ?? text(collected.descriptionRu)
   const ozonCategoryId = positiveInteger(collected.descriptionCategoryId)
@@ -285,6 +286,7 @@ export function toSelectionProduct(value: unknown): ScrapedProduct {
     images,
     rating: 0,
     reviewCount: 0,
+    ...(brand ? { brand } : {}),
     ...(category ? { category } : {}),
     ...(description ? { description } : {}),
     sourceUrl: collected.sourceUrl.trim(),

@@ -12,7 +12,7 @@ import logging
 import re
 import uuid
 from datetime import datetime
-from typing import List, Optional, Tuple
+from typing import Any, List, Optional, Tuple
 
 from sqlalchemy.orm import Session
 
@@ -64,11 +64,56 @@ def price_to_kopecks(price_rub: float) -> str:
 
 # ── Draft creation ────────────────────────────────────────────────────
 
+def _normalize_sku_identity(value: Any) -> str:
+    """Match the editable SKU contract used by the selection frontend."""
+    return str(value).strip() if value is not None else ""
+
+
+def _selected_editable_sku(record: ScrapedProductRecord, source_sku: str) -> Optional[dict]:
+    identity = _normalize_sku_identity(source_sku)
+    rows = record.sku_list if isinstance(record.sku_list, list) else []
+    if not identity:
+        return None
+    return next(
+        (
+            row
+            for row in rows
+            if isinstance(row, dict)
+            and _normalize_sku_identity(row.get("sku")) == identity
+        ),
+        None,
+    )
+
+
+def _valid_http_images(value: Any) -> list[str]:
+    if not isinstance(value, list):
+        return []
+    return [
+        image.strip()
+        for image in value
+        if isinstance(image, str) and image.strip().startswith(("http://", "https://"))
+    ]
+
+
+def _draft_number(value: Any) -> float:
+    if isinstance(value, bool):
+        return 0.0
+    if isinstance(value, (int, float)):
+        return float(value)
+    if isinstance(value, str):
+        try:
+            return float(value.strip().replace(",", "."))
+        except ValueError:
+            return 0.0
+    return 0.0
+
+
 def create_draft_from_scraped(
     db: Session,
     store_id: int,
     source_product_id: int,
     *,
+    source_sku: str = "",
     description_category_id: int = 0,
     type_id: int = 0,
     category_name: str = "",
@@ -84,28 +129,57 @@ def create_draft_from_scraped(
     if not record:
         raise ValueError(f"采集商品 {source_product_id} 不存在")
 
-    # Images: filter valid HTTP URLs
-    raw_images = record.images if isinstance(record.images, list) else []
-    valid_images = [img for img in raw_images if img and isinstance(img, str) and img.startswith("http")]
+    selected_sku = _selected_editable_sku(record, source_sku)
+    selected_identity = (
+        _normalize_sku_identity(selected_sku.get("sku"))
+        if selected_sku is not None
+        else ""
+    )
+    effective_source_sku = selected_identity or _normalize_sku_identity(record.source_id)
+
+    # Property ownership matters here: ``images: []`` means the user cleared
+    # this SKU and must not be silently repopulated from product-level images.
+    image_source = (
+        selected_sku.get("images")
+        if selected_sku is not None and "images" in selected_sku
+        else record.images
+    )
+    valid_images = _valid_http_images(image_source)
+    selected_name = (
+        str(selected_sku.get("name") or "").strip()
+        if selected_sku is not None and "name" in selected_sku
+        else record.title or ""
+    )
+    selected_price = (
+        _draft_number(selected_sku.get("price"))
+        if selected_sku is not None and "price" in selected_sku
+        else _draft_number(record.price)
+    )
+    selected_barcode = (
+        str(selected_sku.get("barcode") or "").strip()
+        if selected_sku is not None and "barcode" in selected_sku
+        else ""
+    )
 
     # Auto-generate offer_id if empty
     if not offer_id:
-        offer_id = generate_offer_id(source_product_id, record.source_id)
+        offer_id = generate_offer_id(source_product_id, effective_source_sku)
 
     draft_data = {
         "store_id": store_id,
         "source_type": "scraped",
         "source_product_id": source_product_id,
-        "source_sku": record.source_id or "",
-        "source_name": record.title or "",
+        "source_sku": effective_source_sku,
+        "source_name": selected_name,
         "source_url": "",
         "source_images": valid_images,
         "description_category_id": description_category_id,
         "type_id": type_id,
         "category_name": category_name or record.category or "",
         "offer_id": offer_id,
-        "name": name or record.title or "",
-        "price_cny": record.price or 0.0,
+        "barcode": selected_barcode,
+        "name": name or selected_name,
+        "price_cny": selected_price,
         "price_rub": price_rub,
         "old_price_rub": old_price_rub,
         "primary_image": valid_images[0] if valid_images else "",
@@ -182,7 +256,7 @@ def _build_ozon_item(draft: UploadDraft) -> dict:
         "name": draft.name,
         "description_category_id": draft.description_category_id,
         "type_id": draft.type_id,
-        "barcode": "",
+        "barcode": draft.barcode or "",
         "dimension_unit": "mm",
         "weight_unit": "g",
         "height": draft.height or 100,

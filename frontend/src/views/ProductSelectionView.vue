@@ -77,9 +77,7 @@
     </div>
 
     <!-- ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-         编辑抽屉 — 左右联动面板
-         左侧:原始数据 (只读)
-         右侧:编辑数据 + AI按钮
+         编辑抽屉 — 单栏编辑面板
          ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ -->
     <n-drawer v-model:show="drawerVisible" :width="920" placement="right" :closable="true" :mask-closable="true"
       :theme-overrides="drawerThemeOverrides">
@@ -96,167 +94,8 @@
         </template>
 
         <div v-if="editProduct" class="edit-drawer-body">
-          <!-- 左栏: 原始数据 (只读) -->
-          <div ref="panelLeftRef" class="panel-left" @scroll="handlePanelScroll('left')">
-            <div class="panel-title">📋 原始数据</div>
-
-            <div class="section-block">
-              <div class="section-label">商品名称</div>
-              <div class="readonly-text">{{ editProduct.title || '—' }}</div>
-            </div>
-
-            <div class="section-block">
-              <div class="section-label">商品图片</div>
-              <div v-if="editProduct.images?.length" class="gallery-row">
-                <div v-for="(img, idx) in editProduct.images" :key="idx" class="gallery-item"
-                  :class="{ 'is-main': idx === 0 }">
-                  <n-image :src="img" :width="idx === 0 ? 100 : 64" :height="idx === 0 ? 100 : 64" object-fit="cover"
-                    preview-disabled class="gallery-img" />
-                  <span v-if="idx === 0" class="main-badge">主</span>
-                </div>
-              </div>
-              <div v-else class="empty-hint">暂无图片</div>
-            </div>
-
-            <n-divider style="margin:8px 0" />
-
-            <div class="section-block">
-              <div class="section-label">基础信息</div>
-              <div class="info-grid">
-                <div class="info-item"><span class="info-key">品牌</span><span>{{ editProduct.brand || '—' }}</span></div>
-                <div class="info-item"><span class="info-key">分类</span><span>{{ editProduct.category || '—' }}</span>
-                </div>
-                <div class="info-item"><span class="info-key">评分</span><span>{{ editProduct.rating ?? '—' }}</span>
-                </div>
-                <div class="info-item"><span class="info-key">评论</span><span>{{ editProduct.review_count ?? '—'
-                    }}</span>
-                </div>
-              </div>
-            </div>
-
-            <div class="section-block">
-              <div class="section-label">价格</div>
-              <div class="info-grid">
-                <div class="info-item"><span class="info-key">现价</span><span>{{ editProduct.price?.toLocaleString() }}
-                    {{
-                      _currencySymbol(editProduct.currency) }}</span></div>
-                <div class="info-item" v-if="editProduct.old_price"><span class="info-key">原价</span><span
-                    style="text-decoration:line-through; color:#999">{{ editProduct.old_price?.toLocaleString() }} {{
-                      _currencySymbol(editProduct.currency) }}</span></div>
-                <div class="info-item" v-if="editProduct.discount"><span class="info-key">折扣</span><span>{{
-                    editProduct.discount }}</span></div>
-              </div>
-            </div>
-
-            <div class="section-block">
-              <div class="section-label">商品描述</div>
-              <div class="readonly-text">{{ editProduct.description || '暂无描述' }}</div>
-            </div>
-
-            <!-- BCS / 页面采集结果：只读，避免人工编辑时误改真实采集事实 -->
-            <div class="section-block" v-if="editProduct.color_list?.length">
-              <div class="section-label">采集颜色</div>
-              <div class="tag-list">
-                <n-tag v-for="color in editProduct.color_list" :key="color" size="small" type="info" :bordered="false">
-                  {{ color }}
-                </n-tag>
-              </div>
-            </div>
-
-            <div class="section-block" v-if="editProduct.facts?.length">
-              <div class="section-label">采集事实 / 商品特征</div>
-              <div class="facts-list">
-                <div v-for="(fact, idx) in editProduct.facts" :key="`${fact.name}-${fact.value}-${idx}`" class="fact-row">
-                  <span class="fact-name">{{ fact.name || '未命名属性' }}</span>
-                  <span class="fact-value">{{ fact.value || '—' }}</span>
-                  <span v-if="fact.sourcePath" class="fact-source">{{ fact.sourcePath }}</span>
-                </div>
-              </div>
-            </div>
-
-            <div class="section-block" v-if="editProduct.spec_list?.length">
-              <div class="section-label">物理规格</div>
-              <div class="info-grid">
-                <div class="info-item" v-if="editProduct.spec_list[0]?.weight_g"><span
-                    class="info-key">重量</span><span>{{
-                      editProduct.spec_list[0].weight_g }}g</span></div>
-                <div class="info-item" v-if="editProduct.spec_list[0]?.width_mm"><span class="info-key">宽</span><span>{{
-                  editProduct.spec_list[0].width_mm }}mm</span></div>
-                <div class="info-item" v-if="editProduct.spec_list[0]?.height_mm"><span
-                    class="info-key">高</span><span>{{
-                      editProduct.spec_list[0].height_mm }}mm</span></div>
-                <div class="info-item" v-if="editProduct.spec_list[0]?.depth_mm"><span class="info-key">深</span><span>{{
-                  editProduct.spec_list[0].depth_mm }}mm</span></div>
-              </div>
-            </div>
-
-            <div class="section-block">
-              <div class="section-label">来源信息</div>
-              <div class="info-grid">
-                <div class="info-item"><span class="info-key">平台</span><span>{{ editProduct.platform }}</span></div>
-                <div class="info-item"><span class="info-key">卖家</span><span>{{ editProduct.seller_name || '—' }}</span>
-                </div>
-                <div class="info-item" style="grid-column: span 2">
-                  <span class="info-key">链接</span>
-                  <n-a v-if="editProduct.source_url" :href="editProduct.source_url" target="_blank"
-                    style="font-size:12px; word-break:break-all">{{ editProduct.source_url }}</n-a>
-                  <span v-else>—</span>
-                </div>
-              </div>
-            </div>
-          </div>
-
-          <!-- 右栏: 编辑数据 -->
-          <div ref="panelRightRef" class="panel-right" @scroll="handlePanelScroll('right')">
-            <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:12px;">
-              <div class="panel-title" style="margin-bottom:0">✨ 优化数据</div>
-              <n-button size="small" type="primary" :loading="aiOneClickLoading" @click="handleOneClickAiOptimize">
-                🤖 一键AI优化
-              </n-button>
-            </div>
-
-            <!-- 标题 -->
-            <div class="section-block">
-              <div class="section-label">
-                商品名称
-                <div class="section-actions">
-                  <n-button size="tiny" quaternary @click="handleAiTranslate('title')">🌐 翻译</n-button>
-                  <n-button size="tiny" quaternary @click="handleAiOptimize('title')">✨ AI优化</n-button>
-                </div>
-              </div>
-              <n-input v-model:value="editProduct.title" type="textarea" :rows="2" placeholder="商品名称" />
-            </div>
-
-            <!-- 图片管理 -->
-            <div class="section-block">
-              <div class="section-label">
-                商品图片
-                <div class="section-actions">
-                  <n-button size="tiny" quaternary @click="handleAiOptimizeImages">✨ AI优化全部</n-button>
-                  <n-button size="tiny" quaternary @click="handleAiGenerateImages">🎨 AI批量生成</n-button>
-                </div>
-              </div>
-              <div class="image-manager">
-                <div v-for="(img, idx) in editProduct.images" :key="idx" class="image-card">
-                  <n-image :src="img" width="80" height="80" object-fit="cover" preview-disabled class="gallery-img" />
-                  <div class="image-actions">
-                    <n-button size="tiny" quaternary type="primary" @click="handleAiOptimizeImage(idx)"
-                      :loading="aiImageLoading === idx">✨</n-button>
-                    <n-button size="tiny" quaternary type="info" @click="openEditor(idx)">✏️</n-button>
-                    <n-button size="tiny" quaternary type="error" @click="removeImage(idx)">✕</n-button>
-                  </div>
-                  <span v-if="idx === 0" class="main-badge">主图</span>
-                </div>
-                <div class="image-card image-add" @click="triggerImageUpload">
-                  <span style="font-size:24px; color:#ccc">+</span>
-                  <span style="font-size:11px; color:#999">添加图片</span>
-                </div>
-              </div>
-              <input ref="imageUploadRef" type="file" accept="image/*" multiple style="display:none"
-                @change="handleImageUpload" />
-            </div>
-
-            <n-divider style="margin:8px 0" />
+          <div class="panel-right">
+            <div class="panel-title">商品数据</div>
 
             <!-- 基础信息 -->
             <div class="section-block">
@@ -275,21 +114,33 @@
 
             <!-- 店铺与 Ozon 分类 -->
             <div class="section-block">
-              <div class="section-label">🏪 店铺与 Ozon 分类</div>
+              <div class="section-label category-section-heading">
+                <span>🏪 店铺与 Ozon 分类</span>
+                <n-button size="tiny" type="primary" secondary :loading="categorySyncing"
+                  :disabled="!editProduct.store_id" @click="syncCategoryTree">
+                  同步中文分类
+                </n-button>
+              </div>
               <n-grid :cols="1" :x-gap="8">
                 <n-gi>
                   <div class="field-label">Ozon 店铺</div>
                   <n-select v-model:value="editProduct.store_id" :options="storeOptions" placeholder="选择店铺" size="small"
                     clearable @update:value="onEditStoreChange" />
+                  <div class="category-selection-hint">浏览本地分类无需店铺；只有从 Ozon 同步分类时才使用所选店铺凭证。</div>
                 </n-gi>
                 <n-gi style="margin-top:8px">
-                  <div class="field-label">商品分类</div>
-                  <n-popover trigger="click" placement="bottom-start" :disabled="!editProduct.store_id"
-                    :show="editCategoryPopoverShow" @update:show="(v: boolean) => editCategoryPopoverShow = v" raw
-                    :style="{ width: '420px' }">
+                  <div class="field-label category-field-heading">
+                    <span>商品分类（本地中文库）</span>
+                    <span class="category-snapshot-meta">
+                      {{ categorySnapshotCount }} 个节点
+                      <template v-if="categorySyncedAt"> · {{ formatCategorySyncedAt(categorySyncedAt) }}</template>
+                    </span>
+                  </div>
+                  <n-popover trigger="click" placement="bottom-start" :show="editCategoryPopoverShow"
+                    @update:show="(v: boolean) => editCategoryPopoverShow = v" raw :style="{ width: '420px' }">
                     <template #trigger>
-                      <n-input :value="editSelectedCategoryLabel" placeholder="请先选择店铺,然后点击选择分类" readonly
-                        :disabled="!editProduct.store_id" size="small" style="cursor: pointer">
+                      <n-input :value="editSelectedCategoryLabel" placeholder="点击选择本地 Ozon 中文分类" readonly
+                        :loading="categoryLoading" size="small" style="cursor: pointer">
                         <template #suffix>
                           <n-icon v-if="editSelectedCategoryLabel" @click.stop="clearEditCategorySelection"
                             style="cursor: pointer">
@@ -325,12 +176,20 @@
                           点击下方分类节点后，这里会显示当前已选分类
                         </template>
                       </div>
-                      <div style="height: 360px; overflow-y: auto; padding: 4px 0;">
+                      <div v-if="categoryTreeNodes.length" style="height: 360px; overflow-y: auto; padding: 4px 0;">
                         <n-tree :data="categoryTreeNodes" :selected-keys="editSelectedCategoryKeys"
                           :expanded-keys="expandedCategoryKeys" :cascade="false"
                           :pattern="editCategorySearchPattern || undefined" :filter="filterCategoryTree"
                           @update:selected-keys="onCategoryTreeSelect" @update:expanded-keys="onCategoryTreeExpand" />
                       </div>
+                      <n-empty v-else description="本地暂无 Ozon 中文分类" style="padding: 48px 16px;">
+                        <template #extra>
+                          <n-button size="small" type="primary" :loading="categorySyncing"
+                            :disabled="!editProduct.store_id" @click="syncCategoryTree">
+                            选择店铺后同步
+                          </n-button>
+                        </template>
+                      </n-empty>
                     </div>
                   </n-popover>
                   <div v-if="editSelectedCategoryLabel" class="category-selection-summary">
@@ -350,31 +209,188 @@
               </n-grid>
             </div>
 
-            <!-- 价格 -->
-            <div class="section-block">
+            <!-- 采集 variants 与可编辑 sku_list 按 SKU 身份统一呈现 -->
+            <div class="section-block sku-editor-section">
               <div class="section-label">
-                价格与促销
-                <div class="section-actions">
-                  <n-button size="tiny" type="warning" @click="showSmartPricingModal" :loading="smartPricingLoading">💰
-                    智能定价</n-button>
+                <span>SKU 变体</span>
+                <n-tag size="tiny" type="success" :bordered="false">{{ skuEditorRows.length }} 个 SKU</n-tag>
+              </div>
+              <div class="sku-editor-hint">
+                左侧选择 SKU，右侧编辑该 SKU 的标题、条码、上架价格和库存。采集图集、视频及价格事实只读。
+              </div>
+
+              <div v-if="skuEditorRows.length" class="sku-editor-content">
+                <div class="sku-selector-list" role="tablist" aria-label="SKU 列表">
+                  <button v-for="item in skuEditorRows" :key="item.key" type="button" role="tab"
+                    class="sku-selector-item" :class="{ 'sku-selector-item--active': activeSkuKey === item.key }"
+                    :aria-selected="activeSkuKey === item.key" @click="selectedSkuKey = item.key">
+                    <img v-if="item.variant?.images?.[0]" :src="item.variant.images[0]" alt="" />
+                    <span v-else class="sku-selector-item__placeholder">SKU</span>
+                    <span class="sku-selector-item__content">
+                      <strong>{{ item.variant?.sku || item.row.sku || '待填写 SKU' }}</strong>
+                      <small>{{ item.row.name || (item.variant ? '采集 SKU' : '人工 SKU') }}</small>
+                    </span>
+                    <span class="sku-selector-item__status" :class="{ 'is-manual': !item.variant }">
+                      {{ item.variant ? '采集' : '人工' }}
+                    </span>
+                  </button>
+                </div>
+
+                <div v-for="item in selectedSkuEditorRows" :key="item.key" class="sku-editor-card"
+                  :class="{ 'sku-editor-card--collected': item.variant }">
+                  <div class="sku-editor-card__header">
+                    <div class="sku-editor-card__identity">
+                      <div class="sku-editor-card__eyebrow">SKU</div>
+                      <strong>{{ item.variant?.sku || item.row.sku || '待填写 SKU' }}</strong>
+                      <span v-if="item.row.name">{{ item.row.name }}</span>
+                    </div>
+                    <n-tag v-if="item.variant" size="tiny" type="success" :bordered="false">采集 SKU</n-tag>
+                    <n-tag v-else size="tiny" type="info" :bordered="false">人工 SKU</n-tag>
+                    <n-button v-if="!item.variant" size="tiny" quaternary type="error"
+                      @click="removeSku(item.row)">删除</n-button>
+                  </div>
+
+                  <div class="sku-subsection-heading sku-subsection-heading--editable">
+                    <div class="sku-subsection-title">SKU 标题</div>
+                    <div class="section-actions">
+                      <n-button size="tiny" quaternary :loading="aiTextLoading"
+                        @click="handleAiTranslateSkuTitle(item.row)">🌐 翻译</n-button>
+                      <n-button size="tiny" quaternary :loading="aiTextLoading"
+                        @click="handleAiOptimizeSkuTitle(item.row)">✨ AI优化</n-button>
+                    </div>
+                  </div>
+                  <div class="sku-editor-field sku-editor-field--wide">
+                    <div class="field-label">上架标题</div>
+                    <n-input v-model:value="item.row.name" type="textarea" :rows="2"
+                      placeholder="请输入当前 SKU 的上架标题" />
+                  </div>
+
+                  <section class="sku-editable-images">
+                    <div class="sku-subsection-heading">
+                      <div class="sku-subsection-title">当前 SKU 上架图片</div>
+                      <n-tag size="tiny" type="info" :bordered="false">SKU 独立保存</n-tag>
+                    </div>
+                    <div class="sku-editor-card__hint">
+                      删除和新增只影响当前 SKU；编辑某个图片 URL 时，会同步更新其他 SKU 对同一原图的引用。
+                    </div>
+                    <div class="sku-image-toolbar">
+                      <n-button size="tiny" quaternary :loading="aiImageBatchLoading"
+                        :disabled="!item.row.images?.length" @click="handleAiOptimizeImages(item.row)">✨ AI 优化全部</n-button>
+                      <n-button size="tiny" quaternary type="primary" :loading="aiImageGenerateLoading"
+                        @click="handleAiGenerateImages(item.row)">🎨 AI 生成图片</n-button>
+                    </div>
+                    <div class="image-manager">
+                      <div v-for="(img, idx) in (item.row.images || [])" :key="`${img}-${idx}`" class="image-card">
+                        <n-image :src="img" width="80" height="80" object-fit="cover" preview-disabled
+                          class="gallery-img" />
+                        <div class="image-actions">
+                          <n-button size="tiny" quaternary type="primary" :loading="aiImageLoading === img"
+                            @click="handleAiOptimizeImage(item.row, img)">✨</n-button>
+                          <n-button size="tiny" quaternary type="info" @click="openEditor(item.row, idx)">✏️</n-button>
+                          <n-button size="tiny" quaternary type="error" @click="removeImage(item.row, idx)">✕</n-button>
+                        </div>
+                        <span v-if="idx === 0" class="main-badge">主图</span>
+                      </div>
+                      <button type="button" class="image-card image-add" @click="triggerImageUpload">
+                        <span class="image-add__icon">+</span>
+                        <span>添加图片</span>
+                      </button>
+                    </div>
+                    <input ref="imageUploadRef" type="file" accept="image/*" multiple class="image-upload-input"
+                      @change="handleImageUpload" />
+                  </section>
+
+                  <section v-if="item.variant" class="sku-facts">
+                    <div class="sku-subsection-heading">
+                      <div class="sku-subsection-title">当前 SKU 采集图片</div>
+                      <n-tag size="tiny" :bordered="false">采集事实 · 只读</n-tag>
+                    </div>
+                    <div v-if="item.variant.images?.length" class="sku-media-grid">
+                      <n-image v-for="(image, imageIndex) in item.variant.images" :key="`${image}-${imageIndex}`"
+                        :src="image" width="72" height="72" object-fit="cover" class="sku-editor-card__image" />
+                    </div>
+                    <div v-else class="sku-editor-card__empty">当前 SKU 未采集到商品图片</div>
+                    <div v-if="item.variant.videoUrls?.length" class="sku-video-grid">
+                      <video v-for="(video, videoIndex) in item.variant.videoUrls" :key="`${video}-${videoIndex}`"
+                        :src="video" controls preload="metadata" />
+                    </div>
+
+                    <div class="sku-subsection-title">其他采集事实</div>
+                    <div class="sku-fact-grid">
+                      <div v-if="item.variant.stock !== undefined"><span>库存</span><strong>{{ item.variant.stock }}</strong></div>
+                      <div v-if="item.variant.weight !== undefined"><span>重量</span><strong>{{ item.variant.weight }} g</strong></div>
+                      <div v-if="item.variant.depth !== undefined"><span>长</span><strong>{{ item.variant.depth }} mm</strong></div>
+                      <div v-if="item.variant.width !== undefined"><span>宽</span><strong>{{ item.variant.width }} mm</strong></div>
+                      <div v-if="item.variant.height !== undefined"><span>高</span><strong>{{ item.variant.height }} mm</strong></div>
+                    </div>
+                    <div v-if="variantValueEntries(item.variant).length" class="variant-values sku-editor-card__values">
+                      <n-tag v-for="entry in variantValueEntries(item.variant)" :key="entry.key" size="small" type="info"
+                        :bordered="false">{{ entry.name }}：{{ entry.value }}</n-tag>
+                    </div>
+                    <div v-if="variantIdentityEntries(item.variant).length" class="sku-identifiers">
+                      <div v-for="entry in variantIdentityEntries(item.variant)" :key="entry.label">
+                        <span>{{ entry.label }}</span><code>{{ entry.value }}</code>
+                      </div>
+                    </div>
+                    <div v-if="supplierFactEntries(item.variant).length" class="sku-supplier-facts">
+                      <n-collapse arrow-placement="right">
+                        <n-collapse-item title="其他采集属性" name="supplier-facts">
+                          <div v-for="entry in supplierFactEntries(item.variant)" :key="entry.key" class="sku-supplier-fact">
+                            <span>{{ entry.name }}</span><strong>{{ entry.value }}</strong>
+                          </div>
+                        </n-collapse-item>
+                      </n-collapse>
+                    </div>
+                    <div v-if="item.variant.sourcePath || item.variant.sourceUrl" class="sku-editor-card__source">
+                      <span v-if="item.variant.sourcePath">采集来源：{{ item.variant.sourcePath }}</span>
+                      <a v-if="item.variant.sourceUrl" :href="item.variant.sourceUrl" target="_blank" rel="noopener noreferrer">查看 SKU 来源页</a>
+                    </div>
+                  </section>
+                  <div v-else class="sku-editor-card__empty sku-editor-card__empty--manual">
+                    该人工 SKU 暂无采集图集、视频、采集价格和促销事实。
+                  </div>
+
+                  <div class="sku-subsection-title sku-subsection-title--editable">价格与促销</div>
+                  <div class="sku-pricing-grid">
+                    <div class="sku-editor-field">
+                      <div class="field-label">上架价格（{{ _currencySymbol(editProduct.currency) }}）</div>
+                      <n-input-number v-model:value="item.row.price" size="small" :min="0" :precision="2"
+                        placeholder="未设置" style="width:100%" />
+                    </div>
+                    <div v-if="item.variant?.price !== undefined" class="sku-readonly-field">
+                      <span>采集当前价</span>
+                      <strong>{{ formatVariantMoney(item.variant.price) }}</strong>
+                    </div>
+                    <div v-if="item.variant?.oldPrice !== undefined" class="sku-readonly-field">
+                      <span>采集原价 / 促销参考</span>
+                      <strong>{{ formatVariantMoney(item.variant.oldPrice) }}</strong>
+                    </div>
+                  </div>
+                  <div v-if="item.variant" class="sku-editor-card__hint">
+                    采集价格与促销信息仅供参考；保存时只更新当前 SKU 的上架价格。
+                  </div>
+
+                  <div class="sku-subsection-title sku-subsection-title--editable">上架数据</div>
+                  <div class="sku-editor-fields">
+                    <div class="sku-editor-field">
+                      <div class="field-label">SKU 编码</div>
+                      <n-input v-model:value="item.row.sku" size="small" placeholder="请输入 SKU"
+                        :disabled="Boolean(item.variant)" />
+                    </div>
+                    <div class="sku-editor-field">
+                      <div class="field-label">条码</div>
+                      <n-input v-model:value="item.row.barcode" size="small" placeholder="未设置" />
+                    </div>
+                    <div class="sku-editor-field">
+                      <div class="field-label">库存</div>
+                      <n-input-number v-model:value="item.row.stock" size="small" :min="0" :precision="0"
+                        placeholder="未设置" style="width:100%" />
+                    </div>
+                  </div>
                 </div>
               </div>
-              <n-grid :cols="3" :x-gap="8">
-                <n-gi>
-                  <div class="field-label">现价</div>
-                  <n-input-number v-model:value="editProduct.price" :min="0" :precision="2" size="small"
-                    style="width:100%" />
-                </n-gi>
-                <n-gi>
-                  <div class="field-label">原价</div>
-                  <n-input-number v-model:value="editProduct.old_price" :min="0" :precision="2" size="small"
-                    style="width:100%" />
-                </n-gi>
-                <n-gi>
-                  <div class="field-label">折扣</div>
-                  <n-input v-model:value="editProduct.discount" size="small" placeholder="e.g. -30%" />
-                </n-gi>
-              </n-grid>
+              <div v-else class="sku-editor-empty">暂无 SKU，点击下方按钮添加</div>
+              <n-button size="small" dashed block class="sku-add-button" @click="addSku">+ 添加人工 SKU</n-button>
             </div>
 
             <!-- 描述 -->
@@ -382,8 +398,8 @@
               <div class="section-label">
                 商品描述
                 <div class="section-actions">
-                  <n-button size="tiny" quaternary @click="handleAiTranslate('description')">🌐 翻译</n-button>
-                  <n-button size="tiny" quaternary @click="handleAiOptimize('description')">✨ AI优化</n-button>
+                  <n-button size="tiny" quaternary @click="handleAiTranslate">🌐 翻译</n-button>
+                  <n-button size="tiny" quaternary @click="handleAiOptimize">✨ AI优化</n-button>
                 </div>
               </div>
               <n-input v-model:value="editProduct.description" type="textarea" :rows="4" placeholder="商品描述" />
@@ -430,102 +446,6 @@
               </n-grid>
             </div>
 
-            <!-- 采集 variants 与可编辑 sku_list 按 SKU 身份统一呈现 -->
-            <div class="section-block sku-editor-section">
-              <div class="section-label">
-                <span>SKU 变体与价格库存</span>
-                <n-tag size="tiny" type="success" :bordered="false">{{ skuEditorRows.length }} 个 SKU</n-tag>
-              </div>
-              <div class="sku-editor-hint">
-                每个采集 SKU 均单独展示；变体属性为采集事实，只读。条码、价格和库存保存到 SKU 数据。
-              </div>
-
-              <div v-if="skuEditorRows.length" class="sku-editor-list">
-                <div v-for="item in skuEditorRows" :key="item.key" class="sku-editor-card"
-                  :class="{ 'sku-editor-card--collected': item.variant }">
-                  <div class="sku-editor-card__header">
-                    <div class="sku-editor-card__identity">
-                      <div class="sku-editor-card__eyebrow">SKU</div>
-                      <strong>{{ item.variant?.sku || item.row.sku || '待填写 SKU' }}</strong>
-                      <span v-if="item.row.name">{{ item.row.name }}</span>
-                    </div>
-                    <n-tag v-if="item.variant" size="tiny" type="success" :bordered="false">采集 SKU</n-tag>
-                    <n-tag v-else size="tiny" type="info" :bordered="false">人工 SKU</n-tag>
-                    <n-button v-if="!item.variant" size="tiny" quaternary type="error"
-                      @click="removeSku(item.row)">删除</n-button>
-                  </div>
-
-                  <section v-if="item.variant" class="sku-facts">
-                    <div class="sku-subsection-title">采集事实</div>
-                    <div v-if="item.variant.images?.length" class="sku-media-grid">
-                      <n-image v-for="(image, imageIndex) in item.variant.images" :key="`${image}-${imageIndex}`"
-                        :src="image" width="72" height="72" object-fit="cover" class="sku-editor-card__image" />
-                    </div>
-                    <div v-if="item.variant.videoUrls?.length" class="sku-video-grid">
-                      <video v-for="(video, videoIndex) in item.variant.videoUrls" :key="`${video}-${videoIndex}`"
-                        :src="video" controls preload="metadata" />
-                    </div>
-                    <div class="sku-fact-grid">
-                      <div v-if="item.variant.price !== undefined"><span>当前价</span><strong>{{ formatVariantMoney(item.variant.price) }}</strong></div>
-                      <div v-if="item.variant.oldPrice !== undefined"><span>原价</span><strong>{{ formatVariantMoney(item.variant.oldPrice) }}</strong></div>
-                      <div v-if="item.variant.stock !== undefined"><span>库存</span><strong>{{ item.variant.stock }}</strong></div>
-                      <div v-if="item.variant.weight !== undefined"><span>重量</span><strong>{{ item.variant.weight }} g</strong></div>
-                      <div v-if="item.variant.depth !== undefined"><span>长</span><strong>{{ item.variant.depth }} mm</strong></div>
-                      <div v-if="item.variant.width !== undefined"><span>宽</span><strong>{{ item.variant.width }} mm</strong></div>
-                      <div v-if="item.variant.height !== undefined"><span>高</span><strong>{{ item.variant.height }} mm</strong></div>
-                    </div>
-                    <div v-if="variantValueEntries(item.variant).length" class="variant-values sku-editor-card__values">
-                      <n-tag v-for="entry in variantValueEntries(item.variant)" :key="entry.key" size="small" type="info"
-                        :bordered="false">{{ entry.name }}：{{ entry.value }}</n-tag>
-                    </div>
-                    <div v-if="variantIdentityEntries(item.variant).length" class="sku-identifiers">
-                      <div v-for="entry in variantIdentityEntries(item.variant)" :key="entry.label">
-                        <span>{{ entry.label }}</span><code>{{ entry.value }}</code>
-                      </div>
-                    </div>
-                    <div v-if="supplierFactEntries(item.variant).length" class="sku-supplier-facts">
-                      <n-collapse arrow-placement="right">
-                        <n-collapse-item title="其他采集属性" name="supplier-facts">
-                          <div v-for="entry in supplierFactEntries(item.variant)" :key="entry.key" class="sku-supplier-fact">
-                            <span>{{ entry.name }}</span><strong>{{ entry.value }}</strong>
-                          </div>
-                        </n-collapse-item>
-                      </n-collapse>
-                    </div>
-                    <div v-if="item.variant.sourcePath || item.variant.sourceUrl" class="sku-editor-card__source">
-                      <span v-if="item.variant.sourcePath">采集来源：{{ item.variant.sourcePath }}</span>
-                      <a v-if="item.variant.sourceUrl" :href="item.variant.sourceUrl" target="_blank" rel="noopener noreferrer">查看 SKU 来源页</a>
-                    </div>
-                  </section>
-
-                  <div class="sku-subsection-title sku-subsection-title--editable">上架数据</div>
-                  <div class="sku-editor-fields">
-                    <div class="sku-editor-field">
-                      <div class="field-label">SKU 编码</div>
-                      <n-input v-model:value="item.row.sku" size="small" placeholder="请输入 SKU"
-                        :disabled="Boolean(item.variant)" />
-                    </div>
-                    <div class="sku-editor-field">
-                      <div class="field-label">条码</div>
-                      <n-input v-model:value="item.row.barcode" size="small" placeholder="未设置" />
-                    </div>
-                    <div class="sku-editor-field">
-                      <div class="field-label">价格（{{ _currencySymbol(editProduct.currency) }}）</div>
-                      <n-input-number v-model:value="item.row.price" size="small" :min="0" :precision="2"
-                        placeholder="未设置" style="width:100%" />
-                    </div>
-                    <div class="sku-editor-field">
-                      <div class="field-label">库存</div>
-                      <n-input-number v-model:value="item.row.stock" size="small" :min="0" :precision="0"
-                        placeholder="未设置" style="width:100%" />
-                    </div>
-                  </div>
-                </div>
-              </div>
-              <div v-else class="sku-editor-empty">暂无 SKU，点击下方按钮添加</div>
-              <n-button size="small" dashed block class="sku-add-button" @click="addSku">+ 添加人工 SKU</n-button>
-            </div>
-
             <!-- 来源信息 -->
             <div class="section-block">
               <div class="section-label">来源信息</div>
@@ -570,6 +490,14 @@
       </n-drawer-content>
     </n-drawer>
 
+    <n-modal v-model:show="editorVisible" :mask-closable="true" :close-on-esc="true"
+      style="width: 85vw; max-width: 1400px; height: 75vh;"
+      content-style="padding: 0; height: 75vh; overflow: hidden;">
+      <div class="image-editor-modal">
+        <ImageEditor :image-url="editorImageUrl" @apply="onEditorApply" @close="editorVisible = false" />
+      </div>
+    </n-modal>
+
     <!-- ━━━ 1688 搜索同款弹窗 ━━━ -->
     <n-modal v-model:show="search1688Visible" preset="card" style="width: 800px;" :bordered="false">
       <template #header>
@@ -608,116 +536,6 @@
       </n-space>
     </n-modal>
 
-    <!-- ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-         上传到 Ozon 弹窗
-         ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ -->
-
-    <!-- ━━━ 智能定价弹窗 ━━━ -->
-    <n-modal v-model:show="smartPricingVisible" preset="card" style="width: 600px;" :bordered="false">
-      <template #header>
-        <span>💰 智能定价</span>
-      </template>
-      <n-space vertical :size="16">
-        <n-grid :cols="2" :x-gap="12" :y-gap="8">
-          <n-gi>
-            <div class="field-label">采购价 (CNY)</div>
-            <n-input-number v-model:value="pricingForm.cost_cny" :min="0" :precision="2" size="small" style="width:100%"
-              placeholder="1688 采购价" />
-          </n-gi>
-          <n-gi>
-            <div class="field-label">运费 (CNY)</div>
-            <n-input-number v-model:value="pricingForm.shipping_cny" :min="0" :precision="2" size="small"
-              style="width:100%" placeholder="国际运费" />
-          </n-gi>
-          <n-gi>
-            <div class="field-label">包装费 (CNY)</div>
-            <n-input-number v-model:value="pricingForm.packaging_cny" :min="0" :precision="2" size="small"
-              style="width:100%" placeholder="包装费" />
-          </n-gi>
-          <n-gi>
-            <div class="field-label">汇率 (CNY→RUB)</div>
-            <n-input-number v-model:value="pricingForm.exchange_rate" :min="0" :precision="2" size="small"
-              style="width:100%" />
-          </n-gi>
-          <n-gi>
-            <div class="field-label">Ozon 佣金 (%)</div>
-            <n-input-number v-model:value="pricingForm.ozon_commission_pct" :min="0" :max="100" :precision="1"
-              size="small" style="width:100%" />
-          </n-gi>
-          <n-gi>
-            <div class="field-label">目标利润率 (%)</div>
-            <n-input-number v-model:value="pricingForm.target_margin_pct" :min="0" :max="500" :precision="1"
-              size="small" style="width:100%" />
-          </n-gi>
-          <n-gi>
-            <div class="field-label">竞品价格 (RUB)</div>
-            <n-input-number v-model:value="pricingForm.competitor_price_rub" :min="0" :precision="2" size="small"
-              style="width:100%" placeholder="可选" />
-          </n-gi>
-        </n-grid>
-        <n-button type="warning" block :loading="smartPricingLoading" @click="handleSmartPricing">
-          🧮 计算建议价格
-        </n-button>
-        <!-- 计算结果 -->
-        <n-card v-if="pricingResult" size="small" title="📊 定价结果" :bordered="true">
-          <n-grid :cols="2" :x-gap="8" :y-gap="4">
-            <n-gi>
-              <div class="pricing-result-item">
-                <span class="pricing-result-label">💰 建议售价</span>
-                <span class="pricing-result-value" style="color: #d03050; font-size: 18px;">₽ {{
-                  pricingResult.suggested_price_rub }}</span>
-              </div>
-            </n-gi>
-            <n-gi>
-              <div class="pricing-result-item">
-                <span class="pricing-result-label">🏷️ 划线价</span>
-                <span class="pricing-result-value">₽ {{ pricingResult.old_price_rub }}</span>
-              </div>
-            </n-gi>
-            <n-gi>
-              <div class="pricing-result-item">
-                <span class="pricing-result-label">📦 总成本</span>
-                <span class="pricing-result-value">₽ {{ pricingResult.cost_total_rub }} (¥{{
-                  pricingResult.cost_total_cny
-                  }})</span>
-              </div>
-            </n-gi>
-            <n-gi>
-              <div class="pricing-result-item">
-                <span class="pricing-result-label">📈 利润率</span>
-                <span class="pricing-result-value">{{ pricingResult.margin_pct }}%</span>
-              </div>
-            </n-gi>
-            <n-gi>
-              <div class="pricing-result-item">
-                <span class="pricing-result-label">💎 预计利润</span>
-                <span class="pricing-result-value" style="color: #18a058;">₽ {{ pricingResult.profit_rub }}</span>
-              </div>
-            </n-gi>
-            <n-gi>
-              <div class="pricing-result-item">
-                <span class="pricing-result-label">🏦 佣金</span>
-                <span class="pricing-result-value">₽ {{ pricingResult.commission_rub }}</span>
-              </div>
-            </n-gi>
-          </n-grid>
-        </n-card>
-      </n-space>
-      <template #footer>
-        <div class="upload-footer">
-          <n-button @click="smartPricingVisible = false">取消</n-button>
-        </div>
-      </template>
-    </n-modal>
-
-    <!-- ━━━ 图片编辑器 (ImageEditor) ━━━ -->
-    <n-modal v-model:show="editorVisible" :mask-closable="true" :close-on-esc="true"
-      style="width: 85vw; max-width: 1400px; height: 75vh;" content-style="padding: 0; height: 75vh; overflow: hidden;">
-      <div class="image-editor-modal">
-        <ImageEditor :image-url="editorImageUrl" @apply="onEditorApply" @close="editorVisible = false" />
-      </div>
-    </n-modal>
-
   </div>
 </template>
 
@@ -726,9 +544,9 @@ import { ref, reactive, computed, h, onMounted, nextTick, watch } from "vue";
 import { useRouter } from "vue-router";
 import {
   NButton, NTag, NSpace, NInput, NInputNumber, NSelect, NDataTable,
-  NPopconfirm, NPagination, NDrawer, NDrawerContent, NImage, NDivider,
-  NModal, NForm, NFormItem, NGrid, NGi, NH2, NAlert,
-  NTree, NA, NSpin, NDatePicker, NInputGroup, NCard, NCollapse, NCollapseItem,
+  NPopconfirm, NPagination, NDrawer, NDrawerContent, NImage,
+  NModal, NGrid, NGi, NH2,
+  NTree, NSpin, NDatePicker, NInputGroup, NCollapse, NCollapseItem,
   type GlobalThemeOverrides,
 } from "naive-ui";
 import { apiGet, apiPost, apiPut, apiDelete } from "../api";
@@ -749,25 +567,6 @@ const drawerThemeOverrides = computed<GlobalThemeOverrides>(() => {
     },
   };
 });
-
-// ── 左右面板滚动锚点联动 ──
-const panelLeftRef = ref<HTMLElement | null>(null);
-const panelRightRef = ref<HTMLElement | null>(null);
-const isSyncingScroll = ref(false);
-
-function handlePanelScroll(side: 'left' | 'right') {
-  if (isSyncingScroll.value) return;
-  const source = side === 'left' ? panelLeftRef.value : panelRightRef.value;
-  const target = side === 'left' ? panelRightRef.value : panelLeftRef.value;
-  if (!source || !target) return;
-  const sourceMax = source.scrollHeight - source.clientHeight;
-  if (sourceMax <= 0) return;
-  const ratio = source.scrollTop / sourceMax;
-  const targetMax = target.scrollHeight - target.clientHeight;
-  isSyncingScroll.value = true;
-  target.scrollTop = ratio * targetMax;
-  nextTick(() => { isSyncingScroll.value = false; });
-}
 
 // ── 币种符号 ──
 const _CURRENCY_MAP: Record<string, string> = { CNY: "¥", RUB: "₽", USD: "$", EUR: "€" };
@@ -820,13 +619,13 @@ const drawerVisible = ref(false);
 const editProduct = ref<any>(null);
 const editProductSnapshot = ref<any>(null);
 const drawerSaving = ref(false);
+const selectedSkuKey = ref<string | null>(null);
 
 // ── 编辑抽屉: 店铺与分类选择 ──
 const editCategoryPopoverShow = ref(false);
 const editSelectedCategoryKeys = ref<any[]>([]);
 const editSelectedCategoryPathLabel = ref('');
 const editCategorySearchPattern = ref('');
-const suppressEditStoreWatch = ref(false);
 
 const editSelectedCategoryLabel = computed(() => {
   if (editSelectedCategoryPathLabel.value) return editSelectedCategoryPathLabel.value;
@@ -845,16 +644,9 @@ function resetEditCategorySelection() {
   editProduct.value.ozon_type_id = 0;
 }
 
-function onEditStoreChange(val: number | null) {
-  resetEditCategorySelection();
-  expandedCategoryKeys.value = [];
-  if (val) {
-    loadCategoryTree(val);
-  } else {
-    categoryTreeNodes.value = [];
-    categoryTreeMap.value.clear();
-    categoryPathLabelMap.value.clear();
-  }
+function onEditStoreChange(_val: number | null) {
+  // The local Ozon taxonomy is global. Changing the store must not clear the
+  // loaded snapshot or the category already selected for this product.
 }
 
 function clearEditCategorySelection() {
@@ -867,7 +659,7 @@ const hasChanges = computed(() => {
 });
 
 function openDrawer(product: any) {
-  suppressEditStoreWatch.value = true;
+  selectedSkuKey.value = null;
   const normalizedProduct = {
     ...normalizeProduct(JSON.parse(JSON.stringify(product))),
     description_category_id: product.description_category_id || product.ozon_category_id || null,
@@ -884,17 +676,11 @@ function openDrawer(product: any) {
   editCategorySearchPattern.value = '';
   editCategoryPopoverShow.value = false;
   expandedCategoryKeys.value = [];
-  // load category tree if store_id is set
-  if (product.store_id) {
-    loadCategoryTree(product.store_id);
-  }
+  loadCategoryTree();
   if (!storeOptions.value.length) {
     loadStoreOptions();
   }
   drawerVisible.value = true;
-  nextTick(() => {
-    suppressEditStoreWatch.value = false;
-  });
 }
 
 async function saveEdit() {
@@ -902,30 +688,7 @@ async function saveEdit() {
   drawerSaving.value = true;
   try {
     const d = editProduct.value;
-    await apiPut(`/selection/products/${d.id}`, {
-      title: d.title,
-      brand: d.brand,
-      category: d.category,
-      price: d.price,
-      old_price: d.old_price,
-      description: d.description,
-      source_url: d.source_url,
-      images: d.images,
-      seller_name: d.seller_name,
-      seller_url: d.seller_url,
-      video_urls: d.video_urls || [],
-      sku_list: d.sku_list || [],
-      spec_list: d.spec_list || [],
-      facts: d.facts || [],
-      color_list: d.color_list || [],
-      weight_g: d.weight_g,
-      width_mm: d.width_mm,
-      height_mm: d.height_mm,
-      depth_mm: d.depth_mm,
-      store_id: d.store_id || null,
-      description_category_id: d.description_category_id || null,
-      type_id: d.type_id || null,
-    });
+    await apiPut(`/selection/products/${d.id}`, buildProductUpdatePayload(d));
     message.success("保存成功");
     editProductSnapshot.value = JSON.parse(JSON.stringify(editProduct.value));
     await loadProducts();
@@ -934,6 +697,33 @@ async function saveEdit() {
   } finally {
     drawerSaving.value = false;
   }
+}
+
+function buildProductUpdatePayload(d: any) {
+  return {
+    title: d.title,
+    brand: d.brand,
+    category: d.category,
+    price: d.price,
+    old_price: d.old_price,
+    description: d.description,
+    source_url: d.source_url,
+    images: d.images,
+    seller_name: d.seller_name,
+    seller_url: d.seller_url,
+    video_urls: d.video_urls || [],
+    sku_list: d.sku_list || [],
+    spec_list: d.spec_list || [],
+    facts: d.facts || [],
+    color_list: d.color_list || [],
+    weight_g: d.weight_g,
+    width_mm: d.width_mm,
+    height_mm: d.height_mm,
+    depth_mm: d.depth_mm,
+    store_id: d.store_id || null,
+    description_category_id: d.description_category_id || null,
+    type_id: d.type_id || null,
+  };
 }
 
 // ── 店铺选项（编辑抽屉使用） ──
@@ -947,20 +737,23 @@ async function handleCreateDraft() {
   drawerCreatingDraft.value = true;
   try {
     const d = editProduct.value;
+    const selectedRow = selectedSkuEditorRows.value[0]?.row;
+    const sourceSku = normalizeSkuIdentity(selectedRow?.sku);
+    if (!sourceSku) {
+      message.warning("请先选择并填写要创建草稿的 SKU");
+      return;
+    }
+    // 草稿服务从持久化 sku_list 读取图片、价格和条码；先保存可避免
+    // 抽屉内尚未保存的当前 SKU 编辑被旧数据库快照覆盖。
+    await apiPut(`/selection/products/${d.id}`, buildProductUpdatePayload(d));
     await apiPost("/upload/drafts", {
       store_id: d.store_id,
-      source_type: "selection",
       source_product_id: d.id,
-      name: d.title || "",
-      description: d.description || "",
+      source_sku: sourceSku,
+      name: displayValue(selectedRow?.name) || d.title || "",
       category_name: editSelectedCategoryLabel.value || d.category || "",
-      price_cny: d.price || 0,
       description_category_id: d.description_category_id || 0,
       type_id: d.type_id || 0,
-      weight: d.weight_g || 500,
-      height: d.height_mm || 100,
-      depth: d.depth_mm || 100,
-      width: d.width_mm || 100,
     });
     message.success("✅ 上架草稿已创建，请到「上架管理」编辑并提交");
     drawerVisible.value = false;
@@ -969,85 +762,6 @@ async function handleCreateDraft() {
     message.error("创建草稿失败: " + e.message);
   } finally {
     drawerCreatingDraft.value = false;
-  }
-}
-
-// ── 图片编辑器 ──
-const editorVisible = ref(false);
-const editorImageUrl = ref("");
-const editorImageIdx = ref(-1);
-
-function openEditor(idx: number) {
-  if (!editProduct.value?.images?.[idx]) return;
-  editorImageIdx.value = idx;
-  editorImageUrl.value = typeof editProduct.value.images[idx] === 'string'
-    ? editProduct.value.images[idx]
-    : (editProduct.value.images[idx] as any)?.url || editProduct.value.images[idx];
-  editorVisible.value = true;
-}
-
-function onEditorApply(editedUrl: string) {
-  const idx = editorImageIdx.value;
-  if (idx < 0 || !editProduct.value?.images) return;
-  editProduct.value.images[idx] = editedUrl;
-  editorVisible.value = false;
-  message.success("编辑结果已应用到图片");
-}
-
-// ── 图片管理 ──
-const imageUploadRef = ref<HTMLInputElement | null>(null);
-
-function triggerImageUpload() {
-  imageUploadRef.value?.click();
-}
-
-function handleImageUpload(e: Event) {
-  const input = e.target as HTMLInputElement;
-  if (!input.files?.length || !editProduct.value) return;
-  // TODO: Upload images to server and get URLs
-  message.info("图片上传功能即将上线,敬请期待 ✨");
-  input.value = "";
-}
-
-function removeImage(idx: number) {
-  if (!editProduct.value?.images) return;
-  editProduct.value.images.splice(idx, 1);
-}
-
-// ── 智能定价 ──
-const smartPricingVisible = ref(false);
-const smartPricingLoading = ref(false);
-const pricingResult = ref<any>(null);
-const pricingForm = ref({
-  cost_cny: 0,
-  shipping_cny: 0,
-  packaging_cny: 0,
-  exchange_rate: 12.5,
-  ozon_commission_pct: 15.0,
-  target_margin_pct: 30.0,
-  competitor_price_rub: 0,
-});
-
-function showSmartPricingModal() {
-  if (editProduct.value) {
-    pricingForm.value.cost_cny = editProduct.value.price || 0;
-  }
-  pricingResult.value = null;
-  smartPricingVisible.value = true;
-}
-
-async function handleSmartPricing() {
-  smartPricingLoading.value = true;
-  try {
-    const result = await apiPost("/selection/smart-pricing", {
-      product_id: editProduct.value?.id || 0,
-      ...pricingForm.value,
-    });
-    pricingResult.value = result;
-  } catch (e: any) {
-    message.error("定价计算失败: " + e.message);
-  } finally {
-    smartPricingLoading.value = false;
   }
 }
 
@@ -1125,73 +839,12 @@ async function handleExtract1688Specs() {
   }
 }
 
-// ── AI 图片功能 ──
-const aiImageLoading = ref<number | null>(null);
-
-async function handleAiOptimizeImage(idx: number) {
-  if (!editProduct.value?.images?.[idx]) return;
-  aiImageLoading.value = idx;
-  try {
-    const img = editProduct.value.images[idx];
-    const url = typeof img === "string" ? img : img.url;
-    const res = await replaceImageSubject({
-      image_url: url,
-      prompt: "Professional e-commerce product photo on white background, studio lighting, clean",
-    });
-    if (res.result_url) {
-      if (typeof editProduct.value.images[idx] === "string") {
-        editProduct.value.images[idx] = res.result_url;
-      } else {
-        editProduct.value.images[idx].result_url = res.result_url;
-      }
-      message.success("图片优化完成");
-    }
-  } catch (e: any) {
-    message.error("图片优化失败: " + e.message);
-  } finally {
-    aiImageLoading.value = null;
-  }
-}
-
-async function handleAiOptimizeImages() {
-  if (!editProduct.value?.images?.length) {
-    message.warning("暂无图片");
-    return;
-  }
-  try {
-    for (let i = 0; i < editProduct.value.images.length; i++) {
-      await handleAiOptimizeImage(i);
-    }
-    message.success("所有图片优化完成");
-  } catch (e: any) {
-    message.error("批量图片优化失败: " + e.message);
-  }
-}
-
-async function handleAiGenerateImages() {
-  if (!editProduct.value) return;
-  try {
-    const res = await generateImage({
-      title: editProduct.value.title,
-      category: editProduct.value.category,
-      count: 4,
-    });
-    if (res.images?.length) {
-      if (!editProduct.value.images) editProduct.value.images = [];
-      editProduct.value.images.push(...res.images.map((url) => ({ url })));
-      message.success(`生成 ${res.images.length} 张图片`);
-    }
-  } catch (e: any) {
-    message.error("图片生成失败: " + e.message);
-  }
-}
-
 // ── AI 文字功能 ──
 const aiTextLoading = ref(false);
 
-async function handleAiTranslate(target: "title" | "description") {
+async function handleAiTranslate() {
   if (!editProduct.value) return;
-  const text = editProduct.value[target];
+  const text = editProduct.value.description;
   if (!text) {
     message.warning("没有可翻译的文本");
     return;
@@ -1200,12 +853,12 @@ async function handleAiTranslate(target: "title" | "description") {
   try {
     const res = await translateText({
       text,
-      field_type: target,
+      field_type: "description",
       context: editProduct.value.category || "",
     });
     if (res.translated) {
-      editProduct.value[target] = res.translated;
-      message.success(`${target === "title" ? "标题" : "描述"}翻译完成`);
+      editProduct.value.description = res.translated;
+      message.success("描述翻译完成");
     }
   } catch (e: any) {
     message.error("翻译失败: " + e.message);
@@ -1214,9 +867,9 @@ async function handleAiTranslate(target: "title" | "description") {
   }
 }
 
-async function handleAiOptimize(target: "title" | "description") {
+async function handleAiOptimize() {
   if (!editProduct.value) return;
-  const text = editProduct.value[target];
+  const text = editProduct.value.description;
   if (!text) {
     message.warning("没有可优化的文本");
     return;
@@ -1225,13 +878,13 @@ async function handleAiOptimize(target: "title" | "description") {
   try {
     const res = await optimizeDescription({
       title: editProduct.value.title || "",
-      description: target === "description" ? text : undefined,
-      field_type: target,
+      description: text,
+      field_type: "description",
       context: editProduct.value.category || "",
     });
     if (res.description) {
-      editProduct.value[target] = res.description;
-      message.success(`${target === "title" ? "标题" : "描述"}优化完成`);
+      editProduct.value.description = res.description;
+      message.success("描述优化完成");
     }
   } catch (e: any) {
     message.error("优化失败: " + e.message);
@@ -1240,79 +893,193 @@ async function handleAiOptimize(target: "title" | "description") {
   }
 }
 
-// ── 一键AI优化 ──
-const aiOneClickLoading = ref(false);
-
-async function handleOneClickAiOptimize() {
-  if (!editProduct.value) return;
-  aiOneClickLoading.value = true;
+async function handleAiTranslateSkuTitle(row: EditableSkuRow) {
+  const text = displayValue(row.name);
+  if (!text) {
+    message.warning("没有可翻译的 SKU 标题");
+    return;
+  }
+  aiTextLoading.value = true;
   try {
-    const steps: string[] = [];
-
-    // Step 1: AI 优化标题
-    if (editProduct.value.title) {
-      try {
-        const titleRes = await optimizeDescription({
-          title: editProduct.value.title,
-          field_type: "title",
-          context: editProduct.value.category || "",
-        });
-        if (titleRes.description) {
-          editProduct.value.title = titleRes.description;
-          steps.push("标题优化");
-        }
-      } catch { /* skip */ }
-    }
-
-    // Step 2: AI 优化描述
-    if (editProduct.value.description) {
-      try {
-        const descRes = await optimizeDescription({
-          title: editProduct.value.title || "",
-          description: editProduct.value.description,
-          field_type: "description",
-          context: editProduct.value.category || "",
-        });
-        if (descRes.description) {
-          editProduct.value.description = descRes.description;
-          steps.push("描述优化");
-        }
-      } catch { /* skip */ }
-    }
-
-    // Step 3: AI 优化图片
-    if (editProduct.value.images?.length) {
-      let optimizedCount = 0;
-      for (let i = 0; i < editProduct.value.images.length; i++) {
-        try {
-          const img = editProduct.value.images[i];
-          const url = typeof img === "string" ? img : img.url;
-          const res = await replaceImageSubject({
-            image_url: url,
-            prompt: "Professional e-commerce product photo on white background, studio lighting, clean",
-          });
-          if (res.result_url) {
-            if (typeof editProduct.value.images[i] === "string") {
-              editProduct.value.images[i] = res.result_url;
-            } else {
-              editProduct.value.images[i].result_url = res.result_url;
-            }
-            optimizedCount++;
-          }
-        } catch { /* skip */ }
-      }
-      if (optimizedCount) steps.push(`优化${optimizedCount}张图片`);
-    }
-
-    if (steps.length) {
-      message.success(`✅ 一键优化完成: ${steps.join(" → ")}`);
-    } else {
-      message.info("没有需要优化的内容");
+    const res = await translateText({
+      text,
+      field_type: "title",
+      context: editProduct.value?.category || "",
+    });
+    if (res.translated) {
+      row.name = res.translated;
+      message.success("SKU 标题翻译完成");
     }
   } catch (e: any) {
-    message.error("一键优化失败: " + e.message);
+    message.error("翻译失败: " + e.message);
   } finally {
-    aiOneClickLoading.value = false;
+    aiTextLoading.value = false;
+  }
+}
+
+async function handleAiOptimizeSkuTitle(row: EditableSkuRow) {
+  const text = displayValue(row.name);
+  if (!text) {
+    message.warning("没有可优化的 SKU 标题");
+    return;
+  }
+  aiTextLoading.value = true;
+  try {
+    const res = await optimizeDescription({
+      title: text,
+      field_type: "title",
+      context: editProduct.value?.category || "",
+    });
+    if (res.description) {
+      row.name = res.description;
+      message.success("SKU 标题优化完成");
+    }
+  } catch (e: any) {
+    message.error("优化失败: " + e.message);
+  } finally {
+    aiTextLoading.value = false;
+  }
+}
+
+// ── SKU 独立上架图片 ──
+const editorVisible = ref(false);
+const editorImageUrl = ref("");
+const editorSourceUrl = ref("");
+const editorSkuRow = ref<EditableSkuRow | null>(null);
+const imageUploadRef = ref<HTMLInputElement | null>(null);
+const aiImageLoading = ref<string | null>(null);
+const aiImageBatchLoading = ref(false);
+const aiImageGenerateLoading = ref(false);
+
+function openEditor(row: EditableSkuRow, idx: number) {
+  const imageUrl = row.images?.[idx];
+  if (!imageUrl) return;
+  editorSkuRow.value = row;
+  editorSourceUrl.value = imageUrl;
+  editorImageUrl.value = imageUrl;
+  editorVisible.value = true;
+}
+
+function replaceSkuImageReferences(sourceUrl: string, targetUrl: string): number {
+  const rows = editProduct.value?.sku_list;
+  if (!sourceUrl || !targetUrl || !Array.isArray(rows)) return 0;
+  let replacements = 0;
+  for (const row of rows as EditableSkuRow[]) {
+    if (!Array.isArray(row.images)) continue;
+    row.images = row.images.map((url) => {
+      if (url !== sourceUrl) return url;
+      replacements += 1;
+      return targetUrl;
+    });
+  }
+  return replacements;
+}
+
+function onEditorApply(editedUrl: string) {
+  const sourceUrl = editorSourceUrl.value;
+  const normalizedUrl = displayValue(editedUrl);
+  if (!editorSkuRow.value || !sourceUrl || !normalizedUrl) return;
+  const replacements = replaceSkuImageReferences(sourceUrl, normalizedUrl);
+  editorVisible.value = false;
+  editorSkuRow.value = null;
+  editorSourceUrl.value = "";
+  if (replacements) message.success(`编辑结果已更新 ${replacements} 个 SKU 图片引用`);
+}
+
+function triggerImageUpload() {
+  imageUploadRef.value?.click();
+}
+
+function handleImageUpload(event: Event) {
+  const input = event.target as HTMLInputElement;
+  if (!input.files?.length || !editProduct.value) return;
+  // 当前项目没有通用商品图片文件上传接口，保留原入口与原提示，避免制造无法保存的临时 URL。
+  message.info("图片上传功能即将上线,敬请期待 ✨");
+  input.value = "";
+}
+
+function removeImage(row: EditableSkuRow, idx: number) {
+  if (!Array.isArray(row.images)) return;
+  row.images.splice(idx, 1);
+}
+
+async function optimizeSkuImageReference(sourceUrl: string, notify = true) {
+  if (!sourceUrl) return false;
+  aiImageLoading.value = sourceUrl;
+  try {
+    const res = await replaceImageSubject({
+      image_url: sourceUrl,
+      prompt: "Professional e-commerce product photo on white background, studio lighting, clean",
+    });
+    const resultUrl = displayValue(res.result_url);
+    if (!resultUrl) return false;
+    const replacements = replaceSkuImageReferences(sourceUrl, resultUrl);
+    if (notify && replacements) message.success(`图片优化完成，已更新 ${replacements} 个 SKU 图片引用`);
+    return replacements > 0;
+  } catch (e: any) {
+    if (notify) message.error("图片优化失败: " + e.message);
+    throw e;
+  } finally {
+    aiImageLoading.value = null;
+  }
+}
+
+async function handleAiOptimizeImage(_row: EditableSkuRow, sourceUrl: string) {
+  try {
+    await optimizeSkuImageReference(sourceUrl);
+  } catch {
+    // 单图优化的错误已在 helper 中反馈。
+  }
+}
+
+async function handleAiOptimizeImages(row: EditableSkuRow) {
+  const sourceUrls = Array.isArray(row.images) ? [...row.images] : [];
+  const imageCount = sourceUrls.length;
+  if (!imageCount) {
+    message.warning("当前 SKU 没有可优化的上架图片");
+    return;
+  }
+  aiImageBatchLoading.value = true;
+  let optimizedCount = 0;
+  try {
+    for (const sourceUrl of sourceUrls) {
+      try {
+        if (await optimizeSkuImageReference(sourceUrl, false)) optimizedCount += 1;
+      } catch {
+        // 继续优化其余图片，最终统一反馈结果。
+      }
+    }
+    if (optimizedCount) message.success(`已优化当前 SKU 的 ${optimizedCount} 张上架图片`);
+    if (optimizedCount < imageCount) message.warning(`${imageCount - optimizedCount} 张图片优化失败`);
+  } finally {
+    aiImageBatchLoading.value = false;
+  }
+}
+
+async function handleAiGenerateImages(row: EditableSkuRow) {
+  if (!editProduct.value) return;
+  const selectedTitle = displayValue(row.name) || displayValue(editProduct.value.title);
+  if (!selectedTitle) {
+    message.warning("请先填写当前 SKU 标题");
+    return;
+  }
+  aiImageGenerateLoading.value = true;
+  try {
+    const res = await generateImage({
+      title: selectedTitle,
+      category: editProduct.value.category || "",
+      count: 4,
+    });
+    const generatedImages = normalizeWritableImageUrls(res.images);
+    if (generatedImages.length) {
+      if (!Array.isArray(row.images)) row.images = [];
+      row.images.push(...generatedImages);
+      message.success(`已为当前 SKU 生成 ${generatedImages.length} 张上架图片`);
+    }
+  } catch (e: any) {
+    message.error("图片生成失败: " + e.message);
+  } finally {
+    aiImageGenerateLoading.value = false;
   }
 }
 
@@ -1360,6 +1127,7 @@ interface EditableSkuRow {
   barcode?: string;
   price?: number | null;
   stock?: number | null;
+  images?: string[];
   [key: string]: unknown;
 }
 
@@ -1410,6 +1178,7 @@ function normalizeSkuList(value: unknown): EditableSkuRow[] {
   return parseArray(value).flatMap((item) => {
     if (!item || typeof item !== "object") return [];
     const row = { ...(item as Record<string, unknown>) } as EditableSkuRow;
+    const ownsImages = Object.prototype.hasOwnProperty.call(item, "images");
     row.sku = normalizeSkuIdentity(row.sku);
     const name = displayValue(row.name);
     const barcode = displayValue(row.barcode);
@@ -1417,6 +1186,8 @@ function normalizeSkuList(value: unknown): EditableSkuRow[] {
     else delete row.name;
     if (barcode) row.barcode = barcode;
     else delete row.barcode;
+    if (ownsImages) row.images = normalizeWritableImageUrls(row.images);
+    else delete row.images;
     return [row];
   });
 }
@@ -1520,6 +1291,19 @@ function normalizeVariantUrls(value: unknown): string[] {
   });
 }
 
+function normalizeWritableImageUrls(value: unknown): string[] {
+  const seen = new Set<string>();
+  return parseArray(value).flatMap((item) => {
+    const rawUrl = item && typeof item === "object"
+      ? (item as Record<string, unknown>).result_url ?? (item as Record<string, unknown>).url
+      : item;
+    const url = displayValue(rawUrl);
+    if (!url || seen.has(url)) return [];
+    seen.add(url);
+    return [url];
+  });
+}
+
 function normalizeVariantNumber(value: unknown): number | undefined {
   if (typeof value === "number") return Number.isFinite(value) && value >= 0 ? value : undefined;
   if (typeof value !== "string" || !value.trim()) return undefined;
@@ -1530,7 +1314,7 @@ function normalizeVariantNumber(value: unknown): number | undefined {
 }
 
 function createSkuRowFromVariant(variant: ProductVariant): EditableSkuRow {
-  const row: EditableSkuRow = { sku: variant.sku };
+  const row: EditableSkuRow = { sku: variant.sku, images: [...(variant.images || [])] };
   if (variant.barcode) row.barcode = variant.barcode;
   if (variant.price !== undefined) row.price = variant.price;
   if (variant.stock !== undefined) row.stock = variant.stock;
@@ -1540,6 +1324,7 @@ function createSkuRowFromVariant(variant: ProductVariant): EditableSkuRow {
 function synchronizeSkuList(product: any): void {
   const skuList = normalizeSkuList(product?.sku_list);
   const rowsBySku = new Map<string, EditableSkuRow>();
+  const fallbackTitle = displayValue(product?.title);
 
   for (const row of skuList) {
     const sku = normalizeSkuIdentity(row.sku);
@@ -1557,9 +1342,13 @@ function synchronizeSkuList(product: any): void {
     }
 
     row.sku = variant.sku;
+    if (!displayValue(row.name) && fallbackTitle) row.name = fallbackTitle;
     if (!row.barcode && variant.barcode) row.barcode = variant.barcode;
     if (row.price == null && variant.price !== undefined) row.price = variant.price;
     if (row.stock == null && variant.stock !== undefined) row.stock = variant.stock;
+    if (!Object.prototype.hasOwnProperty.call(row, "images")) {
+      row.images = [...(variant.images || [])];
+    }
   }
 
   product.sku_list = skuList;
@@ -1568,6 +1357,7 @@ function synchronizeSkuList(product: any): void {
 function normalizeProduct(product: any) {
   return {
     ...product,
+    images: normalizeWritableImageUrls(product?.images),
     sku_list: normalizeSkuList(product?.sku_list),
     spec_list: parseArray(product?.spec_list),
     facts: normalizeFacts(product?.facts),
@@ -1644,17 +1434,36 @@ const skuEditorRows = computed<SkuEditorItem[]>(() => {
   return [...collectedItems, ...manualItems];
 });
 
+const activeSkuKey = computed<string | null>(() => {
+  const rows = skuEditorRows.value;
+  if (selectedSkuKey.value && rows.some((item) => item.key === selectedSkuKey.value)) {
+    return selectedSkuKey.value;
+  }
+  return rows[0]?.key ?? null;
+});
+
+const selectedSkuEditorRows = computed<SkuEditorItem[]>(() => {
+  const key = activeSkuKey.value;
+  if (!key) return [];
+  const item = skuEditorRows.value.find((candidate) => candidate.key === key);
+  return item ? [item] : [];
+});
+
 function addSku() {
   if (!editProduct.value) return;
   if (!Array.isArray(editProduct.value.sku_list)) editProduct.value.sku_list = [];
-  editProduct.value.sku_list.push({ sku: "", barcode: "", price: null, stock: null } as EditableSkuRow);
+  const row = { sku: "", barcode: "", price: null, stock: null, images: [] } as EditableSkuRow;
+  editProduct.value.sku_list.push(row);
+  selectedSkuKey.value = skuRowObjectKey(row);
 }
 
 function removeSku(row: EditableSkuRow) {
   const skuList = editProduct.value?.sku_list;
   if (!Array.isArray(skuList)) return;
   const index = skuList.indexOf(row);
-  if (index >= 0) skuList.splice(index, 1);
+  if (index < 0) return;
+  if (activeSkuKey.value === skuRowObjectKey(row)) selectedSkuKey.value = null;
+  skuList.splice(index, 1);
 }
 
 // ── 删除 ──
@@ -1815,13 +1624,31 @@ async function loadStoreOptions() {
   } catch { /* ignore */ }
 }
 
-// ── Category tree: fetch all once per store, local lazy load ──
+// ── Category tree: store-independent local Chinese snapshot ──
+interface OzonCategorySnapshot {
+  categories?: any[];
+  language?: string;
+  count?: number;
+  synced_at?: string | null;
+  source_store_id?: number | null;
+}
+
 const categoryTreeNodes = ref<any[]>([]);
 const selectedCategoryKeys = ref<any[]>([]);
 const expandedCategoryKeys = ref<any[]>([]);
 const categoryLoading = ref(false);
+const categorySyncing = ref(false);
+const categorySnapshotCount = ref(0);
+const categorySyncedAt = ref<string | null>(null);
+const categorySourceStoreId = ref<number | null>(null);
 const categoryTreeMap = ref<Map<any, any[]>>(new Map()); // node key -> children[]
 const categoryPathLabelMap = ref<Map<any, string>>(new Map()); // node key -> breadcrumb label
+
+function formatCategorySyncedAt(value: string) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  return `同步于 ${date.toLocaleString('zh-CN', { hour12: false })}`;
+}
 
 // n-tree filter: match node label against search pattern
 function filterCategoryTree(pattern: string, node: any): boolean {
@@ -1951,21 +1778,15 @@ function buildCategoryPathLabelMap(nodes: any[], parentLabels: string[] = [], pa
   }
 }
 
-// Fetch ALL categories once when store is selected
-async function loadCategoryTree(storeId?: number) {
-  if (!storeId) {
-    categoryTreeNodes.value = [];
-    categoryTreeMap.value.clear();
-    categoryPathLabelMap.value.clear();
-    return;
-  }
+// Read the complete Chinese taxonomy from this application's database only.
+async function loadCategoryTree() {
   categoryLoading.value = true;
   try {
-    const params = new URLSearchParams();
-    params.set('category_id', '0');
-    params.set('store_id', String(storeId));
-    const resp = await apiGet<any>(`/selection/ozon-categories?${params}`);
+    const resp = await apiGet<OzonCategorySnapshot | any[]>('/selection/ozon-categories', { language: 'ZH_HANS' });
     const raw = Array.isArray(resp) ? resp : (resp?.categories || []);
+    categorySnapshotCount.value = Array.isArray(resp) ? raw.length : Number(resp?.count || 0);
+    categorySyncedAt.value = Array.isArray(resp) ? null : (resp?.synced_at || null);
+    categorySourceStoreId.value = Array.isArray(resp) ? null : (resp?.source_store_id || null);
     categoryTreeMap.value.clear();
     categoryPathLabelMap.value.clear();
     expandedCategoryKeys.value = [];
@@ -1980,6 +1801,25 @@ async function loadCategoryTree(storeId?: number) {
     message.error('加载分类失败');
   } finally {
     categoryLoading.value = false;
+  }
+}
+
+async function syncCategoryTree() {
+  const storeId = Number(editProduct.value?.store_id || 0);
+  if (!storeId) {
+    message.warning('请先选择用于同步 Ozon 分类的店铺');
+    return;
+  }
+
+  categorySyncing.value = true;
+  try {
+    await apiPost(`/selection/ozon-categories/sync?store_id=${encodeURIComponent(String(storeId))}`);
+    await loadCategoryTree();
+    message.success('Ozon 中文分类已同步到本地数据库');
+  } catch (e: any) {
+    message.error(`同步分类失败: ${e?.message || '未知错误'}`);
+  } finally {
+    categorySyncing.value = false;
   }
 }
 
@@ -2038,27 +1878,6 @@ function findCategoryTreeNodePathByKey(nodes: any[], key: any, parents: any[] = 
   return [];
 }
 
-// Watch store_id change -> reload full category tree
-watch(() => editProduct.value?.store_id, (newVal) => {
-  if (suppressEditStoreWatch.value) return;
-  if (newVal) {
-    loadCategoryTree(newVal);
-  } else {
-    categoryTreeNodes.value = [];
-    categoryTreeMap.value.clear();
-    categoryPathLabelMap.value.clear();
-    expandedCategoryKeys.value = [];
-    editSelectedCategoryKeys.value = [];
-    editSelectedCategoryPathLabel.value = '';
-    if (editProduct.value) {
-      editProduct.value.description_category_id = null;
-      editProduct.value.type_id = null;
-      editProduct.value.ozon_category_id = 0;
-      editProduct.value.ozon_type_id = 0;
-    }
-  }
-});
-
 function onPageSizeChange(size: number) {
   pageSize.value = size;
   currentPage.value = 1;
@@ -2069,19 +1888,11 @@ onMounted(() => {
   loadProducts();
   loadBrands();
   loadStoreOptions();
-  // Don't load category tree here — it requires a store to be selected first
+  loadCategoryTree();
 });
 </script>
 
 <style scoped>
-.image-editor-modal {
-  width: 100%;
-  height: 75vh;
-  min-width: 0;
-  min-height: 0;
-  overflow: hidden;
-}
-
 /* ═══════════════════════════════════════════════════════
    选品中心 — 全局样式
    ═══════════════════════════════════════════════════════ */
@@ -2198,26 +2009,16 @@ onMounted(() => {
   margin-top: 12px;
 }
 
-/* ━━━ 编辑抽屉 — 左右联动面板 ━━━ */
+/* ━━━ 编辑抽屉 — 单栏编辑面板 ━━━ */
 .edit-drawer-body {
-  display: flex;
-  gap: 0;
-}
-
-.panel-left {
-  flex: 0 0 42%;
-  padding: 14px;
-  background: #f0f2f5;
-  border-radius: 6px;
-  overflow-y: auto;
-  border-right: 1px solid var(--border-color);
+  width: 100%;
 }
 
 .panel-right {
-  flex: 1;
+  width: 100%;
+  box-sizing: border-box;
   padding: 14px;
-  overflow-y: auto;
-  background: #fff;
+  background: var(--bg-card, #fff);
 }
 
 .panel-title {
@@ -2401,101 +2202,6 @@ onMounted(() => {
   color: var(--text-muted, #999);
 }
 
-/* ── 图片画廊 ── */
-.gallery-row {
-  display: flex;
-  gap: 8px;
-  flex-wrap: wrap;
-}
-
-.gallery-item {
-  position: relative;
-  border-radius: 6px;
-  overflow: hidden;
-  border: 2px solid transparent;
-  transition: border-color 0.15s ease;
-}
-
-.gallery-item.is-main {
-  border-color: #18a058;
-}
-
-.gallery-img {
-  border-radius: 6px;
-  object-fit: cover;
-}
-
-.main-badge {
-  position: absolute;
-  top: 2px;
-  left: 2px;
-  background: #18a058;
-  color: #fff;
-  font-size: 10px;
-  padding: 1px 4px;
-  border-radius: 3px;
-}
-
-/* ── 图片管理器 ── */
-.image-manager {
-  display: flex;
-  gap: 8px;
-  flex-wrap: wrap;
-}
-
-.image-card {
-  position: relative;
-  width: 84px;
-  height: 84px;
-  border-radius: 6px;
-  overflow: hidden;
-  border: 1px solid var(--border-color);
-  transition: all 0.15s ease;
-}
-
-.image-card:hover {
-  border-color: #18a058;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
-}
-
-.image-card:hover .image-actions {
-  opacity: 1;
-}
-
-.image-card .gallery-img {
-  display: block;
-  max-width: 80px;
-  max-height: 80px;
-  border-radius: 4px;
-  object-fit: cover;
-}
-
-.image-actions {
-  position: absolute;
-  bottom: 0;
-  left: 0;
-  right: 0;
-  display: flex;
-  justify-content: center;
-  gap: 2px;
-  padding: 3px 2px;
-  background: rgba(0, 0, 0, 0.6);
-  opacity: 1;
-}
-
-.image-add {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  cursor: pointer;
-  border-style: dashed;
-}
-
-.image-add:hover {
-  background: var(--bg-card-hover, #f8f9fa);
-}
-
 /* ── 统一 SKU 编辑器 ── */
 .sku-editor-section {
   padding: 12px;
@@ -2511,10 +2217,106 @@ onMounted(() => {
   line-height: 1.5;
 }
 
-.sku-editor-list {
+.sku-editor-content {
+  display: grid;
+  grid-template-columns: minmax(220px, 260px) minmax(0, 1fr);
+  gap: 12px;
+  align-items: start;
+}
+
+.sku-selector-list {
   display: flex;
+  position: sticky;
+  top: 0;
   flex-direction: column;
-  gap: 10px;
+  gap: 8px;
+  max-height: 720px;
+  overflow-y: auto;
+}
+
+.sku-selector-item {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 8px;
+  padding: 8px;
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  background: var(--bg-elevated);
+  color: var(--text-secondary);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: border-color 0.15s, background-color 0.15s, box-shadow 0.15s;
+}
+
+.sku-selector-item:hover {
+  border-color: rgba(24, 160, 88, 0.55);
+}
+
+.sku-selector-item--active {
+  border-color: #18a058;
+  background: rgba(24, 160, 88, 0.08);
+  box-shadow: 0 0 0 2px rgba(24, 160, 88, 0.1);
+}
+
+.sku-selector-item img,
+.sku-selector-item__placeholder {
+  width: 40px;
+  height: 40px;
+  flex: 0 0 40px;
+  border-radius: 6px;
+}
+
+.sku-selector-item img {
+  object-fit: cover;
+}
+
+.sku-selector-item__placeholder {
+  display: grid;
+  place-items: center;
+  background: var(--bg-card, #fff);
+  color: var(--text-muted);
+  font-size: 10px;
+  font-weight: 600;
+}
+
+.sku-selector-item__content {
+  display: flex;
+  min-width: 0;
+  flex: 1;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.sku-selector-item__content strong {
+  overflow: hidden;
+  font-family: monospace;
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sku-selector-item__content small {
+  overflow: hidden;
+  color: var(--text-muted);
+  font-size: 10px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sku-selector-item__status {
+  flex: none;
+  padding: 1px 5px;
+  border-radius: 999px;
+  background: rgba(24, 160, 88, 0.12);
+  color: #18a058;
+  font-size: 10px;
+}
+
+.sku-selector-item__status.is-manual {
+  background: rgba(32, 128, 240, 0.12);
+  color: #2080f0;
 }
 
 .sku-editor-card {
@@ -2587,10 +2389,117 @@ onMounted(() => {
   font-weight: 600;
 }
 
+.sku-subsection-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.sku-subsection-heading--editable,
 .sku-subsection-title--editable {
   margin-top: 12px;
   padding-top: 10px;
   border-top: 1px dashed var(--border-color);
+}
+
+.sku-editable-images {
+  margin-top: 12px;
+  padding: 10px;
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  background: var(--bg-card, #fff);
+}
+
+.sku-image-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 4px;
+  margin-top: 8px;
+}
+
+.image-manager {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.image-card {
+  position: relative;
+  width: 82px;
+  height: 82px;
+  overflow: hidden;
+  box-sizing: border-box;
+  border: 1px solid var(--border-color);
+  border-radius: 7px;
+  background: var(--bg-elevated, #f8f9fa);
+}
+
+.image-card .gallery-img {
+  display: block;
+}
+
+.image-actions {
+  position: absolute;
+  right: 2px;
+  bottom: 2px;
+  left: 2px;
+  display: flex;
+  justify-content: center;
+  border-radius: 5px;
+  background: rgba(0, 0, 0, 0.58);
+}
+
+.image-actions :deep(.n-button) {
+  min-width: 22px;
+  height: 22px;
+  padding: 0 3px;
+}
+
+.image-add {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  color: var(--text-muted);
+  font: inherit;
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.image-add:hover {
+  border-color: rgba(24, 160, 88, 0.55);
+  color: #18a058;
+}
+
+.image-add__icon {
+  font-size: 24px;
+  line-height: 1;
+}
+
+.main-badge {
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  padding: 1px 4px;
+  border-radius: 4px;
+  background: rgba(24, 160, 88, 0.9);
+  color: #fff;
+  font-size: 9px;
+  line-height: 1.4;
+}
+
+.image-upload-input {
+  display: none;
+}
+
+.image-editor-modal {
+  width: 100%;
+  height: 100%;
+  background: var(--bg-card, #fff);
 }
 
 .sku-media-grid {
@@ -2686,6 +2595,51 @@ onMounted(() => {
   font-size: 11px;
 }
 
+.sku-editor-card__empty--manual {
+  padding: 10px;
+  border: 1px dashed var(--border-color);
+  border-radius: 6px;
+  background: var(--bg-elevated);
+  line-height: 1.5;
+}
+
+.sku-pricing-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.sku-readonly-field {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  justify-content: center;
+  gap: 4px;
+  padding: 7px 9px;
+  border: 1px solid rgba(24, 160, 88, 0.2);
+  border-radius: 6px;
+  background: var(--bg-card, #fff);
+}
+
+.sku-readonly-field span {
+  color: var(--text-muted);
+  font-size: 10px;
+}
+
+.sku-readonly-field strong {
+  color: var(--text-secondary);
+  font-size: 13px;
+  word-break: break-word;
+}
+
+.sku-editor-card__hint {
+  margin-top: 7px;
+  color: var(--text-muted);
+  font-size: 10px;
+  line-height: 1.5;
+}
+
 .sku-editor-fields {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -2695,6 +2649,10 @@ onMounted(() => {
 
 .sku-editor-field {
   min-width: 0;
+}
+
+.sku-editor-field--wide {
+  margin-top: 10px;
 }
 
 .sku-editor-card__source {
@@ -2726,29 +2684,28 @@ onMounted(() => {
 }
 
 /* ── 响应式 ── */
+@media (max-width: 760px) {
+  .sku-editor-content {
+    grid-template-columns: 1fr;
+  }
+
+  .sku-selector-list {
+    position: static;
+    max-height: 240px;
+  }
+}
+
 @media (max-width: 600px) {
-  .edit-drawer-body {
-    flex-direction: column;
-  }
-
-  .panel-left {
-    flex: none;
-    width: 100%;
-    border-right: none;
-    border-bottom: 1px solid var(--border-color);
-  }
-
   .panel-right {
-    flex: none;
-    width: 100%;
-    border-right: none;
+    padding: 10px 0;
   }
 
   .sku-editor-card__header {
     flex-wrap: wrap;
   }
 
-  .sku-editor-fields {
+  .sku-editor-fields,
+  .sku-pricing-grid {
     grid-template-columns: 1fr;
   }
 
@@ -2776,20 +2733,12 @@ onMounted(() => {
   border-top-color: var(--border-color, rgba(255, 255, 255, 0.08)) !important;
 }
 
-[data-theme="dark"] .panel-left {
-  background: #1a1a2e !important;
-}
-
 [data-theme="dark"] .panel-right {
   background: #16213e !important;
 }
 
 [data-theme="dark"] .n-collapse-item {
   --n-title-font-size: 14px;
-}
-
-[data-theme="dark"] .image-add:hover {
-  background: var(--bg-card-hover, #1c2048) !important;
 }
 
 @media (max-width: 700px) {
@@ -2928,25 +2877,6 @@ onMounted(() => {
   justify-content: flex-end;
   gap: 12px;
   padding-top: 4px;
-}
-
-/* ── 智能定价结果 ── */
-.pricing-result-item {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  padding: 6px 0;
-}
-
-.pricing-result-label {
-  font-size: 12px;
-  color: #999;
-}
-
-.pricing-result-value {
-  font-size: 14px;
-  font-weight: 600;
-  color: #333;
 }
 
 /* ── 1688 搜索结果 ── */

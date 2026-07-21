@@ -25,6 +25,7 @@ const OFFER_LINK = 'a[href*="/product/"]'
 const OFFER_PRICE = '[data-testid*="price" i], [class*="price" i]'
 const CURRENCY_PATTERN = /(?:₽|руб(?:\.|лей|ля)?)/i
 const MAX_OFFER_GRAPH_SIZE = 300
+const BRAND_SPEC_NAMES = new Set(['brand', 'бренд', '品牌'])
 
 interface OfferSelectorGroup {
   element: HTMLElement
@@ -49,6 +50,44 @@ interface OfferSelectorGraph {
 function text(value: unknown): string | undefined {
   if (typeof value === 'string' && value.trim()) return value.trim()
   if (typeof value === 'number' && Number.isFinite(value)) return String(value)
+  return undefined
+}
+
+function factualString(value: unknown): string | undefined {
+  if (typeof value !== 'string') return undefined
+  const normalized = value.replace(/\s+/g, ' ').trim()
+  return normalized || undefined
+}
+
+function canonicalSpecName(value: string): string {
+  return value
+    .normalize('NFKC')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .replace(/\s*[:：]\s*$/, '')
+    .toLocaleLowerCase()
+}
+
+/**
+ * Read only an explicitly declared product-level brand.
+ * JSON-LD wins; characteristics are an exact-name fallback. Seller/title data
+ * is deliberately not accepted because it is not a factual brand source.
+ */
+export function readFactualBrand(
+  jsonLdBrand: unknown,
+  specs: Array<Record<string, unknown>>,
+): string | undefined {
+  const structuredBrand = isRecord(jsonLdBrand)
+    ? factualString(jsonLdBrand.name)
+    : factualString(jsonLdBrand)
+  if (structuredBrand) return structuredBrand
+
+  for (const spec of specs) {
+    const name = factualString(spec.name)
+    if (!name || !BRAND_SPEC_NAMES.has(canonicalSpecName(name))) continue
+    const value = factualString(spec.value)
+    if (value) return value
+  }
   return undefined
 }
 
@@ -239,6 +278,7 @@ function readOffer(
 
 function readJsonLd(productId: string, root: Document = document, pageUrl = location.href): {
   title?: string
+  brand?: string
   description?: string
   sku?: string
   images: string[]
@@ -273,6 +313,7 @@ function readJsonLd(productId: string, root: Document = document, pageUrl = loca
   }
   return {
     title: text(product.name),
+    brand: readFactualBrand(product.brand, specs),
     description: text(product.description),
     sku: text(product.sku),
     images: uniqueUrls(Array.isArray(product.image) ? product.image : [product.image], pageUrl),
@@ -761,6 +802,7 @@ export async function collectCurrentOzonProduct(): Promise<OzonboxCollectedProdu
   const price = jsonCurrent?.price ?? readDomPrice()
   if (!price) throw new Error('当前 Ozon 商品缺少可核验的正价')
   const specs = readSpecs(structured.specs)
+  const brand = structured.brand ?? readFactualBrand(undefined, specs)
   const selector = await readOfferSelectorGraph(productId)
   const currentVariant = readOzonVariantFacts(document, productId, sourceUrl, selector.currentAttrs)
   const selectorProductIds = new Set([productId, ...selector.variants.flatMap((variant) => variant.productId ? [variant.productId] : [])])
@@ -785,7 +827,7 @@ export async function collectCurrentOzonProduct(): Promise<OzonboxCollectedProdu
   return {
     source: 'OZON', sourceUrl, productId, recordName: title.slice(0, 200),
     ...(structured.sku ? { sku: structured.sku } : {}),
-    title, ...(description ? { description } : {}), images, price,
+    title, ...(brand ? { brand } : {}), ...(description ? { description } : {}), images, price,
     specs, variantsData, variantAttrIds: [],
     ...(path ? { categoryPath: path } : {}), status: 'draft',
   }

@@ -37,10 +37,12 @@ export interface OzonboxVariant {
   productId?: string | null
   sku?: string | null
   offerId?: string | null
-  price: number
+  /** Offer-specific price. Absent when the selector does not expose one. */
+  price?: number | null
   oldPrice?: number | null
   images: string[]
   video?: string | null
+  videos?: string[]
   weight?: number | null
   depth?: number | null
   width?: number | null
@@ -165,7 +167,9 @@ function validateVariant(value: unknown, index: number): OzonboxVariant {
     .map((key) => value[key])
     .find((item) => typeof item === 'string' && item.trim())
   if (!identity) throw new Error(`第 ${index + 1} 个变体缺少真实身份`)
-  positiveNumber(value.price, `第 ${index + 1} 个变体价格`)
+  if (value.price !== undefined && value.price !== null && value.price !== '') {
+    positiveNumber(value.price, `第 ${index + 1} 个变体价格`)
+  }
   if (!Array.isArray(value.images)) throw new Error(`第 ${index + 1} 个变体图片必须是数组`)
   if (!Array.isArray(value.supplierAttrs)) throw new Error(`第 ${index + 1} 个变体供应商属性必须是数组`)
   if (!isRecord(value.variantAttrs)) throw new Error(`第 ${index + 1} 个变体属性必须是对象`)
@@ -204,7 +208,7 @@ export function assertOzonboxProductRecord(value: unknown): OzonboxProductRecord
 
 export function assertOzonboxEnvelope<T>(value: unknown): OzonboxEnvelope<T> {
   if (!isRecord(value) || typeof value.code !== 'number' || !('data' in value)) {
-    throw new Error('Ozonbox 后端返回了无效响应')
+    throw new Error('后端服务返回了无效响应')
   }
   return value as unknown as OzonboxEnvelope<T>
 }

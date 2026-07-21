@@ -4,6 +4,7 @@ import type {
   OzonboxRuntimeMessage,
   OzonboxSellerApiResponse,
 } from '@/lib/ozonbox/contract'
+import { isRecord } from '@/lib/ozonbox/contract'
 import { isOzonProductUrl, isOzonUrl } from '@/lib/ozonbox/url'
 import { getAuthSession, getSettings } from '@/lib/utils/storage'
 import {
@@ -28,6 +29,13 @@ function isSellerUrl(value: string): boolean {
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error)
+}
+
+function collectedOzonProduct(response: unknown): OzonboxCollectedProduct {
+  if (isRecord(response) && typeof response.error === 'string' && response.error.trim()) {
+    throw new Error(response.error.trim())
+  }
+  return response as OzonboxCollectedProduct
 }
 
 function requirePositiveIntegerString(value: unknown, field: string): string {
@@ -191,8 +199,8 @@ export default defineBackground(() => {
     if (!(await isAuthenticated())) return
 
     const url = tab.url
-    // Ozon has an explicit popup-driven flow.  Automatic collection would
-    // require an implicit target store, so it is intentionally excluded.
+    // Ozon remains an explicit popup-driven flow and is intentionally excluded
+    // from automatic collection.
     const isWB = /wildberries\.ru/.test(url) && /\/\d+\/?$/.test(url)
     const is1688 = /detail\.1688\.com\/offer\//.test(url) || /s\.1688\.com\/selloffer/.test(url) || /s\.1688\.com\/offer_search/.test(url)
     const isPdd = /(yangkeduo|pinduoduo)\.com/.test(url) && (/goods\.html/i.test(url) || /[?&](goods_id|goodsId)=\d+/.test(url))
@@ -294,17 +302,19 @@ async function collectOzonProductInTab(tabId?: number): Promise<OzonboxCollected
   }
 
   const request: OzonboxRuntimeMessage = { type: 'COLLECT_PRODUCT' }
+  let response: unknown
   try {
-    return await browser.tabs.sendMessage(tabId, request) as OzonboxCollectedProduct
+    response = await browser.tabs.sendMessage(tabId, request)
   } catch (firstError: unknown) {
     try {
       await browser.scripting.executeScript({ target: { tabId }, files: [OZON_CONTENT_SCRIPT] })
       await new Promise((resolve) => setTimeout(resolve, 300))
-      return await browser.tabs.sendMessage(tabId, request) as OzonboxCollectedProduct
+      response = await browser.tabs.sendMessage(tabId, request)
     } catch (secondError: unknown) {
       throw new Error(`无法启动 Ozon 采集脚本：${errorMessage(secondError)}；首次尝试：${errorMessage(firstError)}`)
     }
   }
+  return collectedOzonProduct(response)
 }
 
 async function findSellerTab(explicitTabId?: number): Promise<chrome.tabs.Tab> {

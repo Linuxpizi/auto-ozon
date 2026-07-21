@@ -186,17 +186,47 @@ def test_local_category_is_scoped_by_store_and_product(
     assert unknown_store.status_code == 404
 
 
+def test_local_category_accepts_public_ozon_sku(
+    test_app: TestClient, test_db: Session
+):
+    headers = auth_headers(test_app)
+    store = create_store(test_db)
+    test_db.add(
+        Listing(
+            store_id=store.id,
+            store_name=store.name,
+            product_id="123",
+            sku="777",
+            category_id=400,
+            type_id=40,
+        )
+    )
+    test_db.commit()
+
+    response = test_app.post(
+        f"/api/online-product/info?storeId={store.id}",
+        headers=headers,
+        json={"product_id": [777]},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["data"]["descriptionCategoryId"] == 400
+
+
 def test_live_category_uses_exact_product_and_fields(
     test_app: TestClient, test_db: Session, monkeypatch: pytest.MonkeyPatch
 ):
     headers = auth_headers(test_app)
     create_store(test_db)
 
-    def product_info(_self: OzonClient, product_ids: list[str]) -> list[dict]:
-        assert product_ids == ["777"]
+    def product_info(
+        _self: OzonClient, product_ids=None, *, offer_ids=None, skus=None
+    ) -> list[dict]:
+        assert skus == ["777"]
+        assert product_ids is None
         return [
-            {"id": 999, "description_category_id": 1, "type_id": 2},
-            {"id": 777, "description_category_id": 300, "type_id": 30},
+            {"sku": 999, "description_category_id": 1, "type_id": 2},
+            {"sku": 777, "description_category_id": 300, "type_id": 30},
         ]
 
     monkeypatch.setattr(OzonClient, "get_product_info_list", product_info)
@@ -224,7 +254,12 @@ def test_live_category_rejects_ambiguous_data_and_maps_api_failure(
     monkeypatch.setattr(
         OzonClient,
         "get_product_info_list",
-        lambda _self, _ids: [{"id": 777, "category_id": 300}],
+        lambda _self, _ids=None, **_kwargs: [{"sku": 777, "category_id": 300}],
+    )
+    monkeypatch.setattr(
+        OzonClient,
+        "get_product_attributes",
+        lambda _self, **_kwargs: [{"sku": 777, "category_id": 300}],
     )
     missing = test_app.post(
         "/api/ozon/products/info?clientId=client-1",
@@ -233,7 +268,7 @@ def test_live_category_rejects_ambiguous_data_and_maps_api_failure(
     )
     assert missing.status_code == 404
 
-    def fail(_self: OzonClient, _ids: list[str]) -> list[dict]:
+    def fail(_self: OzonClient, **_kwargs) -> list[dict]:
         raise OzonAPIError(503, {"message": "unavailable"})
 
     monkeypatch.setattr(OzonClient, "get_product_info_list", fail)
@@ -243,6 +278,200 @@ def test_live_category_rejects_ambiguous_data_and_maps_api_failure(
         json={"product_id": 777},
     )
     assert failed.status_code == 502
+
+
+def test_live_category_does_not_call_v4_when_v3_has_no_exact_item(
+    test_app: TestClient, test_db: Session, monkeypatch: pytest.MonkeyPatch
+):
+    headers = auth_headers(test_app)
+    create_store(test_db)
+    info_calls = []
+    attribute_calls = []
+
+    def product_info(
+        _self: OzonClient, product_ids=None, *, offer_ids=None, skus=None
+    ) -> list[dict]:
+        info_calls.append({"product_ids": product_ids, "skus": skus})
+        return []
+
+    def attributes(_self: OzonClient, **kwargs) -> list[dict]:
+        attribute_calls.append(kwargs)
+        return []
+
+    monkeypatch.setattr(OzonClient, "get_product_info_list", product_info)
+    monkeypatch.setattr(OzonClient, "get_product_attributes", attributes)
+
+    response = test_app.post(
+        "/api/ozon/products/info?clientId=client-1",
+        headers=headers,
+        json={"product_id": 777},
+    )
+
+    assert response.status_code == 404
+    assert info_calls == [
+        {"product_ids": None, "skus": ["777"]},
+        {"product_ids": ["777"], "skus": None},
+    ]
+    assert attribute_calls == []
+    assert response.json()["detail"] == (
+        "所选店铺的 Ozon Seller API 中没有该商品；公开商品可能不属于该店铺"
+    )
+
+
+def test_live_category_uses_v4_only_after_exact_v3_sku_without_category(
+    test_app: TestClient, test_db: Session, monkeypatch: pytest.MonkeyPatch
+):
+    headers = auth_headers(test_app)
+    create_store(test_db)
+    info_calls = []
+    attribute_calls = []
+
+    def product_info(
+        _self: OzonClient, product_ids=None, *, offer_ids=None, skus=None
+    ) -> list[dict]:
+        info_calls.append({"product_ids": product_ids, "skus": skus})
+        return [{"sku": 777, "category_id": 999}]
+
+    def attributes(_self: OzonClient, **kwargs) -> list[dict]:
+        attribute_calls.append(kwargs)
+        return [{"sku": 777, "description_category_id": 300, "type_id": 30}]
+
+    monkeypatch.setattr(OzonClient, "get_product_info_list", product_info)
+    monkeypatch.setattr(OzonClient, "get_product_attributes", attributes)
+
+    response = test_app.post(
+        "/api/ozon/products/info?clientId=client-1",
+        headers=headers,
+        json={"product_id": 777},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["data"]["descriptionCategoryId"] == 300
+    assert info_calls == [{"product_ids": None, "skus": ["777"]}]
+    assert attribute_calls == [{"skus": ["777"]}]
+
+
+def test_live_category_treats_v4_item_not_found_as_item_miss(
+    test_app: TestClient, test_db: Session, monkeypatch: pytest.MonkeyPatch
+):
+    headers = auth_headers(test_app)
+    create_store(test_db)
+    attribute_calls = []
+
+    def product_info(
+        _self: OzonClient, product_ids=None, *, offer_ids=None, skus=None
+    ) -> list[dict]:
+        if skus:
+            return [{"sku": 777, "category_id": 999}]
+        return []
+
+    def item_not_found(_self: OzonClient, **kwargs) -> list[dict]:
+        attribute_calls.append(kwargs)
+        raise OzonAPIError(404, {"code": 5, "message": "item not found"})
+
+    monkeypatch.setattr(OzonClient, "get_product_info_list", product_info)
+    monkeypatch.setattr(OzonClient, "get_product_attributes", item_not_found)
+
+    response = test_app.post(
+        "/api/ozon/products/info?clientId=client-1",
+        headers=headers,
+        json={"product_id": 777},
+    )
+
+    assert response.status_code == 404
+    assert response.json()["detail"] == "Ozon 返回中没有明确的真实类目信息"
+    assert attribute_calls == [{"skus": ["777"]}]
+
+
+def test_live_category_downgrades_v4_compatibility_error_after_exact_v3_item(
+    test_app: TestClient, test_db: Session, monkeypatch: pytest.MonkeyPatch
+):
+    headers = auth_headers(test_app)
+    create_store(test_db)
+    attribute_calls = []
+
+    def product_info(
+        _self: OzonClient, product_ids=None, *, offer_ids=None, skus=None
+    ) -> list[dict]:
+        if skus:
+            return [{"sku": 777}]
+        return []
+
+    def unsupported(_self: OzonClient, **kwargs) -> list[dict]:
+        attribute_calls.append(kwargs)
+        raise OzonAPIError(405, {"message": "method not allowed"})
+
+    monkeypatch.setattr(OzonClient, "get_product_info_list", product_info)
+    monkeypatch.setattr(OzonClient, "get_product_attributes", unsupported)
+
+    response = test_app.post(
+        "/api/ozon/products/info?clientId=client-1",
+        headers=headers,
+        json={"product_id": 777},
+    )
+
+    assert response.status_code == 404
+    assert attribute_calls == [{"skus": ["777"]}]
+
+
+def test_product_info_list_supports_public_sku_filter(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    client = OzonClient("client-1", "api-key-1")
+    calls = []
+
+    def request(method: str, path: str, json_body=None) -> dict:
+        calls.append((method, path, json_body))
+        return {
+            "items": [
+                {"sku": 777, "description_category_id": 300, "type_id": 30}
+            ]
+        }
+
+    monkeypatch.setattr(client, "_request", request)
+
+    assert client.get_product_info_list(skus=[" 777 ", "", "0"]) == [
+        {"sku": 777, "description_category_id": 300, "type_id": 30}
+    ]
+    assert calls == [
+        ("POST", "/v3/product/info/list", {"sku": ["777"]})
+    ]
+
+
+def test_product_attributes_uses_sku_filter_and_accepts_top_level_items(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    client = OzonClient("client-1", "api-key-1")
+    calls = []
+
+    def request(method: str, path: str, json_body=None) -> dict:
+        calls.append((method, path, json_body))
+        return {
+            "items": [
+                {
+                    "sku": 777,
+                    "description_category_id": 300,
+                    "type_id": 30,
+                }
+            ]
+        }
+
+    monkeypatch.setattr(client, "_request", request)
+
+    assert client.get_product_attributes(skus=[" 777 ", "", "0"]) == [
+        {"sku": 777, "description_category_id": 300, "type_id": 30}
+    ]
+    assert calls == [
+        (
+            "POST",
+            "/v4/product/info/attributes",
+            {
+                "filter": {"sku": ["777"], "visibility": "ALL"},
+                "limit": 100,
+                "sort_dir": "ASC",
+            },
+        )
+    ]
 
 
 def test_save_product_record_preserves_facts_without_legacy_defaults(

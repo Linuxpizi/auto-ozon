@@ -13,6 +13,25 @@ const NORMALIZED_DIMENSION_KEYS = ['dimension_mm'] as const
 
 const NORMALIZED_WEIGHT_KEYS = ['weight_g'] as const
 
+const CATEGORY_PATH_KEYS = [
+  'categoryPath',
+  'category_path',
+  'categoryBreadcrumbs',
+  'category_breadcrumbs',
+  'categoryTree',
+  'category_tree',
+] as const
+
+const CATEGORY_NAME_KEYS = [
+  'categoryName',
+  'category_name',
+  'categoryTitle',
+  'category_title',
+  'category3',
+  'category_3',
+  'category',
+] as const
+
 const PACKAGING_ATTRIBUTE_KEYS = {
   length: '9454',
   width: '9455',
@@ -160,6 +179,48 @@ function firstFact(item: OzonboxAnalyticsItem, keys: readonly string[]): unknown
   return undefined
 }
 
+function categoryText(value: unknown): string | undefined {
+  if (typeof value === 'string') return value.replace(/\s+/g, ' ').trim() || undefined
+  if (Array.isArray(value)) {
+    const parts = value.map(categoryText).filter((part): part is string => Boolean(part))
+    return parts.length ? Array.from(new Set(parts)).join(' > ') : undefined
+  }
+  if (!isRecord(value)) return undefined
+  for (const key of CATEGORY_PATH_KEYS) {
+    const path = categoryText(value[key])
+    if (path) return path
+  }
+  const levels = [
+    categoryText(value.category1 ?? value.category_1),
+    categoryText(value.category2 ?? value.category_2),
+    categoryText(value.category3 ?? value.category_3),
+  ].filter((part): part is string => Boolean(part))
+  if (levels.length) return Array.from(new Set(levels)).join(' > ')
+  for (const key of ['name', 'title', 'label', 'value']) {
+    const name = categoryText(value[key])
+    if (name) return name
+  }
+  return undefined
+}
+
+export function analyticsCategoryName(item: OzonboxAnalyticsItem): string | undefined {
+  for (const key of CATEGORY_PATH_KEYS) {
+    const path = categoryText(item[key])
+    if (path) return path
+  }
+  const levels = [
+    categoryText(item.category1 ?? item.category_1),
+    categoryText(item.category2 ?? item.category_2),
+    categoryText(item.category3 ?? item.category_3),
+  ].filter((part): part is string => Boolean(part))
+  if (levels.length) return Array.from(new Set(levels)).join(' > ')
+  for (const key of CATEGORY_NAME_KEYS) {
+    const name = categoryText(item[key])
+    if (name) return name
+  }
+  return undefined
+}
+
 function dimensionRecordInMm(
   value: unknown,
   sharedUnit: 'mm' | 'cm' | 'm' | null,
@@ -258,6 +319,9 @@ export function normalizeAnalyticsItem(item: OzonboxAnalyticsItem): OzonboxAnaly
     const block = item[key]
     if (isRecord(block)) Object.assign(normalized, block)
   }
+  const categoryName = analyticsCategoryName(normalized)
+  if (categoryName) normalized.categoryName = categoryName
+  else delete normalized.categoryName
   const dimension = normalizedDimension(normalized)
   if (dimension) normalized.dimension_mm = dimension
   else delete normalized.dimension_mm
@@ -310,7 +374,7 @@ export async function fetchOzonAnalyticsItem(
     return mergeKnownMeasures(item, { attributes: packageFacts.attributes })
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : '包裹参数读取失败'
-    console.warn('Ozonbox 包裹参数补充失败，保留已获取的 analytics 数据', error)
+    console.warn('包裹参数补充失败，保留已获取的 analytics 数据', error)
     return { ...item, ozonboxPackageFactsError: message }
   }
 }

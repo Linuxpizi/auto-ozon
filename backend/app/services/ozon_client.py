@@ -842,25 +842,86 @@ class OzonClient:
         )
         return bool(data.get("result", False))
 
-    def get_product_info_list(self, product_ids: list[str]) -> list[dict]:
+    def get_product_info_list(
+        self,
+        product_ids: Optional[list[str]] = None,
+        *,
+        offer_ids: Optional[list[str]] = None,
+        skus: Optional[list[str]] = None,
+    ) -> list[dict]:
         """Get detailed product info via POST /v3/product/info/list.
 
-        API allows max 1000 product_ids per request. This method handles
-        batching automatically.
+        The endpoint accepts seller product IDs, offer IDs, and public Ozon
+        SKUs. API allows at most 1000 identifiers per request; each identifier
+        type is batched separately so existing product-ID callers remain
+        compatible while callers can explicitly select the correct namespace.
 
         Returns list of dicts with keys: sku, name, primary_image, price,
         old_price, vat, etc. (raw API response items).
         """
-        result = []
-        for i in range(0, len(product_ids), 1000):
-            batch = product_ids[i : i + 1000]
-            data = self._request(
-                "POST",
-                "/v3/product/info/list",
-                json_body={"product_id": batch},
-            )
-            result.extend(_product_info_items(data))
+        result: list[dict] = []
+        for key, values in (
+            ("product_id", product_ids),
+            ("offer_id", offer_ids),
+            ("sku", skus),
+        ):
+            cleaned = [_clean_identifier(value) for value in (values or [])]
+            cleaned = [value for value in cleaned if value]
+            for i in range(0, len(cleaned), 1000):
+                data = self._request(
+                    "POST",
+                    "/v3/product/info/list",
+                    json_body={key: cleaned[i : i + 1000]},
+                )
+                result.extend(_product_info_items(data))
         return result
+
+    def get_product_attributes(
+        self,
+        *,
+        product_ids: Optional[list[str]] = None,
+        offer_ids: Optional[list[str]] = None,
+        skus: Optional[list[str]] = None,
+    ) -> list[dict]:
+        """Get product attributes, including the real description category.
+
+        ``POST /v4/product/info/attributes`` accepts seller product IDs,
+        offer IDs, or public Ozon SKUs.  Public product-page URLs contain an
+        Ozon SKU rather than the seller's internal ``product_id``, so callers
+        must be able to select the identifier field explicitly.
+        """
+        identity_filter: dict[str, list[str]] = {}
+        for key, values in (
+            ("product_id", product_ids),
+            ("offer_id", offer_ids),
+            ("sku", skus),
+        ):
+            cleaned = [_clean_identifier(value) for value in (values or [])]
+            cleaned = [value for value in cleaned if value]
+            if cleaned:
+                identity_filter[key] = cleaned
+
+        if not identity_filter:
+            return []
+
+        data = self._request(
+            "POST",
+            "/v4/product/info/attributes",
+            json_body={
+                "filter": {**identity_filter, "visibility": "ALL"},
+                "limit": 100,
+                "sort_dir": "ASC",
+            },
+        )
+        items = data.get("items")
+        if isinstance(items, list):
+            return items
+        result = data.get("result", [])
+        if isinstance(result, list):
+            return result
+        if isinstance(result, dict) and isinstance(result.get("items"), list):
+            return result["items"]
+        return []
 
     def get_images_by_offer_ids(self, offer_ids: list[str]) -> dict[str, str]:
         """Look up primary_image for a batch of offer_ids via /v3/product/info/list.

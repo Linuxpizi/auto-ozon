@@ -39,7 +39,7 @@ async function request<T>(path: string, options: RequestInit = {}, authenticated
 
 async function ozonboxRequest<T>(path: string, options: RequestInit = {}): Promise<T> {
   const response = assertOzonboxEnvelope<T>(await request<unknown>(path, options))
-  if (response.code !== 200) throw new Error(response.message || 'Ozonbox 请求失败')
+  if (response.code !== 200) throw new Error(response.message || '服务请求失败')
   return response.data
 }
 

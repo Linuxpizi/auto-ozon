@@ -4,7 +4,8 @@ import {
   renderAnalyticsItem,
   setAnalyticsStatus,
 } from './analytics-view'
-import { fetchOzonAnalyticsItem, readOzonSellerId } from './seller-analytics'
+import { readOzonCategoryPath } from './collector'
+import { analyticsCategoryName, fetchOzonAnalyticsItem, readOzonSellerId } from './seller-analytics'
 import { extractOzonProductId, isOzonProductUrl } from './url'
 
 const LIST_CARD_SELECTOR = '.tile-root'
@@ -41,13 +42,21 @@ function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : 'Ozon analytics 加载失败'
 }
 
-function updateAnalyticsIframe(iframe: HTMLIFrameElement, sku: string, forceSellerId = false): Promise<void> {
+function updateAnalyticsIframe(
+  iframe: HTMLIFrameElement,
+  sku: string,
+  forceSellerId = false,
+  categoryFallback?: () => string | undefined,
+): Promise<void> {
   const active = iframeRequests.get(iframe)
   if (active) return active
   setAnalyticsStatus(iframe, '加载中...')
   const request = resolveSellerId(forceSellerId).then(async (shopId) => {
     const item = await fetchOzonAnalyticsItem(sku, shopId)
-    if (item) renderAnalyticsItem(iframe, item)
+    if (item) {
+      const categoryName = analyticsCategoryName(item) ?? categoryFallback?.()
+      renderAnalyticsItem(iframe, categoryName ? { ...item, categoryName } : item)
+    }
     else setAnalyticsStatus(iframe, `暂无数据（店铺ID: ${shopId}）`)
   }).catch((error: unknown) => {
     setAnalyticsStatus(iframe, errorMessage(error))
@@ -58,15 +67,19 @@ function updateAnalyticsIframe(iframe: HTMLIFrameElement, sku: string, forceSell
   return request
 }
 
-function initializeIframe(iframe: HTMLIFrameElement, sku: string): void {
+function initializeIframe(
+  iframe: HTMLIFrameElement,
+  sku: string,
+  categoryFallback?: () => string | undefined,
+): void {
   let initialized = false
   const initialize = () => {
     if (initialized) return
     initialized = true
     bindAnalyticsActions(iframe, () => {
-      void updateAnalyticsIframe(iframe, sku, true)
+      void updateAnalyticsIframe(iframe, sku, true, categoryFallback)
     })
-    void updateAnalyticsIframe(iframe, sku)
+    void updateAnalyticsIframe(iframe, sku, false, categoryFallback)
   }
   iframe.addEventListener('load', initialize, { once: true })
   window.setTimeout(initialize, iframe.dataset.type === 'detail' ? 800 : 600)
@@ -82,7 +95,7 @@ function injectDetailAnalytics(): void {
   if (document.getElementById(id)) return
   const iframe = createAnalyticsIframe(id, 'detail', sku)
   host.prepend(iframe)
-  initializeIframe(iframe, sku)
+  initializeIframe(iframe, sku, readOzonCategoryPath)
   window.setTimeout(() => {
     if (!document.getElementById(id)) injectDetailAnalytics()
   }, 1200)

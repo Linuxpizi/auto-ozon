@@ -28,7 +28,23 @@ export interface ProductVariant {
   price?: number
   oldPrice?: number
   stock?: number
+  /** 该 SKU 自己的完整事实图集；imageUrl 保留为首图兼容字段。 */
+  images?: string[]
   imageUrl?: string
+  /** 该 SKU 自己的事实视频地址。 */
+  videoUrls?: string[]
+  weight?: number
+  depth?: number
+  width?: number
+  height?: number
+  sourceUrl?: string
+  id?: string
+  productId?: string
+  offerId?: string
+  supplierSkuId?: string
+  supplierSpecText?: string
+  supplierAttrs?: Array<Record<string, unknown>>
+  variantAttrs?: Record<string, unknown>
   /** 变体事实来源，便于区分页面结构化数据、DOM 与平台接口。 */
   sourcePath?: string
 }

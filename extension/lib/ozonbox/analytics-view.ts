@@ -3,8 +3,6 @@ import { normalizeAnalyticsItem, type OzonboxAnalyticsItem } from './seller-anal
 
 export type OzonboxAnalyticsCardType = 'lite' | 'detail'
 
-const ANALYTICS_ICON_SVG = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128"><defs><linearGradient id="grad" x1="0%" y1="0%" x2="100%" y2="100%"><stop offset="0%" style="stop-color:#FF6B35"/><stop offset="100%" style="stop-color:#F7931E"/></linearGradient></defs><circle cx="64" cy="64" r="60" fill="url(#grad)"/><path d="M72 24L48 72h24l-8 32 32-48H72l8-32z" fill="white"/></svg>'
-
 type Formatter = (value: unknown, item: OzonboxAnalyticsItem) => string
 
 interface AnalyticsField {
@@ -14,16 +12,16 @@ interface AnalyticsField {
   metricClass?: string
 }
 
-function buildAnalyticsDoc(type: OzonboxAnalyticsCardType): string {
+function buildAnalyticsDoc(type: OzonboxAnalyticsCardType, logoUrl: string): string {
   return `<!DOCTYPE html><html><head><meta charset="utf-8"><style>
     body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"PingFang SC","Microsoft YaHei",sans-serif;background:#fff}
     .card{border:1px solid #e6eef7;border-radius:12px;box-shadow:0 6px 18px rgba(0,0,0,.12);overflow:hidden}
-    .header{display:flex;align-items:center;gap:8px;padding:10px 12px;background:#fff}.logo{width:24px;height:24px}.title{font-size:14px;color:#1a73e8;font-weight:600}
+    .header{display:flex;align-items:center;gap:9px;padding:10px 12px;background:#fff}.logo{width:28px;height:28px;object-fit:contain;border-radius:7px}.title{font-size:14px;color:#4242a8;font-weight:700;letter-spacing:.1px}
     .status-bar{display:flex;align-items:center;gap:8px;padding:8px 12px}.status{font-size:13px;color:#666;flex:1}.actions{display:flex;gap:8px}
     .btn{padding:4px 10px;border-radius:10px;border:1px solid #d7e3f7;background:#fff;color:#1a73e8;font-size:12px;cursor:pointer}.btn.primary{background:#1677ff;border-color:#1677ff;color:#fff}
     .list{display:flex;flex-direction:column;gap:3px;padding:0 10px 10px}.item{display:flex;align-items:baseline;justify-content:flex-start;gap:6px;font-size:13px;line-height:1.3}
     .label{color:#666;white-space:nowrap;min-width:86px}.value{color:#1a73e8;font-weight:600;word-break:break-word;text-align:left;flex:1}.metric-sales .value{color:#ff6b00}.metric-ads .value{color:#16a34a}
-  </style></head><body><div class="card"><div class="header"><div class="logo">${ANALYTICS_ICON_SVG}</div><div class="title">Ozonbox ERP</div></div>
+  </style></head><body><div class="card"><div class="header"><img class="logo" src="${logoUrl}" alt="鲸智 AI"><div class="title">鲸智 AI</div></div>
   <div class="status-bar"><div class="status" id="status">${type === 'detail' ? '加载中...' : '等待数据...'}</div><div class="actions"><button class="btn primary" id="ozon-login-btn">登录卖家</button><button class="btn" id="ozon-refresh-btn">刷新状态</button></div></div>
   <div class="list" id="metrics" style="display:none"></div></div></body></html>`
 }
@@ -112,7 +110,7 @@ function formatDate(value: unknown, item: OzonboxAnalyticsItem): string {
 }
 
 const FIELDS: readonly AnalyticsField[] = [
-  { label: '类目', keys: ['categoryName', 'category', 'categoryTitle', 'category3'] },
+  { label: '类目', keys: ['categoryName'] },
   { label: 'rFBS佣金', keys: ['rfbsCommission', 'rfbs_fee', 'commissionRfbs', 'rfbsPercent'], format: formatPercentSmart },
   { label: 'SKU', keys: ['sku', 'skuName'] },
   { label: '品牌', keys: ['brand', 'brandName'] },
@@ -166,7 +164,7 @@ export function createAnalyticsIframe(
   iframe.style.zIndex = '2147483646'
   iframe.style.overflow = 'hidden'
   if (type === 'detail') iframe.style.marginBottom = '8px'
-  iframe.srcdoc = buildAnalyticsDoc(type)
+  iframe.srcdoc = buildAnalyticsDoc(type, browser.runtime.getURL('/brand-logo.png'))
   return iframe
 }
 

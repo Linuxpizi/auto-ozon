@@ -81,7 +81,7 @@
          左侧:原始数据 (只读)
          右侧:编辑数据 + AI按钮
          ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ -->
-    <n-drawer v-model:show="drawerVisible" :width="680" placement="right" :closable="true" :mask-closable="true"
+    <n-drawer v-model:show="drawerVisible" :width="920" placement="right" :closable="true" :mask-closable="true"
       :theme-overrides="drawerThemeOverrides">
       <n-drawer-content :native-scrollbar="false" closable>
         <template #header>
@@ -174,46 +174,6 @@
               </div>
             </div>
 
-            <div class="section-block" v-if="editProduct.variants?.length">
-              <div class="section-label">
-                真实 SKU 变体（采集）
-                <n-tag size="tiny" type="success" :bordered="false">{{ editProduct.variants.length }}</n-tag>
-              </div>
-              <div class="collected-variants">
-                <div v-for="variant in editProduct.variants" :key="variant.sku" class="collected-variant">
-                  <div class="collected-variant__header">
-                    <n-image v-if="variant.imageUrl" :src="variant.imageUrl" width="44" height="44" object-fit="cover"
-                      preview-disabled class="collected-variant__image" />
-                    <div class="collected-variant__identity">
-                      <div class="collected-variant__sku">SKU {{ variant.sku }}</div>
-                      <div v-if="variant.barcode" class="collected-variant__secondary">条码 {{ variant.barcode }}</div>
-                    </div>
-                  </div>
-                  <div v-if="variantValueEntries(variant).length" class="variant-values">
-                    <n-tag v-for="entry in variantValueEntries(variant)" :key="entry.key" size="tiny" :bordered="false">
-                      {{ entry.name }}：{{ entry.value }}
-                    </n-tag>
-                  </div>
-                  <div v-else class="empty-hint">暂无变体属性</div>
-                  <div v-if="hasVariantCommerceData(variant)" class="collected-variant__commerce">
-                    <div v-if="variant.price !== undefined" class="variant-metric variant-metric--price">
-                      <span>价格</span>
-                      <strong>{{ formatVariantPrice(variant.price, editProduct.currency) }}</strong>
-                    </div>
-                    <div v-if="variant.oldPrice !== undefined" class="variant-metric">
-                      <span>原价</span>
-                      <del>{{ formatVariantPrice(variant.oldPrice, editProduct.currency) }}</del>
-                    </div>
-                    <div v-if="variant.stock !== undefined" class="variant-metric">
-                      <span>库存</span>
-                      <strong>{{ variant.stock }}</strong>
-                    </div>
-                  </div>
-                  <div v-if="variant.sourcePath" class="collected-variant__source">来源：{{ variant.sourcePath }}</div>
-                </div>
-              </div>
-            </div>
-
             <div class="section-block" v-if="editProduct.spec_list?.length">
               <div class="section-label">物理规格</div>
               <div class="info-grid">
@@ -227,15 +187,6 @@
                       editProduct.spec_list[0].height_mm }}mm</span></div>
                 <div class="info-item" v-if="editProduct.spec_list[0]?.depth_mm"><span class="info-key">深</span><span>{{
                   editProduct.spec_list[0].depth_mm }}mm</span></div>
-              </div>
-            </div>
-
-            <div class="section-block" v-if="editProduct.sku_list?.length">
-              <div class="section-label">SKU / 价格库存摘要</div>
-              <div v-for="sku in editProduct.sku_list" :key="sku.sku || sku.name" class="sku-row">
-                <span>{{ sku.name || sku.sku }}</span>
-                <span style="color:var(--accent)">{{ sku.price }} {{ _currencySymbol(editProduct.currency) }}</span>
-                <span style="color:#999">库存 {{ sku.stock ?? '—' }}</span>
               </div>
             </div>
 
@@ -479,20 +430,100 @@
               </n-grid>
             </div>
 
-            <!-- 人工维护的 SKU / 价格库存摘要，与只读采集 variants 分开 -->
-            <div class="section-block">
-              <div class="section-label">人工 SKU / 价格库存</div>
-              <div v-if="editProduct.sku_list?.length">
-                <div v-for="(sku, idx) in editProduct.sku_list" :key="idx" class="sku-edit-row">
-                  <n-input v-model:value="sku.name" size="small" placeholder="变体名称" style="flex:1" />
-                  <n-input-number v-model:value="sku.price" size="small" :min="0" :precision="2" placeholder="价格"
-                    style="width:90px" />
-                  <n-input-number v-model:value="sku.stock" size="small" :min="0" placeholder="库存" style="width:70px" />
-                  <n-button size="tiny" quaternary type="error"
-                    @click="editProduct.sku_list.splice(idx, 1)">✕</n-button>
+            <!-- 采集 variants 与可编辑 sku_list 按 SKU 身份统一呈现 -->
+            <div class="section-block sku-editor-section">
+              <div class="section-label">
+                <span>SKU 变体与价格库存</span>
+                <n-tag size="tiny" type="success" :bordered="false">{{ skuEditorRows.length }} 个 SKU</n-tag>
+              </div>
+              <div class="sku-editor-hint">
+                每个采集 SKU 均单独展示；变体属性为采集事实，只读。条码、价格和库存保存到 SKU 数据。
+              </div>
+
+              <div v-if="skuEditorRows.length" class="sku-editor-list">
+                <div v-for="item in skuEditorRows" :key="item.key" class="sku-editor-card"
+                  :class="{ 'sku-editor-card--collected': item.variant }">
+                  <div class="sku-editor-card__header">
+                    <div class="sku-editor-card__identity">
+                      <div class="sku-editor-card__eyebrow">SKU</div>
+                      <strong>{{ item.variant?.sku || item.row.sku || '待填写 SKU' }}</strong>
+                      <span v-if="item.row.name">{{ item.row.name }}</span>
+                    </div>
+                    <n-tag v-if="item.variant" size="tiny" type="success" :bordered="false">采集 SKU</n-tag>
+                    <n-tag v-else size="tiny" type="info" :bordered="false">人工 SKU</n-tag>
+                    <n-button v-if="!item.variant" size="tiny" quaternary type="error"
+                      @click="removeSku(item.row)">删除</n-button>
+                  </div>
+
+                  <section v-if="item.variant" class="sku-facts">
+                    <div class="sku-subsection-title">采集事实</div>
+                    <div v-if="item.variant.images?.length" class="sku-media-grid">
+                      <n-image v-for="(image, imageIndex) in item.variant.images" :key="`${image}-${imageIndex}`"
+                        :src="image" width="72" height="72" object-fit="cover" class="sku-editor-card__image" />
+                    </div>
+                    <div v-if="item.variant.videoUrls?.length" class="sku-video-grid">
+                      <video v-for="(video, videoIndex) in item.variant.videoUrls" :key="`${video}-${videoIndex}`"
+                        :src="video" controls preload="metadata" />
+                    </div>
+                    <div class="sku-fact-grid">
+                      <div v-if="item.variant.price !== undefined"><span>当前价</span><strong>{{ formatVariantMoney(item.variant.price) }}</strong></div>
+                      <div v-if="item.variant.oldPrice !== undefined"><span>原价</span><strong>{{ formatVariantMoney(item.variant.oldPrice) }}</strong></div>
+                      <div v-if="item.variant.stock !== undefined"><span>库存</span><strong>{{ item.variant.stock }}</strong></div>
+                      <div v-if="item.variant.weight !== undefined"><span>重量</span><strong>{{ item.variant.weight }} g</strong></div>
+                      <div v-if="item.variant.depth !== undefined"><span>长</span><strong>{{ item.variant.depth }} mm</strong></div>
+                      <div v-if="item.variant.width !== undefined"><span>宽</span><strong>{{ item.variant.width }} mm</strong></div>
+                      <div v-if="item.variant.height !== undefined"><span>高</span><strong>{{ item.variant.height }} mm</strong></div>
+                    </div>
+                    <div v-if="variantValueEntries(item.variant).length" class="variant-values sku-editor-card__values">
+                      <n-tag v-for="entry in variantValueEntries(item.variant)" :key="entry.key" size="small" type="info"
+                        :bordered="false">{{ entry.name }}：{{ entry.value }}</n-tag>
+                    </div>
+                    <div v-if="variantIdentityEntries(item.variant).length" class="sku-identifiers">
+                      <div v-for="entry in variantIdentityEntries(item.variant)" :key="entry.label">
+                        <span>{{ entry.label }}</span><code>{{ entry.value }}</code>
+                      </div>
+                    </div>
+                    <div v-if="supplierFactEntries(item.variant).length" class="sku-supplier-facts">
+                      <n-collapse arrow-placement="right">
+                        <n-collapse-item title="其他采集属性" name="supplier-facts">
+                          <div v-for="entry in supplierFactEntries(item.variant)" :key="entry.key" class="sku-supplier-fact">
+                            <span>{{ entry.name }}</span><strong>{{ entry.value }}</strong>
+                          </div>
+                        </n-collapse-item>
+                      </n-collapse>
+                    </div>
+                    <div v-if="item.variant.sourcePath || item.variant.sourceUrl" class="sku-editor-card__source">
+                      <span v-if="item.variant.sourcePath">采集来源：{{ item.variant.sourcePath }}</span>
+                      <a v-if="item.variant.sourceUrl" :href="item.variant.sourceUrl" target="_blank" rel="noopener noreferrer">查看 SKU 来源页</a>
+                    </div>
+                  </section>
+
+                  <div class="sku-subsection-title sku-subsection-title--editable">上架数据</div>
+                  <div class="sku-editor-fields">
+                    <div class="sku-editor-field">
+                      <div class="field-label">SKU 编码</div>
+                      <n-input v-model:value="item.row.sku" size="small" placeholder="请输入 SKU"
+                        :disabled="Boolean(item.variant)" />
+                    </div>
+                    <div class="sku-editor-field">
+                      <div class="field-label">条码</div>
+                      <n-input v-model:value="item.row.barcode" size="small" placeholder="未设置" />
+                    </div>
+                    <div class="sku-editor-field">
+                      <div class="field-label">价格（{{ _currencySymbol(editProduct.currency) }}）</div>
+                      <n-input-number v-model:value="item.row.price" size="small" :min="0" :precision="2"
+                        placeholder="未设置" style="width:100%" />
+                    </div>
+                    <div class="sku-editor-field">
+                      <div class="field-label">库存</div>
+                      <n-input-number v-model:value="item.row.stock" size="small" :min="0" :precision="0"
+                        placeholder="未设置" style="width:100%" />
+                    </div>
+                  </div>
                 </div>
               </div>
-              <n-button size="small" quaternary @click="addSku">+ 添加 SKU</n-button>
+              <div v-else class="sku-editor-empty">暂无 SKU，点击下方按钮添加</div>
+              <n-button size="small" dashed block class="sku-add-button" @click="addSku">+ 添加人工 SKU</n-button>
             </div>
 
             <!-- 来源信息 -->
@@ -697,7 +728,7 @@ import {
   NButton, NTag, NSpace, NInput, NInputNumber, NSelect, NDataTable,
   NPopconfirm, NPagination, NDrawer, NDrawerContent, NImage, NDivider,
   NModal, NForm, NFormItem, NGrid, NGi, NH2, NAlert,
-  NTree, NA, NSpin, NDatePicker, NInputGroup, NCard,
+  NTree, NA, NSpin, NDatePicker, NInputGroup, NCard, NCollapse, NCollapseItem,
   type GlobalThemeOverrides,
 } from "naive-ui";
 import { apiGet, apiPost, apiPut, apiDelete } from "../api";
@@ -838,10 +869,11 @@ const hasChanges = computed(() => {
 function openDrawer(product: any) {
   suppressEditStoreWatch.value = true;
   const normalizedProduct = {
-    ...JSON.parse(JSON.stringify(product)),
+    ...normalizeProduct(JSON.parse(JSON.stringify(product))),
     description_category_id: product.description_category_id || product.ozon_category_id || null,
     type_id: product.type_id || product.ozon_type_id || null,
   };
+  synchronizeSkuList(normalizedProduct);
   editProduct.value = normalizedProduct;
   editProductSnapshot.value = JSON.parse(JSON.stringify(normalizedProduct));
   // initialize edit category state from product
@@ -883,7 +915,6 @@ async function saveEdit() {
       seller_url: d.seller_url,
       video_urls: d.video_urls || [],
       sku_list: d.sku_list || [],
-      variants: d.variants || [],
       spec_list: d.spec_list || [],
       facts: d.facts || [],
       color_list: d.color_list || [],
@@ -1285,13 +1316,6 @@ async function handleOneClickAiOptimize() {
   }
 }
 
-// ── SKU 管理 ──
-function addSku() {
-  if (!editProduct.value) return;
-  if (!editProduct.value.sku_list) editProduct.value.sku_list = [];
-  editProduct.value.sku_list.push({ sku: "", name: "", price: 0, stock: 0 });
-}
-
 // ── 采集数据兼容归一化 ──
 interface ProductFact {
   name: string;
@@ -1311,10 +1335,42 @@ interface ProductVariant {
   price?: number;
   oldPrice?: number;
   stock?: number;
+  images?: string[];
   imageUrl?: string;
+  videoUrls?: string[];
+  weight?: number;
+  depth?: number;
+  width?: number;
+  height?: number;
+  sourceUrl?: string;
+  id?: string;
+  productId?: string;
+  offerId?: string;
+  supplierSkuId?: string;
+  supplierSpecText?: string;
+  supplierAttrs?: Array<Record<string, unknown>>;
+  variantAttrs?: Record<string, unknown>;
   sourcePath?: string;
   [key: string]: unknown;
 }
+
+interface EditableSkuRow {
+  sku: string;
+  name?: string;
+  barcode?: string;
+  price?: number | null;
+  stock?: number | null;
+  [key: string]: unknown;
+}
+
+interface SkuEditorItem {
+  key: string;
+  row: EditableSkuRow;
+  variant?: ProductVariant;
+}
+
+const skuRowKeys = new WeakMap<object, string>();
+let skuRowKeySeed = 0;
 
 function parseArray(value: unknown): unknown[] {
   if (Array.isArray(value)) return value;
@@ -1336,6 +1392,33 @@ function displayValue(value: unknown): string {
   } catch {
     return String(value);
   }
+}
+
+function normalizeSkuIdentity(value: unknown): string {
+  return displayValue(value).trim();
+}
+
+function skuRowObjectKey(row: EditableSkuRow): string {
+  const existing = skuRowKeys.get(row);
+  if (existing) return existing;
+  const created = `sku-row-${++skuRowKeySeed}`;
+  skuRowKeys.set(row, created);
+  return created;
+}
+
+function normalizeSkuList(value: unknown): EditableSkuRow[] {
+  return parseArray(value).flatMap((item) => {
+    if (!item || typeof item !== "object") return [];
+    const row = { ...(item as Record<string, unknown>) } as EditableSkuRow;
+    row.sku = normalizeSkuIdentity(row.sku);
+    const name = displayValue(row.name);
+    const barcode = displayValue(row.barcode);
+    if (name) row.name = name;
+    else delete row.name;
+    if (barcode) row.barcode = barcode;
+    else delete row.barcode;
+    return [row];
+  });
 }
 
 function normalizeFacts(value: unknown): ProductFact[] {
@@ -1377,15 +1460,26 @@ function normalizeVariants(value: unknown): ProductVariant[] {
     });
     const normalized = { ...raw, sku, values } as ProductVariant;
     const barcode = displayValue(raw.barcode);
-    const imageUrl = displayValue(raw.imageUrl ?? raw.image_url);
+    const images = normalizeVariantUrls(raw.images);
+    const legacyImageUrl = displayValue(raw.imageUrl ?? raw.image_url);
+    if (legacyImageUrl && !images.includes(legacyImageUrl)) images.unshift(legacyImageUrl);
+    const videoUrls = normalizeVariantUrls(raw.videoUrls ?? raw.video_urls);
     const sourcePath = displayValue(raw.sourcePath ?? raw.source_path);
+    const sourceUrl = displayValue(raw.sourceUrl ?? raw.source_url);
     const price = normalizeVariantNumber(raw.price);
     const oldPrice = normalizeVariantNumber(raw.oldPrice ?? raw.old_price);
     const stock = normalizeVariantNumber(raw.stock);
     if (barcode) normalized.barcode = barcode;
     else delete normalized.barcode;
-    if (imageUrl) normalized.imageUrl = imageUrl;
-    else delete normalized.imageUrl;
+    if (images.length) {
+      normalized.images = images;
+      normalized.imageUrl = images[0];
+    } else {
+      delete normalized.images;
+      delete normalized.imageUrl;
+    }
+    if (videoUrls.length) normalized.videoUrls = videoUrls;
+    else delete normalized.videoUrls;
     if (sourcePath) normalized.sourcePath = sourcePath;
     else delete normalized.sourcePath;
     if (price !== undefined) normalized.price = price;
@@ -1394,7 +1488,35 @@ function normalizeVariants(value: unknown): ProductVariant[] {
     else delete normalized.oldPrice;
     if (stock !== undefined) normalized.stock = stock;
     else delete normalized.stock;
+    for (const field of ["weight", "depth", "width", "height"] as const) {
+      const number = normalizeVariantNumber(raw[field]);
+      if (number !== undefined) normalized[field] = number;
+      else delete normalized[field];
+    }
+    if (sourceUrl) normalized.sourceUrl = sourceUrl;
+    else delete normalized.sourceUrl;
+    for (const field of ["id", "productId", "offerId", "supplierSkuId", "supplierSpecText"] as const) {
+      const fieldValue = displayValue(raw[field]);
+      if (fieldValue) normalized[field] = fieldValue;
+      else delete normalized[field];
+    }
+    normalized.supplierAttrs = parseArray(raw.supplierAttrs ?? raw.supplier_attrs)
+      .filter((entry): entry is Record<string, unknown> => Boolean(entry) && typeof entry === "object" && !Array.isArray(entry))
+      .map((entry) => ({ ...entry }));
+    normalized.variantAttrs = raw.variantAttrs && typeof raw.variantAttrs === "object" && !Array.isArray(raw.variantAttrs)
+      ? { ...(raw.variantAttrs as Record<string, unknown>) }
+      : {};
     return [normalized];
+  });
+}
+
+function normalizeVariantUrls(value: unknown): string[] {
+  const seen = new Set<string>();
+  return parseArray(value).flatMap((item) => {
+    const url = displayValue(item);
+    if (!url || seen.has(url)) return [];
+    seen.add(url);
+    return [url];
   });
 }
 
@@ -1407,10 +1529,46 @@ function normalizeVariantNumber(value: unknown): number | undefined {
   return Number.isFinite(parsed) && parsed >= 0 ? parsed : undefined;
 }
 
+function createSkuRowFromVariant(variant: ProductVariant): EditableSkuRow {
+  const row: EditableSkuRow = { sku: variant.sku };
+  if (variant.barcode) row.barcode = variant.barcode;
+  if (variant.price !== undefined) row.price = variant.price;
+  if (variant.stock !== undefined) row.stock = variant.stock;
+  return row;
+}
+
+function synchronizeSkuList(product: any): void {
+  const skuList = normalizeSkuList(product?.sku_list);
+  const rowsBySku = new Map<string, EditableSkuRow>();
+
+  for (const row of skuList) {
+    const sku = normalizeSkuIdentity(row.sku);
+    if (sku && !rowsBySku.has(sku)) rowsBySku.set(sku, row);
+  }
+
+  for (const variant of normalizeVariants(product?.variants)) {
+    const sku = normalizeSkuIdentity(variant.sku);
+    if (!sku) continue;
+    let row = rowsBySku.get(sku);
+    if (!row) {
+      row = createSkuRowFromVariant(variant);
+      skuList.push(row);
+      rowsBySku.set(sku, row);
+    }
+
+    row.sku = variant.sku;
+    if (!row.barcode && variant.barcode) row.barcode = variant.barcode;
+    if (row.price == null && variant.price !== undefined) row.price = variant.price;
+    if (row.stock == null && variant.stock !== undefined) row.stock = variant.stock;
+  }
+
+  product.sku_list = skuList;
+}
+
 function normalizeProduct(product: any) {
   return {
     ...product,
-    sku_list: parseArray(product?.sku_list),
+    sku_list: normalizeSkuList(product?.sku_list),
     spec_list: parseArray(product?.spec_list),
     facts: normalizeFacts(product?.facts),
     color_list: normalizeColors(product?.color_list),
@@ -1425,12 +1583,78 @@ function variantValueEntries(variant: ProductVariant): Array<ProductVariantValue
   }));
 }
 
-function hasVariantCommerceData(variant: ProductVariant): boolean {
-  return variant.price !== undefined || variant.oldPrice !== undefined || variant.stock !== undefined;
+function formatVariantMoney(value: number): string {
+  return `${value.toLocaleString("ru-RU", { maximumFractionDigits: 2 })} ${_currencySymbol(editProduct.value?.currency)}`;
 }
 
-function formatVariantPrice(value: number, currency?: string): string {
-  return `${value.toLocaleString()} ${_currencySymbol(currency)}`;
+function variantIdentityEntries(variant: ProductVariant): Array<{ label: string; value: string }> {
+  const entries: Array<[string, string | undefined]> = [
+    ["Product ID", variant.productId],
+    ["Offer ID", variant.offerId],
+    ["事实 ID", variant.id],
+    ["供应商 SKU ID", variant.supplierSkuId],
+    ["供应商规格", variant.supplierSpecText],
+  ];
+  return entries.flatMap(([label, value]) => value ? [{ label, value }] : []);
+}
+
+function supplierFactEntries(variant: ProductVariant): Array<{ key: string; name: string; value: string }> {
+  return (variant.supplierAttrs || []).flatMap((fact, index) => {
+    const name = displayValue(fact.name ?? fact.label ?? fact.propertyID);
+    const value = displayValue(fact.value);
+    if (!name || !value) return [];
+    return [{ key: `${name}-${value}-${index}`, name, value }];
+  });
+}
+
+const skuEditorRows = computed<SkuEditorItem[]>(() => {
+  const product = editProduct.value;
+  if (!product) return [];
+
+  const skuList = Array.isArray(product.sku_list) ? product.sku_list as EditableSkuRow[] : [];
+  const variants = Array.isArray(product.variants) ? product.variants as ProductVariant[] : [];
+  const availableRowsBySku = new Map<string, EditableSkuRow[]>();
+  const usedRows = new Set<EditableSkuRow>();
+  const variantOccurrences = new Map<string, number>();
+
+  for (const row of skuList) {
+    const sku = normalizeSkuIdentity(row.sku);
+    if (!sku) continue;
+    const rows = availableRowsBySku.get(sku) || [];
+    rows.push(row);
+    availableRowsBySku.set(sku, rows);
+  }
+
+  const collectedItems = variants.flatMap((variant) => {
+    const sku = normalizeSkuIdentity(variant.sku);
+    if (!sku) return [];
+    const matchingRows = availableRowsBySku.get(sku) || [];
+    const row = matchingRows.find((candidate) => !usedRows.has(candidate)) || matchingRows[0];
+    if (!row) return [];
+    usedRows.add(row);
+    const occurrence = (variantOccurrences.get(sku) || 0) + 1;
+    variantOccurrences.set(sku, occurrence);
+    return [{ key: `variant-${sku}-${occurrence}`, row, variant }];
+  });
+
+  const manualItems = skuList
+    .filter((row) => !usedRows.has(row))
+    .map((row) => ({ key: skuRowObjectKey(row), row }));
+
+  return [...collectedItems, ...manualItems];
+});
+
+function addSku() {
+  if (!editProduct.value) return;
+  if (!Array.isArray(editProduct.value.sku_list)) editProduct.value.sku_list = [];
+  editProduct.value.sku_list.push({ sku: "", barcode: "", price: null, stock: null } as EditableSkuRow);
+}
+
+function removeSku(row: EditableSkuRow) {
+  const skuList = editProduct.value?.sku_list;
+  if (!Array.isArray(skuList)) return;
+  const index = skuList.indexOf(row);
+  if (index >= 0) skuList.splice(index, 1);
 }
 
 // ── 删除 ──
@@ -2040,7 +2264,7 @@ onMounted(() => {
   padding: 8px 0;
 }
 
-/* ── 采集事实、颜色与真实 SKU ── */
+/* ── 采集事实与颜色 ── */
 .tag-list,
 .variant-values {
   display: flex;
@@ -2085,81 +2309,6 @@ onMounted(() => {
   color: var(--text-muted);
   font-size: 10px;
   word-break: break-all;
-}
-
-.collected-variants {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
-
-.collected-variant {
-  padding: 8px;
-  border: 1px solid var(--border-color);
-  border-radius: 6px;
-  background: var(--bg-elevated);
-}
-
-.collected-variant__header {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin-bottom: 7px;
-}
-
-.collected-variant__image {
-  flex-shrink: 0;
-  border-radius: 5px;
-  overflow: hidden;
-}
-
-.collected-variant__identity {
-  min-width: 0;
-}
-
-.collected-variant__sku {
-  color: var(--text-secondary);
-  font-size: 11px;
-  font-family: monospace;
-  word-break: break-all;
-}
-
-.collected-variant__secondary,
-.collected-variant__source {
-  color: var(--text-muted);
-  font-size: 10px;
-  word-break: break-all;
-}
-
-.collected-variant__commerce {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px 12px;
-  margin-top: 8px;
-  padding-top: 7px;
-  border-top: 1px dashed var(--border-color);
-}
-
-.variant-metric {
-  display: flex;
-  align-items: baseline;
-  gap: 4px;
-  color: var(--text-muted);
-  font-size: 11px;
-}
-
-.variant-metric strong,
-.variant-metric del {
-  color: var(--text-secondary);
-  font-weight: 600;
-}
-
-.variant-metric--price strong {
-  color: var(--accent);
-}
-
-.collected-variant__source {
-  margin-top: 6px;
 }
 
 .info-grid {
@@ -2347,23 +2496,226 @@ onMounted(() => {
   background: var(--bg-card-hover, #f8f9fa);
 }
 
-/* ── SKU 编辑行 ── */
-.sku-edit-row {
+/* ── 统一 SKU 编辑器 ── */
+.sku-editor-section {
+  padding: 12px;
+  border: 1px solid var(--border-color);
+  border-radius: 10px;
+  background: var(--bg-card, #fff);
+}
+
+.sku-editor-hint {
+  margin-bottom: 10px;
+  color: var(--text-muted);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.sku-editor-list {
   display: flex;
-  gap: 6px;
-  align-items: center;
-  margin-bottom: 6px;
-  padding: 4px 6px;
-  border-radius: 6px;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.sku-editor-card {
+  padding: 12px;
+  border: 1px solid var(--border-color);
+  border-radius: 9px;
   background: var(--bg-elevated);
 }
 
-.sku-row {
+.sku-editor-card--collected {
+  border-color: rgba(24, 160, 88, 0.28);
+  box-shadow: inset 3px 0 0 #18a058;
+}
+
+.sku-editor-card__header {
   display: flex;
   gap: 8px;
   align-items: center;
+}
+
+.sku-editor-card__image {
+  flex-shrink: 0;
+  overflow: hidden;
+  border-radius: 6px;
+}
+
+.sku-editor-card__identity {
+  display: flex;
+  min-width: 0;
+  flex: 1;
+  flex-direction: column;
+}
+
+.sku-editor-card__eyebrow {
+  color: var(--text-muted);
+  font-size: 10px;
+  letter-spacing: 0.08em;
+}
+
+.sku-editor-card__identity strong {
+  color: var(--text-secondary);
+  font-family: monospace;
   font-size: 12px;
-  padding: 3px 0;
+  word-break: break-all;
+}
+
+.sku-editor-card__identity span {
+  color: var(--text-muted);
+  font-size: 11px;
+  word-break: break-word;
+}
+
+.sku-editor-card__values {
+  margin-top: 10px;
+  padding-top: 9px;
+  border-top: 1px dashed var(--border-color);
+}
+
+.sku-facts {
+  margin-top: 10px;
+  padding: 10px;
+  border: 1px solid rgba(24, 160, 88, 0.2);
+  border-radius: 6px;
+  background: var(--bg-card, #fff);
+}
+
+.sku-subsection-title {
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.sku-subsection-title--editable {
+  margin-top: 12px;
+  padding-top: 10px;
+  border-top: 1px dashed var(--border-color);
+}
+
+.sku-media-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, 72px);
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.sku-video-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.sku-video-grid video {
+  width: 100%;
+  max-height: 180px;
+  border-radius: 6px;
+  background: #111;
+}
+
+.sku-fact-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 6px;
+  margin-top: 9px;
+}
+
+.sku-fact-grid > div {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 2px;
+  padding: 6px 8px;
+  border: 1px solid var(--border-color);
+  border-radius: 5px;
+}
+
+.sku-fact-grid span,
+.sku-identifiers span,
+.sku-supplier-fact span {
+  color: var(--text-muted);
+  font-size: 10px;
+}
+
+.sku-fact-grid strong {
+  color: var(--text-secondary);
+  font-size: 12px;
+  word-break: break-word;
+}
+
+.sku-identifiers {
+  display: grid;
+  gap: 4px;
+  margin-top: 9px;
+}
+
+.sku-identifiers > div,
+.sku-supplier-fact {
+  display: grid;
+  grid-template-columns: minmax(90px, 0.45fr) minmax(0, 1fr);
+  gap: 8px;
+  align-items: baseline;
+}
+
+.sku-identifiers code,
+.sku-supplier-fact strong {
+  color: var(--text-secondary);
+  font-size: 11px;
+  font-weight: 500;
+  word-break: break-all;
+}
+
+.sku-supplier-facts {
+  margin-top: 8px;
+}
+
+.sku-editor-card__source {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.sku-editor-card__source a {
+  color: #2080f0;
+}
+
+.sku-editor-card__empty {
+  margin-top: 9px;
+  color: var(--text-muted);
+  font-size: 11px;
+}
+
+.sku-editor-fields {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.sku-editor-field {
+  min-width: 0;
+}
+
+.sku-editor-card__source {
+  margin-top: 8px;
+  color: var(--text-muted);
+  font-size: 10px;
+  word-break: break-all;
+}
+
+.sku-editor-empty {
+  padding: 18px;
+  border: 1px dashed var(--border-color);
+  border-radius: 8px;
+  background: var(--bg-elevated);
+  color: var(--text-muted);
+  font-size: 12px;
+  text-align: center;
+}
+
+.sku-add-button {
+  margin-top: 10px;
 }
 
 /* ── 编辑抽屉底部 ── */
@@ -2390,6 +2742,18 @@ onMounted(() => {
     flex: none;
     width: 100%;
     border-right: none;
+  }
+
+  .sku-editor-card__header {
+    flex-wrap: wrap;
+  }
+
+  .sku-editor-fields {
+    grid-template-columns: 1fr;
+  }
+
+  .sku-fact-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
 

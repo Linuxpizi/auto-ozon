@@ -15,6 +15,38 @@ function positiveNumber(value: unknown): number | undefined {
   return Number.isFinite(number) && number >= 0 ? number : undefined
 }
 
+function uniqueTexts(values: unknown[]): string[] {
+  return Array.from(new Set(values.map(text).filter(Boolean)))
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
+
+function normalizeRecord(value: unknown): Record<string, unknown> | undefined {
+  return isRecord(value) ? { ...value } : undefined
+}
+
+function stableValue(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(stableValue)
+  if (!isRecord(value)) return value
+  return Object.fromEntries(Object.entries(value)
+    .sort(([left], [right]) => left.localeCompare(right))
+    .map(([key, item]) => [key, stableValue(item)]))
+}
+
+function normalizeRecordList(value: unknown): Array<Record<string, unknown>> {
+  if (!Array.isArray(value)) return []
+  const result = new Map<string, Record<string, unknown>>()
+  for (const item of value) {
+    const record = normalizeRecord(item)
+    if (!record) continue
+    const key = JSON.stringify(stableValue(record))
+    if (!result.has(key)) result.set(key, record)
+  }
+  return [...result.values()]
+}
+
 function normalizeVariantValues(values: ProductVariantValue[] = []): ProductVariantValue[] {
   const seen = new Set<string>()
   return values.flatMap((item) => {
@@ -40,6 +72,13 @@ export function normalizeVariants(variants: ProductVariant[] = []): ProductVaria
     const key = `${sku}\u0000${values.map((item) => `${item.name}=${item.value}`).join('|')}`
     if (seen.has(key)) continue
     seen.add(key)
+    const images = uniqueTexts([
+      ...(Array.isArray(variant.images) ? variant.images : []),
+      variant.imageUrl,
+    ])
+    const videoUrls = uniqueTexts(Array.isArray(variant.videoUrls) ? variant.videoUrls : [])
+    const supplierAttrs = normalizeRecordList(variant.supplierAttrs)
+    const variantAttrs = normalizeRecord(variant.variantAttrs)
     result.push({
       sku,
       ...(barcode ? { barcode } : {}),
@@ -47,7 +86,20 @@ export function normalizeVariants(variants: ProductVariant[] = []): ProductVaria
       ...(positiveNumber(variant.price) !== undefined ? { price: positiveNumber(variant.price) } : {}),
       ...(positiveNumber(variant.oldPrice) !== undefined ? { oldPrice: positiveNumber(variant.oldPrice) } : {}),
       ...(positiveNumber(variant.stock) !== undefined ? { stock: positiveNumber(variant.stock) } : {}),
-      ...(text(variant.imageUrl) ? { imageUrl: text(variant.imageUrl) } : {}),
+      ...(images.length ? { images, imageUrl: images[0] } : {}),
+      ...(videoUrls.length ? { videoUrls } : {}),
+      ...(positiveNumber(variant.weight) !== undefined ? { weight: positiveNumber(variant.weight) } : {}),
+      ...(positiveNumber(variant.depth) !== undefined ? { depth: positiveNumber(variant.depth) } : {}),
+      ...(positiveNumber(variant.width) !== undefined ? { width: positiveNumber(variant.width) } : {}),
+      ...(positiveNumber(variant.height) !== undefined ? { height: positiveNumber(variant.height) } : {}),
+      ...(text(variant.sourceUrl) ? { sourceUrl: text(variant.sourceUrl) } : {}),
+      ...(text(variant.id) ? { id: text(variant.id) } : {}),
+      ...(text(variant.productId) ? { productId: text(variant.productId) } : {}),
+      ...(text(variant.offerId) ? { offerId: text(variant.offerId) } : {}),
+      ...(text(variant.supplierSkuId) ? { supplierSkuId: text(variant.supplierSkuId) } : {}),
+      ...(text(variant.supplierSpecText) ? { supplierSpecText: text(variant.supplierSpecText) } : {}),
+      ...(supplierAttrs.length ? { supplierAttrs } : {}),
+      ...(variantAttrs ? { variantAttrs } : {}),
       ...(text(variant.sourcePath) ? { sourcePath: text(variant.sourcePath) } : {}),
     })
   }

@@ -108,6 +108,24 @@ def _draft_number(value: Any) -> float:
     return 0.0
 
 
+def _serialize_tags(value: Any) -> Optional[str]:
+    if not isinstance(value, list):
+        return None
+
+    tags: list[str] = []
+    seen: set[str] = set()
+    for item in value:
+        if not isinstance(item, str) or not item.strip():
+            continue
+        tag = item.strip()
+        key = tag.casefold()
+        if key in seen:
+            continue
+        seen.add(key)
+        tags.append(tag)
+    return ", ".join(tags) or None
+
+
 def create_draft_from_scraped(
     db: Session,
     store_id: int,
@@ -184,6 +202,7 @@ def create_draft_from_scraped(
         "old_price_rub": old_price_rub,
         "primary_image": valid_images[0] if valid_images else "",
         "images": valid_images[:15],
+        "ozonbox_tags": _serialize_tags(record.tags),
         "weight": 500,
         "height": 100,
         "depth": 100,

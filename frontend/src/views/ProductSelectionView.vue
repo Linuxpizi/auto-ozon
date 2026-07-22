@@ -110,6 +110,9 @@
                   <n-input v-model:value="editProduct.category" size="small" placeholder="分类" />
                 </n-gi>
               </n-grid>
+              <div class="field-label" style="margin-top: 8px">上架标签</div>
+              <n-dynamic-tags v-model:value="editProduct.tags" />
+              <div class="field-hint">独立于采集事实；不会自动作为 Ozon 类目属性提交。</div>
             </div>
 
             <!-- 店铺与 Ozon 分类 -->
@@ -545,7 +548,7 @@ import { useRouter } from "vue-router";
 import {
   NButton, NTag, NSpace, NInput, NInputNumber, NSelect, NDataTable,
   NPopconfirm, NPagination, NDrawer, NDrawerContent, NImage,
-  NModal, NGrid, NGi, NH2,
+  NModal, NGrid, NGi, NH2, NDynamicTags,
   NTree, NSpin, NDatePicker, NInputGroup, NCollapse, NCollapseItem,
   type GlobalThemeOverrides,
 } from "naive-ui";
@@ -715,6 +718,7 @@ function buildProductUpdatePayload(d: any) {
     sku_list: d.sku_list || [],
     spec_list: d.spec_list || [],
     facts: d.facts || [],
+    tags: d.tags || [],
     color_list: d.color_list || [],
     weight_g: d.weight_g,
     width_mm: d.width_mm,
@@ -1215,6 +1219,17 @@ function normalizeColors(value: unknown): string[] {
   });
 }
 
+function normalizeTags(value: unknown): string[] {
+  const seen = new Set<string>();
+  return parseArray(value).flatMap((item) => {
+    const tag = displayValue(item);
+    const key = tag.toLocaleLowerCase();
+    if (!tag || seen.has(key)) return [];
+    seen.add(key);
+    return [tag];
+  });
+}
+
 function normalizeVariants(value: unknown): ProductVariant[] {
   return parseArray(value).flatMap((item) => {
     if (!item || typeof item !== "object") return [];
@@ -1361,6 +1376,7 @@ function normalizeProduct(product: any) {
     sku_list: normalizeSkuList(product?.sku_list),
     spec_list: parseArray(product?.spec_list),
     facts: normalizeFacts(product?.facts),
+    tags: normalizeTags(product?.tags),
     color_list: normalizeColors(product?.color_list),
     variants: normalizeVariants(product?.variants),
   };

@@ -2,6 +2,7 @@
 
 from datetime import datetime
 
+from app.api.routers.selection import ProductUpdate, update_product
 from app.crud.scraped_product import bulk_create_scraped_products
 from app.models.scraped_product import ScrapedProductRecord
 from app.schemas.scraped_product import ScrapedProductCreate
@@ -16,6 +17,7 @@ def test_schema_normalizes_extension_payload() -> None:
             "brand": "Factual Brand",
             "category": "Электроника > Аксессуары",
             "colorList": ["Black", "Blue"],
+            "tags": '[" Summer ", "Outdoor"]',
             "skuList": '[{"sku":"SKU-1","barcode":"460000000001"}]',
             "facts": '[{"name":"Color","value":"Black","sourcePath":"BCS card"}]',
             "variants": '[{"sku":"SKU-1","values":[{"name":"Color","value":"Black"}]}]',
@@ -27,6 +29,7 @@ def test_schema_normalizes_extension_payload() -> None:
     assert product.brand == "Factual Brand"
     assert product.category == "Электроника > Аксессуары"
     assert product.color_list == ["Black", "Blue"]
+    assert product.tags == [" Summer ", "Outdoor"]
     assert product.sku_list == [{"sku": "SKU-1", "barcode": "460000000001"}]
     assert product.facts == [
         {"name": "Color", "value": "Black", "sourcePath": "BCS card"}
@@ -168,6 +171,52 @@ def test_bulk_upsert_preserves_and_enriches_collected_product_data(test_db) -> N
     assert persisted.facts == record.facts
     assert persisted.color_list == ["Black", "Blue"]
     assert persisted.variants == detail.variants
+
+
+def test_bulk_upsert_merges_tags_without_erasing_user_tags(test_db) -> None:
+    initial = ScrapedProductCreate.model_validate(
+        {
+            "platform": "ozon",
+            "sourceId": "tags-123",
+            "tags": [" Summer ", "Outdoor"],
+        }
+    )
+    record = bulk_create_scraped_products(test_db, [initial])[0]
+    assert record.tags == ["Summer", "Outdoor"]
+
+    empty_resync = ScrapedProductCreate.model_validate(
+        {"platform": "ozon", "sourceId": "tags-123", "tags": []}
+    )
+    assert bulk_create_scraped_products(test_db, [empty_resync]) == []
+    test_db.refresh(record)
+    assert record.tags == ["Summer", "Outdoor"]
+
+    enrichment = ScrapedProductCreate.model_validate(
+        {
+            "platform": "ozon",
+            "sourceId": "tags-123",
+            "tags": ["outdoor", "Travel", "  "],
+        }
+    )
+    assert bulk_create_scraped_products(test_db, [enrichment]) == [record]
+    test_db.refresh(record)
+    assert record.tags == ["Summer", "Outdoor", "Travel"]
+
+
+def test_selection_update_can_explicitly_clear_tags(test_db) -> None:
+    record = ScrapedProductRecord(
+        platform="ozon",
+        source_id="editable-tags-1",
+        tags=["Summer", "Outdoor"],
+    )
+    test_db.add(record)
+    test_db.commit()
+    test_db.refresh(record)
+
+    update_product(record.id, ProductUpdate(tags=[]), test_db)
+
+    test_db.refresh(record)
+    assert record.tags == []
 
 
 def test_bulk_upsert_keeps_variant_commerce_and_values_isolated_by_sku(test_db) -> None:

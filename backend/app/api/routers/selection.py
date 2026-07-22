@@ -43,6 +43,7 @@ class ProductUpdate(BaseModel):
     video_urls: Optional[List[str]] = None
     sku_list: Optional[List[dict]] = None
     spec_list: Optional[List[dict]] = None
+    tags: Optional[List[str]] = None
     description_category_id: Optional[int] = None
     type_id: Optional[int] = None
     ozon_category_id: Optional[int] = None

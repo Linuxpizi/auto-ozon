@@ -33,6 +33,7 @@ class ScrapedProductRecord(Base):
     variants = Column(JSON, default=list, comment="真实可售 SKU 及完整变体组合")
     spec_list = Column(JSON, default=list, comment="规格列表 [{weight_g, depth_mm, height_mm, width_mm, color, size, ...}]")
     facts = Column(JSON, default=list, comment="页面/API/BCS 采集事实 [{name, value, sourcePath}]")
+    tags = Column(JSON, default=list, comment="用户可编辑的上架标签；不等同于采集事实")
     color_list = Column(JSON, default=list, comment="从事实与真实变体汇总的颜色列表")
 
     # ── Ozon 内部分类 ──

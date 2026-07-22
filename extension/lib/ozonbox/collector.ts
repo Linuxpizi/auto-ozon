@@ -47,6 +47,18 @@ interface OfferSelectorGraph {
   hasSelector: boolean
 }
 
+interface OfferPageResponse {
+  ok: boolean
+  status: number
+  url: string
+  text: () => Promise<string>
+}
+
+interface OfferSelectorGraphDependencies {
+  fetchPage?: (url: string) => Promise<OfferPageResponse>
+  parseHtml?: (html: string) => Document
+}
+
 function text(value: unknown): string | undefined {
   if (typeof value === 'string' && value.trim()) return value.trim()
   if (typeof value === 'number' && Number.isFinite(value)) return String(value)
@@ -89,6 +101,22 @@ export function readFactualBrand(
     if (value) return value
   }
   return undefined
+}
+
+/**
+ * Read brand text only from Ozon's explicit brand UI.
+ * The dedicated widget is authoritative; a link whose own URL points to an
+ * Ozon brand page is the conservative fallback. No surrounding page text is
+ * considered, so seller names and title fragments cannot become a brand.
+ */
+export function readDomBrand(root: ParentNode): string | undefined {
+  const widget = root.querySelector('[data-widget="webBrandName"]')
+  if (widget) {
+    const value = factualString(widget.querySelector('a, span')?.textContent)
+    if (value) return value
+  }
+
+  return factualString(root.querySelector('a[href*="/brand/"]')?.textContent)
 }
 
 function parsePositivePrice(value: unknown): number | undefined {
@@ -592,7 +620,11 @@ export function readOfferSelector(root: Document, currentProductId: string, page
     const image = anchor.querySelector<HTMLImageElement>('img')
     const priceText = anchor.querySelector(OFFER_PRICE)?.textContent
     const price = priceText && CURRENCY_PATTERN.test(priceText) ? parsePositivePrice(priceText) : undefined
-    const variantAttrs = { ...currentAttrs, [group.label]: value }
+    // A selector link proves only the value of the group that contains it.
+    // Copying the current SKU's other selected values onto the linked SKU is
+    // unsafe: the same target may differ in several dimensions and appear in
+    // several groups. Those independent facts are merged by productId below.
+    const variantAttrs = { [group.label]: value }
     const variant: OzonboxVariant = {
       productId,
       ...(price ? { price } : {}),
@@ -621,11 +653,15 @@ export function readOfferSelector(root: Document, currentProductId: string, page
   }
 }
 
-async function readOfferSelectorGraph(currentProductId: string): Promise<OfferSelectorGraph> {
-  const initial = readOfferSelector(document, currentProductId, location.href)
-  if (initial.unresolvedProductIds.length) {
-    throw new Error(`Ozon 变体选择器中有 ${initial.unresolvedProductIds.length} 个商品无法关联事实性维度：${initial.unresolvedProductIds.slice(0, 5).join(', ')}`)
-  }
+export async function readOfferSelectorGraph(
+  root: Document,
+  currentProductId: string,
+  pageUrl: string,
+  dependencies: OfferSelectorGraphDependencies = {},
+): Promise<OfferSelectorGraph> {
+  const fetchPage = dependencies.fetchPage ?? (async (url: string) => fetch(url, { credentials: 'include' }))
+  const parseHtml = dependencies.parseHtml ?? ((html: string) => new DOMParser().parseFromString(html, 'text/html'))
+  const initial = readOfferSelector(root, currentProductId, pageUrl)
   if (!initial.links.length) {
     return { variants: initial.variants, currentAttrs: initial.currentAttrs, hasSelector: initial.hasWidgets }
   }
@@ -644,9 +680,9 @@ async function readOfferSelectorGraph(currentProductId: string): Promise<OfferSe
     const url = links.get(productId)
     if (!url) throw new Error(`Ozon 变体 ${productId} 缺少可核验的详情页地址`)
 
-    let response: Response
+    let response: OfferPageResponse
     try {
-      response = await fetch(url, { credentials: 'include' })
+      response = await fetchPage(url)
     } catch (error) {
       throw new Error(`无法读取 Ozon 变体 ${productId} 的详情页：${error instanceof Error ? error.message : String(error)}`)
     }
@@ -658,15 +694,16 @@ async function readOfferSelectorGraph(currentProductId: string): Promise<OfferSe
     }
     const html = await response.text()
     if (!html.trim()) throw new Error(`Ozon 变体 ${productId} 的详情页为空`)
-    const remoteDocument = new DOMParser().parseFromString(html, 'text/html')
+    const remoteDocument = parseHtml(html)
     const selector = readOfferSelector(remoteDocument, productId, finalUrl)
     if (!selector.hasWidgets || !Object.keys(selector.currentAttrs).length) {
       throw new Error(`Ozon 变体 ${productId} 的详情页未提供可核验的变体选择器，无法确认全部变体`)
     }
-    if (selector.unresolvedProductIds.length) {
-      throw new Error(`Ozon 变体 ${productId} 的选择器中有 ${selector.unresolvedProductIds.length} 个商品无法关联事实性维度：${selector.unresolvedProductIds.slice(0, 5).join(', ')}`)
-    }
 
+    // A real product link scoped to a known offer-selector widget can be used
+    // only as navigation evidence when its source label/value is unparseable.
+    // It proves no attributes: the target productId and selected attributes
+    // must be verified on that product's own PDP.
     variants.push(readOzonVariantFacts(remoteDocument, productId, finalUrl, selector.currentAttrs), ...selector.variants)
     visited.add(productId)
     for (const link of selector.links) {
@@ -802,8 +839,8 @@ export async function collectCurrentOzonProduct(): Promise<OzonboxCollectedProdu
   const price = jsonCurrent?.price ?? readDomPrice()
   if (!price) throw new Error('当前 Ozon 商品缺少可核验的正价')
   const specs = readSpecs(structured.specs)
-  const brand = structured.brand ?? readFactualBrand(undefined, specs)
-  const selector = await readOfferSelectorGraph(productId)
+  const brand = structured.brand ?? readFactualBrand(undefined, specs) ?? readDomBrand(document)
+  const selector = await readOfferSelectorGraph(document, productId, location.href)
   const currentVariant = readOzonVariantFacts(document, productId, sourceUrl, selector.currentAttrs)
   const selectorProductIds = new Set([productId, ...selector.variants.flatMap((variant) => variant.productId ? [variant.productId] : [])])
   const structuredSelectorVariants = structured.variants.filter((variant) => (

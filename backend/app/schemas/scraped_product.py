@@ -35,6 +35,7 @@ class ScrapedProductBase(BaseModel):
     variants: List[dict] = []          # [{"sku": "...", "values": [{"name": "颜色", "value": "黑色"}]}]
     spec_list: List[dict] = []         # [{"weight_g": 0, "depth_mm": 0, "height_mm": 0, "width_mm": 0, "color": "...", "size": "..."}]
     facts: List[dict] = []              # [{"name": "...", "value": "...", "sourcePath": "BCS card"}]
+    tags: List[str] = []                # 用户可编辑上架标签；不等同于页面采集事实
     color_list: List[str] = []
 
     # ── Ozon 内部分类 ──
@@ -49,7 +50,7 @@ class ScrapedProductBase(BaseModel):
     trade_quantity: int = 0
 
     @field_validator(
-        "images", "video_urls", "sku_list", "variants", "spec_list", "facts",
+        "images", "video_urls", "sku_list", "variants", "spec_list", "facts", "tags",
         "color_list", "price_ranges", mode="before",
     )
     @classmethod

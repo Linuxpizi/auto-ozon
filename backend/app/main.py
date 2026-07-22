@@ -108,7 +108,7 @@ def _ensure_scraped_product_columns():
             logger.info("DB migration: added column %s %s", column.name, typedef)
         list_json_columns = [
             "images", "video_urls", "sku_list", "variants", "spec_list", "facts",
-            "color_list", "price_ranges", "matched_suppliers",
+            "tags", "color_list", "price_ranges", "matched_suppliers",
         ]
         for column_name in list_json_columns:
             if column_name in existing or column_name in {c.name for c in ScrapedProductRecord.__table__.columns}:

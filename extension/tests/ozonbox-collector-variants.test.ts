@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { parseHTML } from 'linkedom'
-import { readFactualBrand, readOfferSelector, readOzonVariantFacts } from '../lib/ozonbox/collector'
+import { readDomBrand, readFactualBrand, readOfferSelector, readOfferSelectorGraph, readOzonVariantFacts } from '../lib/ozonbox/collector'
 import { toSelectionProduct } from '../lib/ozonbox/selection-product'
 import { assertCompleteProduct } from '../lib/utils/product-data'
 
@@ -24,6 +24,29 @@ assert.equal(readFactualBrand(undefined, [
   { name: 'Seller', value: 'Not a Brand' },
 ]), undefined)
 assert.equal(readFactualBrand(undefined, [{ name: 'Brand', value: '' }]), undefined)
+
+function brandFixture(body: string): Document {
+  return parseHTML(`<!doctype html><html><body>${body}</body></html>`).document
+}
+
+assert.equal(readDomBrand(brandFixture(`
+  <div data-widget="webBrandName"><a href="/brand/acme-123/"><span> ACME </span></a></div>
+  <a href="/brand/fallback-456/">Fallback Brand</a>
+`)), 'ACME')
+assert.equal(readDomBrand(brandFixture(`
+  <div data-widget="webBrandName"><span><strong> Widget Brand </strong></span></div>
+`)), 'Widget Brand')
+assert.equal(readDomBrand(brandFixture(`
+  <a href="https://www.ozon.ru/brand/fallback-456/"><em>Fallback Brand</em></a>
+`)), 'Fallback Brand')
+assert.equal(readDomBrand(brandFixture(`
+  <div data-widget="webBrandName"><span>   </span></div>
+  <a href="/brand/fallback-456/">Fallback Brand</a>
+`)), 'Fallback Brand')
+assert.equal(readDomBrand(brandFixture(`
+  <h1>Title Brand</h1>
+  <a href="/seller/not-a-brand/">Seller Brand</a>
+`)), undefined)
 
 function aspectsFixture(currentValue: string, targetValue: string, targetProductId: string, fromSku: string): Document {
   const { document } = parseHTML(`
@@ -93,6 +116,162 @@ const closedProductIds = new Set([
   ...alternatePage.links.map(({ productId }) => productId),
 ])
 assert.deepEqual([...closedProductIds].sort(), [ALTERNATE_PRODUCT_ID, CURRENT_PRODUCT_ID].sort())
+
+function multiDimensionFixture(): Document {
+  const { document } = parseHTML(`
+    <!doctype html>
+    <html>
+      <body>
+        <div data-widget="webAspects">
+          <div>
+            <span>Мощность, Вт: 1000</span>
+            <a href="/product/alternate-${ALTERNATE_PRODUCT_ID}/">1500</a>
+          </div>
+          <div>
+            <span>Цвет: Белый</span>
+            <a href="/product/alternate-${ALTERNATE_PRODUCT_ID}/">Черный</a>
+          </div>
+        </div>
+      </body>
+    </html>
+  `)
+  return document
+}
+
+const multiDimensionPage = readOfferSelector(
+  multiDimensionFixture(),
+  CURRENT_PRODUCT_ID,
+  CURRENT_URL,
+)
+
+assert.deepEqual(multiDimensionPage.currentAttrs, {
+  'Мощность, Вт': '1000',
+  'Цвет': 'Белый',
+})
+assert.deepEqual(multiDimensionPage.unresolvedProductIds, [])
+assert.deepEqual(multiDimensionPage.variants.map(({ productId, variantAttrs }) => ({ productId, variantAttrs })), [{
+  productId: ALTERNATE_PRODUCT_ID,
+  variantAttrs: {
+    'Мощность, Вт': '1500',
+    'Цвет': 'Черный',
+  },
+}])
+
+function unresolvedSourceDimensionFixture(): Document {
+  const { document } = parseHTML(`
+    <!doctype html>
+    <html>
+      <body>
+        <div data-widget="webAspects">
+          <a href="/product/alternate-${ALTERNATE_PRODUCT_ID}/">
+            <img src="https://cdn.example/wc500/alternate.jpg">
+          </a>
+        </div>
+      </body>
+    </html>
+  `)
+  return document
+}
+
+const unresolvedSourceDimensionPage = readOfferSelector(
+  unresolvedSourceDimensionFixture(),
+  CURRENT_PRODUCT_ID,
+  CURRENT_URL,
+)
+
+assert.deepEqual(unresolvedSourceDimensionPage.variants, [])
+assert.deepEqual(unresolvedSourceDimensionPage.unresolvedProductIds, [ALTERNATE_PRODUCT_ID])
+assert.deepEqual(unresolvedSourceDimensionPage.links.map(({ productId }) => productId), [ALTERNATE_PRODUCT_ID])
+
+function unresolvedGraphRootFixture(): Document {
+  const { document } = parseHTML(`
+    <!doctype html>
+    <html>
+      <body>
+        <div data-widget="webAspects"><span>Мощность, Вт: 1000</span></div>
+        <div data-widget="webOfferSelector">
+          <a href="/product/alternate-${ALTERNATE_PRODUCT_ID}/">
+            <img src="https://cdn.example/wc500/alternate.jpg">
+          </a>
+        </div>
+      </body>
+    </html>
+  `)
+  return document
+}
+
+const targetHtml = `
+  <!doctype html>
+  <html>
+    <body>
+      <div data-widget="webAspects">
+        <div>
+          <span>Мощность, Вт: 1500</span>
+          <a href="/product/current-${CURRENT_PRODUCT_ID}/">1000</a>
+        </div>
+      </div>
+    </body>
+  </html>
+`
+
+const fetchedUrls: string[] = []
+const unresolvedGraph = await readOfferSelectorGraph(
+  unresolvedGraphRootFixture(),
+  CURRENT_PRODUCT_ID,
+  CURRENT_URL,
+  {
+    fetchPage: async (url) => {
+      fetchedUrls.push(url)
+      return { ok: true, status: 200, url: ALTERNATE_URL, text: async () => targetHtml }
+    },
+    parseHtml: (html) => parseHTML(html).document,
+  },
+)
+
+assert.deepEqual(fetchedUrls, [ALTERNATE_URL])
+assert.deepEqual(unresolvedGraph.currentAttrs, { 'Мощность, Вт': '1000' })
+assert.deepEqual(
+  unresolvedGraph.variants
+    .filter(({ productId }) => productId === ALTERNATE_PRODUCT_ID)
+    .map(({ variantAttrs }) => variantAttrs),
+  [{ 'Мощность, Вт': '1500' }],
+)
+
+await assert.rejects(
+  readOfferSelectorGraph(
+    unresolvedGraphRootFixture(),
+    CURRENT_PRODUCT_ID,
+    CURRENT_URL,
+    {
+      fetchPage: async () => ({
+        ok: true,
+        status: 200,
+        url: 'https://www.ozon.ru/product/wrong-9999999999/',
+        text: async () => targetHtml,
+      }),
+      parseHtml: (html) => parseHTML(html).document,
+    },
+  ),
+  /详情页跳转到了不同商品 9999999999/,
+)
+
+await assert.rejects(
+  readOfferSelectorGraph(
+    unresolvedGraphRootFixture(),
+    CURRENT_PRODUCT_ID,
+    CURRENT_URL,
+    {
+      fetchPage: async () => ({
+        ok: true,
+        status: 200,
+        url: ALTERNATE_URL,
+        text: async () => '<!doctype html><html><body><h1>Target without selector</h1></body></html>',
+      }),
+      parseHtml: (html) => parseHTML(html).document,
+    },
+  ),
+  /未提供可核验的变体选择器/,
+)
 
 function richVariantFixture(): Document {
   const { document } = parseHTML(`

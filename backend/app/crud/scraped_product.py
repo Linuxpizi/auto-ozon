@@ -55,6 +55,7 @@ def create_scraped_product(db: Session, product: ScrapedProductCreate) -> Scrape
         variants=product.variants,
         spec_list=product.spec_list,
         facts=product.facts,
+        tags=_merge_unique_strings([], product.tags),
         color_list=product.color_list,
         ozon_category_id=product.ozon_category_id,
         ozon_type_id=product.ozon_type_id,
@@ -227,6 +228,7 @@ def bulk_create_scraped_products(
                 variants=product.variants,
                 spec_list=product.spec_list,
                 facts=product.facts,
+                tags=_merge_unique_strings([], product.tags),
                 color_list=product.color_list,
                 ozon_category_id=product.ozon_category_id,
                 ozon_type_id=product.ozon_type_id,
@@ -331,6 +333,12 @@ def bulk_create_scraped_products(
             merged_facts = _merge_facts(record.facts, product.facts)
             if merged_facts != _as_list(record.facts):
                 record.facts = merged_facts
+                changed = True
+
+            # 采集同步只补充非空标签；不清除用户在选品页手动维护的标签。
+            merged_tags = _merge_unique_strings(record.tags, product.tags)
+            if merged_tags != _as_list(record.tags):
+                record.tags = merged_tags
                 changed = True
 
             merged_colors = _merge_unique_strings(record.color_list, product.color_list)

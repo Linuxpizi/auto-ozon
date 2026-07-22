@@ -1,6 +1,6 @@
 from app.models.scraped_product import ScrapedProductRecord
 from app.models.upload_draft import UploadDraft
-from app.schemas.upload_draft import CreateDraftRequest, UploadDraftRead
+from app.schemas.upload_draft import CreateDraftRequest, UpdateDraftRequest, UploadDraftRead
 from app.services.upload_service import _build_ozon_item, create_draft_from_scraped
 
 
@@ -150,7 +150,22 @@ def test_unknown_sku_falls_back_to_product_identity_and_fields(test_db):
     assert draft.offer_id.startswith("PRODUCT-1-")
 
 
-def test_create_request_and_read_schema_include_source_sku_and_barcode():
+def test_selection_tags_are_copied_to_local_draft_metadata(test_db):
+    record = _save_record(
+        test_db,
+        _record(tags=[" Summer ", "Outdoor", "outdoor", "", "Travel"]),
+    )
+
+    draft = create_draft_from_scraped(
+        test_db,
+        store_id=1,
+        source_product_id=record.id,
+    )
+
+    assert draft.ozonbox_tags == "Summer, Outdoor, Travel"
+
+
+def test_create_update_and_read_schemas_include_draft_metadata():
     request = CreateDraftRequest(
         store_id=1,
         source_product_id=2,
@@ -164,10 +179,15 @@ def test_create_request_and_read_schema_include_source_sku_and_barcode():
             "store_id": 1,
             "source_sku": "SKU-API",
             "barcode": "BARCODE-API",
+            "ozonbox_tags": "Summer, Outdoor",
         }
     )
     assert read.source_sku == "SKU-API"
     assert read.barcode == "BARCODE-API"
+    assert read.ozonbox_tags == "Summer, Outdoor"
+
+    update = UpdateDraftRequest(ozonbox_tags="Travel")
+    assert update.model_dump(exclude_unset=True) == {"ozonbox_tags": "Travel"}
 
 
 def test_ozon_item_uses_draft_barcode():
@@ -181,8 +201,11 @@ def test_ozon_item_uses_draft_barcode():
         type_id=200,
         price_rub=0,
         old_price_rub=0,
+        ozonbox_tags="Summer, Outdoor",
     )
 
     item = _build_ozon_item(draft)
 
     assert item["barcode"] == "4601234567890"
+    assert "tags" not in item
+    assert "ozonbox_tags" not in item

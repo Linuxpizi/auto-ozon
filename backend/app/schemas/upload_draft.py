@@ -28,6 +28,7 @@ class UploadDraftBase(BaseModel):
     depth: int = 100
     width: int = 100
     primary_image: str = ""
+    ozonbox_tags: Optional[str] = None
 
 
 # ── 创建 ──────────────────────────────────────────────────────
@@ -80,6 +81,7 @@ class UpdateDraftRequest(BaseModel):
     width: Optional[int] = None
     primary_image: Optional[str] = None
     images: Optional[List[str]] = None
+    ozonbox_tags: Optional[str] = None
 
 
 # ── 提交 ──────────────────────────────────────────────────────

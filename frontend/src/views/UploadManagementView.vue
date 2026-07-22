@@ -74,6 +74,19 @@
             <n-form-item label="描述">
               <n-input v-model:value="editingDraft.description" type="textarea" :rows="4" />
             </n-form-item>
+            <n-form-item label="上架标签备注">
+              <div style="width:100%">
+                <n-input
+                  v-model:value="editingDraft.ozonbox_tags"
+                  type="textarea"
+                  :rows="2"
+                  placeholder="多个标签可用逗号分隔"
+                />
+                <div style="margin-top:4px;font-size:12px;color:#8c8c8c">
+                  仅作为本地草稿元数据，不会作为 Ozon 类目属性提交。
+                </div>
+              </div>
+            </n-form-item>
             <n-form-item label="售价 (₽)">
               <n-input-number v-model:value="editingDraft.price_rub" :min="0" style="width:100%" />
             </n-form-item>
@@ -359,6 +372,7 @@ async function saveDraft() {
     await apiPut(`/upload/drafts/${editingDraft.value.id}`, {
       name: editingDraft.value.name,
       description: editingDraft.value.description,
+      ozonbox_tags: editingDraft.value.ozonbox_tags,
       price_rub: editingDraft.value.price_rub,
       weight: editingDraft.value.weight,
       height: editingDraft.value.height,

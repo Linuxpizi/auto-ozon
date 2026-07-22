@@ -114,6 +114,14 @@ export default defineBackground(() => {
       return true
     }
 
+    if ((message as Partial<OzonboxRuntimeMessage>).type === 'OZONBOX_FETCH_SELLER_VARIANT_PACKAGE') {
+      const request = message as OzonboxRuntimeMessage & { type: 'OZONBOX_FETCH_SELLER_VARIANT_PACKAGE' }
+      fetchSellerVariantPackage(request.variantId, request.shopId).then(sendResponse).catch((error: unknown) => {
+        sendResponse({ error: errorMessage(error) })
+      })
+      return true
+    }
+
     // Content script 上报采集数据 → 直接保存到后端
     if (message.action === 'productScraped') {
       handleProductScraped(message.data).then((result) => {
@@ -337,7 +345,7 @@ async function collectOzonProductInTab(tabId?: number): Promise<OzonboxCollected
   }
 }
 
-async function findSellerTab(explicitTabId?: number): Promise<chrome.tabs.Tab> {
+async function findSellerTab(explicitTabId?: number) {
   if (explicitTabId) {
     const tab = await browser.tabs.get(explicitTabId)
     if (!tab.url || !isSellerUrl(tab.url)) throw new Error('指定标签页不是 Ozon 卖家后台')
@@ -378,9 +386,10 @@ async function readOzonSellerId(explicitTabId?: number): Promise<string> {
 async function fetchSellerApi(
   sku: string,
   shopId: string,
-  pageType: 'what-to-sell' | 'products',
+  pageType: 'what-to-sell' | 'products' | undefined,
   endpoint: string,
   body: Record<string, unknown>,
+  language: 'zh-Hans' | 'RU',
   explicitTabId?: number,
 ): Promise<OzonboxSellerApiResponse> {
   const tab = await findSellerTab(explicitTabId)
@@ -389,10 +398,9 @@ async function fetchSellerApi(
   const companyId = requirePositiveIntegerString(String(shopId), 'shopId')
   const headers = {
     'content-type': 'application/json',
-    'x-o3-app-name': 'seller-ui',
     'x-o3-company-id': companyId,
-    'x-o3-language': 'zh-Hans',
-    'x-o3-page-type': pageType,
+    'x-o3-language': language,
+    ...(pageType ? { 'x-o3-app-name': 'seller-ui', 'x-o3-page-type': pageType } : {}),
   }
 
   // The seller API must run in the seller tab's page context.  A service
@@ -431,6 +439,21 @@ function fetchSellerAnalytics(sku: string, shopId: string, tabId?: number) {
     'what-to-sell',
     'https://seller.ozon.ru/api/site/seller-analytics/what_to_sell/data/v3',
     { limit: '50', offset: '0', filter: { stock: 'any_stock', sku: String(sku) }, sort: { key: 'sum_gmv_desc' } },
+    'zh-Hans',
+    tabId,
+  )
+}
+
+function fetchSellerVariantPackage(variantId: string, shopId: string, tabId?: number) {
+  const companyId = requirePositiveIntegerString(String(shopId), 'shopId')
+  const normalizedVariantId = requirePositiveIntegerString(String(variantId), 'variantId')
+  return fetchSellerApi(
+    normalizedVariantId,
+    companyId,
+    undefined,
+    'https://seller.ozon.ru/api/site/seller-prototype/create-bundle-by-variant-id',
+    { company_id: companyId, variant_id: normalizedVariantId, source: 'SOURCE_UI_COPY_MERGED' },
+    'RU',
     tabId,
   )
 }

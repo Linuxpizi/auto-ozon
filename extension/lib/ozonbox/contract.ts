@@ -130,6 +130,12 @@ export interface OzonboxPackageFactsRequest {
   sku: string
 }
 
+export interface OzonboxSellerVariantPackageRequest {
+  type: 'OZONBOX_FETCH_SELLER_VARIANT_PACKAGE'
+  variantId: string
+  shopId: string
+}
+
 export interface OzonboxSellerApiResponse {
   data: unknown
   status: number
@@ -151,6 +157,7 @@ export type OzonboxRuntimeMessage =
   | OzonboxSellerIdRequest
   | OzonboxSellerAnalyticsRequest
   | OzonboxPackageFactsRequest
+  | OzonboxSellerVariantPackageRequest
 
 export type OzonboxRuntimeResponse =
   | OzonboxCollectedProduct

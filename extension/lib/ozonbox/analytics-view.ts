@@ -149,6 +149,20 @@ function pick(item: OzonboxAnalyticsItem, keys: readonly string[]): unknown {
   return undefined
 }
 
+function nonEmptyError(value: unknown): string | undefined {
+  return typeof value === 'string' && value.trim() ? value.trim() : undefined
+}
+
+export function analyticsLoadStatus(item: OzonboxAnalyticsItem): string {
+  const variantError = nonEmptyError(item.ozonboxSellerVariantPackageError)
+  const packageFactsError = nonEmptyError(item.ozonboxPackageFactsError)
+  const errors = [
+    variantError ? `Seller 变体包裹参数读取失败：${variantError}` : undefined,
+    packageFactsError ? `后端包裹事实读取失败：${packageFactsError}` : undefined,
+  ].filter((message): message is string => Boolean(message))
+  return errors.length ? `已加载；${errors.join('；')}` : '已加载'
+}
+
 export function createAnalyticsIframe(
   id: string,
   type: OzonboxAnalyticsCardType,
@@ -160,6 +174,7 @@ export function createAnalyticsIframe(
   iframe.height = type === 'detail' ? '140' : '120'
   iframe.dataset.sku = sku
   iframe.dataset.type = type
+  iframe.dataset.ozonboxAnalytics = 'true'
   iframe.style.border = '0'
   iframe.style.zIndex = '2147483646'
   iframe.style.overflow = 'hidden'
@@ -210,12 +225,7 @@ export function renderAnalyticsItem(iframe: HTMLIFrameElement, source: OzonboxAn
     row.append(label, output)
     metrics.append(row)
   }
-  const packageFactsError = item.ozonboxPackageFactsError
-  if (status) {
-    status.textContent = typeof packageFactsError === 'string' && packageFactsError.trim()
-      ? `已加载；包裹参数读取失败：${packageFactsError}`
-      : '已加载'
-  }
+  if (status) status.textContent = analyticsLoadStatus(item)
   metrics.style.display = 'flex'
   adjustHeight(iframe)
 }

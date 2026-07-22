@@ -14,6 +14,8 @@ import {
   analyticsItemForExactSku,
   collectedProductAnalyticsSku,
   mergeExactSkuAnalyticsBrand,
+  normalizeAnalyticsItem,
+  normalizeSellerVariantPackage,
 } from '../lib/ozonbox/seller-analytics'
 import { assertCompleteProduct } from '../lib/utils/product-data'
 
@@ -109,6 +111,28 @@ assert.deepEqual(
 )
 assert.equal(collectedProductAnalyticsSku({ sku: 'not-numeric', productId: REQUESTED_ANALYTICS_SKU }), REQUESTED_ANALYTICS_SKU)
 assert.equal(collectedProductAnalyticsSku({ sku: REQUESTED_ANALYTICS_SKU, productId: '9999999999' }), '9999999999')
+
+assert.deepEqual(normalizeSellerVariantPackage({
+  item: { depth: 119, width: 110, height: 16, weight: 16 },
+}), {
+  dimension_mm: { length: 119, width: 110, height: 16 },
+  weight_g: 16,
+})
+assert.deepEqual(normalizeSellerVariantPackage({
+  item: { depth: '119', width: '110', height: '16', weight: '16' },
+}), {
+  dimension_mm: { length: 119, width: 110, height: 16 },
+  weight_g: 16,
+})
+assert.deepEqual(normalizeSellerVariantPackage({
+  item: { depth: 119, width: 110, weight: 16 },
+}), { weight_g: 16 })
+assert.deepEqual(normalizeAnalyticsItem({ depth: 119, width: 110, height: 16, weight: 16 }), {
+  depth: 119,
+  width: 110,
+  height: 16,
+  weight: 16,
+})
 
 function aspectsFixture(currentValue: string, targetValue: string, targetProductId: string, fromSku: string): Document {
   const { document } = parseHTML(`

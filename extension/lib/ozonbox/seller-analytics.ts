@@ -162,6 +162,13 @@ function numberFrom(value: unknown): number | null {
   return Number.isFinite(parsed) ? parsed : null
 }
 
+function positiveContractNumber(value: unknown): number | undefined {
+  if (typeof value === 'number') return Number.isFinite(value) && value > 0 ? value : undefined
+  if (typeof value !== 'string' || !/^\d+(?:[.,]\d+)?$/.test(value.trim())) return undefined
+  const parsed = Number(value.trim().replace(',', '.'))
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : undefined
+}
+
 function lengthUnit(value: unknown): 'mm' | 'cm' | 'm' | null {
   if (typeof value !== 'string') return null
   const unit = value.toLowerCase()
@@ -381,6 +388,25 @@ export function normalizeAnalyticsItem(item: OzonboxAnalyticsItem): OzonboxAnaly
   return normalized
 }
 
+/**
+ * Normalize the package measures returned by create-bundle-by-variant-id.
+ * That endpoint's item contract uses millimetres for dimensions and grams for
+ * weight, so no unit inference is needed or accepted here.
+ */
+export function normalizeSellerVariantPackage(data: unknown): OzonboxAnalyticsItem {
+  if (!isRecord(data) || !isRecord(data.item)) return {}
+  const depth = positiveContractNumber(data.item.depth)
+  const width = positiveContractNumber(data.item.width)
+  const height = positiveContractNumber(data.item.height)
+  const weight = positiveContractNumber(data.item.weight)
+  return {
+    ...(depth !== undefined && width !== undefined && height !== undefined
+      ? { dimension_mm: { length: depth, width, height } }
+      : {}),
+    ...(weight !== undefined ? { weight_g: weight } : {}),
+  }
+}
+
 function mergeKnownMeasures(item: OzonboxAnalyticsItem, attributes: OzonboxAnalyticsItem): OzonboxAnalyticsItem {
   const merged = normalizeAnalyticsItem(item)
   const normalizedAttributes = normalizeAnalyticsItem(attributes)
@@ -414,8 +440,25 @@ export async function fetchOzonAnalyticsItem(
   }))
   const sourceItem = analyticsItemForExactSku(analyticsResponse.data, sku)
   if (!sourceItem) return null
-  const item = normalizeAnalyticsItem(sourceItem)
+  let item = normalizeAnalyticsItem(sourceItem)
   if (hasFact(item, NORMALIZED_DIMENSION_KEYS) && hasFact(item, NORMALIZED_WEIGHT_KEYS)) return item
+
+  const variantId = positiveIntegerText(sourceItem.variantId) ?? positiveIntegerText(sourceItem.variant_id)
+  if (variantId) {
+    try {
+      const variantResponse = assertSellerApiResponse(await send({
+        type: 'OZONBOX_FETCH_SELLER_VARIANT_PACKAGE',
+        variantId,
+        shopId,
+      }))
+      item = mergeKnownMeasures(item, normalizeSellerVariantPackage(variantResponse.data))
+      if (hasFact(item, NORMALIZED_DIMENSION_KEYS) && hasFact(item, NORMALIZED_WEIGHT_KEYS)) return item
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : 'Seller 变体包裹参数读取失败'
+      console.warn('Seller 变体包裹参数补充失败，继续读取已有包裹事实', error)
+      item = { ...item, ozonboxSellerVariantPackageError: message }
+    }
+  }
 
   try {
     const shops = packageFactsFrom(await send({ type: 'OZONBOX_FETCH_PACKAGE_FACTS', sku }))

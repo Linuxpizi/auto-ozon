@@ -10,6 +10,7 @@
     "build:chrome": "wxt build -b chrome",
     "typecheck": "wxt prepare && vue-tsc --noEmit",
     "test:ozonbox-variants": "vite-node tests/ozonbox-collector-variants.test.ts",
+    "test:ozonbox-runtime": "vite-node tests/ozonbox-analytics-runtime.test.ts",
     "prepare": "wxt prepare",
     "zip": "wxt zip",
     "zip:chrome": "wxt zip -b chrome"

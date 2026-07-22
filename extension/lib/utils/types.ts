@@ -82,6 +82,21 @@ export interface ScrapedProduct {
   sourceUrl: string
   scrapedAt: string
 
+  // ── Ozon 商品级采集元数据 ──
+  /** Ozonbox 采集记录名。 */
+  recordName?: string
+  /** 当前 PDP 明确选中的 SKU；与完整 skuList/variants 分开保存。 */
+  selectedSku?: string
+  /** 页面/API 明确提供的俄文标题与描述。 */
+  titleRu?: string
+  descriptionRu?: string
+  /** Ozon 变体属性 ID 图谱。 */
+  variantAttrIds?: number[]
+  /** 采集记录状态，不等同于正式上架状态。 */
+  collectionStatus?: string
+  /** Ozon categoryId；与 description_category_id 分开保存。 */
+  ozonCategoryPathId?: number
+
   // ── 多值字段 (JSON arrays) ──
   /** 商品视频 URL 列表 */
   videoUrls?: string[]
@@ -95,7 +110,7 @@ export interface ScrapedProduct {
   facts?: ProductFact[]
   /** 从颜色事实和真实 SKU 变体维度汇总的颜色列表。 */
   colorList?: string[]
-  /** 商品标签 (品牌、分类、促销标签等) */
+  /** 从平台明确的主题/风格/场景特征自动采集，可在选品页修正。 */
   tags?: string[]
 
   // ── 新增:Ozon 内部分类(从内部 API 获取) ──

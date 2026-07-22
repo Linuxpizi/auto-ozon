@@ -29,6 +29,16 @@ function uniqueStrings(values: Array<string | undefined>): string[] {
   return Array.from(new Set(values.filter((value): value is string => Boolean(value))))
 }
 
+function colorValues(facts: ProductFact[], variants: ProductVariant[]): string[] {
+  const isColorName = (name: string) => /^(?:颜色|色号|color|colour|цвет)$/iu.test(name.normalize('NFKC').trim())
+  return uniqueStrings([
+    ...facts.filter((fact) => isColorName(fact.name)).map((fact) => text(fact.value)),
+    ...variants.flatMap((variant) => variant.values
+      .filter((value) => isColorName(value.name))
+      .map((value) => text(value.value))),
+  ])
+}
+
 function stableValue(value: unknown): unknown {
   if (Array.isArray(value)) return value.map(stableValue)
   if (!isRecord(value)) return value
@@ -81,6 +91,10 @@ function requireCollectedProduct(value: unknown): OzonboxCollectedProduct {
   if (!positiveNumber(value.price)) throw new Error('Ozon 采集结果缺少有效价格')
   if (!Array.isArray(value.images) || !Array.isArray(value.specs) || !Array.isArray(value.variantsData)) {
     throw new Error('Ozon 采集结果中的图片、规格或变体格式无效')
+  }
+  if (value.tags !== undefined && (!Array.isArray(value.tags)
+    || value.tags.some((tag) => typeof tag !== 'string' || !tag.trim()))) {
+    throw new Error('Ozon 采集结果中的标签格式无效')
   }
   return value as unknown as OzonboxCollectedProduct
 }
@@ -183,7 +197,7 @@ function mergeDuplicateVariant(existing: ProductVariant, incoming: ProductVarian
 function factsFrom(specs: Array<Record<string, unknown>>): ProductFact[] {
   const seen = new Set<string>()
   return specs.flatMap((spec) => {
-    const name = text(spec.name)
+    const name = text(spec.name) ?? text(spec.label)
     const value = text(spec.value)
     if (!name || !value) return []
     const key = `${name.toLocaleLowerCase()}\u0000${value.toLocaleLowerCase()}`
@@ -270,11 +284,34 @@ export function toSelectionProduct(value: unknown): ScrapedProduct {
     ...collected.variantsData.flatMap((variant) => variant.images.map(text)),
     ...collected.images.map(text),
   ])
+  const videoUrls = uniqueStrings(collected.variantsData.flatMap((variant) => [
+    ...(variant.videos ?? []).map(text),
+    text(variant.video),
+  ]))
+  const facts = factsFrom(collected.specs)
+  const colors = colorValues(facts, variants)
   const brand = text(collected.brand)
   const category = text(collected.categoryPath)
   const description = text(collected.description) ?? text(collected.descriptionRu)
+  const recordName = text(collected.recordName)
+  const selectedSku = text(collected.sku)
+  const titleRu = text(collected.titleRu)
+  const descriptionRu = text(collected.descriptionRu)
+  const collectionStatus = text(collected.status)
+  const ozonCategoryPathId = positiveInteger(collected.categoryId)
   const ozonCategoryId = positiveInteger(collected.descriptionCategoryId)
-  const ozonTypeId = ozonCategoryId === undefined ? undefined : positiveInteger(collected.typeId)
+  const ozonTypeId = positiveInteger(collected.typeId)
+  const variantAttrIds = Array.from(new Set((Array.isArray(collected.variantAttrIds) ? collected.variantAttrIds : [])
+    .map(positiveInteger)
+    .filter((item): item is number => item !== undefined)))
+  const warehouse = text(collected.warehouse)
+  const warehouseId = text(collected.warehouseId)
+  const logisticsType = text(collected.logisticsType)
+  const deliveryMethod = text(collected.deliveryMethod)
+  const deliveryRegion = text(collected.deliveryRegion)
+  const deliveryDays = positiveInteger(collected.deliveryDays)
+  const discount = text(collected.discount)
+  const stock = text(collected.stock)
 
   return {
     platform: 'ozon',
@@ -284,6 +321,7 @@ export function toSelectionProduct(value: unknown): ScrapedProduct {
     price,
     oldPrice,
     images,
+    ...(videoUrls.length ? { videoUrls } : {}),
     rating: 0,
     reviewCount: 0,
     ...(brand ? { brand } : {}),
@@ -291,11 +329,29 @@ export function toSelectionProduct(value: unknown): ScrapedProduct {
     ...(description ? { description } : {}),
     sourceUrl: collected.sourceUrl.trim(),
     scrapedAt: new Date().toISOString(),
+    ...(recordName ? { recordName } : {}),
+    ...(selectedSku ? { selectedSku } : {}),
+    ...(titleRu ? { titleRu } : {}),
+    ...(descriptionRu ? { descriptionRu } : {}),
+    ...(variantAttrIds.length ? { variantAttrIds } : {}),
+    ...(collectionStatus ? { collectionStatus } : {}),
+    ...(ozonCategoryPathId !== undefined ? { ozonCategoryPathId } : {}),
     skuList: variants.map((variant) => ({ sku: variant.sku, barcode: '' })),
     variants,
     specList: specsFrom(current),
-    facts: factsFrom(collected.specs),
+    facts,
+    ...(colors.length ? { colorList: colors } : {}),
+    ...(collected.tags?.length ? { tags: uniqueStrings(collected.tags.map(text)) } : {}),
     ...(ozonCategoryId !== undefined ? { ozonCategoryId } : {}),
     ...(ozonTypeId !== undefined ? { ozonTypeId } : {}),
+    ...(collected.ozonMetrics ? { ozonMetrics: collected.ozonMetrics } : {}),
+    ...(warehouse ? { warehouse } : {}),
+    ...(warehouseId ? { warehouseId } : {}),
+    ...(logisticsType ? { logisticsType } : {}),
+    ...(deliveryMethod ? { deliveryMethod } : {}),
+    ...(deliveryRegion ? { deliveryRegion } : {}),
+    ...(deliveryDays !== undefined ? { deliveryDays } : {}),
+    ...(discount ? { discount } : {}),
+    ...(stock ? { stock } : {}),
   }
 }

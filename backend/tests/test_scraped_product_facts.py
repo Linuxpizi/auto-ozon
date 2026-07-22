@@ -2,10 +2,169 @@
 
 from datetime import datetime
 
+from fastapi.testclient import TestClient
+
 from app.api.routers.selection import ProductUpdate, update_product
 from app.crud.scraped_product import bulk_create_scraped_products
 from app.models.scraped_product import ScrapedProductRecord
 from app.schemas.scraped_product import ScrapedProductCreate
+
+
+def test_browser_sync_http_preserves_brand_and_tags_in_selection_products(test_app: TestClient) -> None:
+    registered = test_app.post(
+        "/api/auth/register",
+        json={
+            "email": "ozon-facts-http-complete@example.com",
+            "password": "password123",
+            "name": "Ozon facts HTTP test",
+        },
+    )
+    assert registered.status_code == 201
+    headers = {
+        "Authorization": f"Bearer {registered.json()['access_token']}",
+    }
+
+    synced = test_app.post(
+        "/api/browser-sync/sync-products",
+        headers=headers,
+        json={
+            "products": [
+                {
+                    "platform": "ozon",
+                    "sourceId": "2268446233-complete",
+                    "title": "Runtime-boundary factual product",
+                    "price": 1299.0,
+                    "oldPrice": 1699.0,
+                    "currency": "RUB",
+                    "images": ["https://cdn.example/product.jpg"],
+                    "rating": 4.8,
+                    "reviewCount": 42,
+                    "brand": "Exact analytics brand",
+                    "category": "Электроника > Аксессуары",
+                    "description": "Structured PDP description",
+                    "descriptionRu": "Описание карточки на русском языке",
+                    "recordName": "Runtime complete record",
+                    "selectedSku": "2268446233-complete",
+                    "titleRu": "Полная фактическая карточка",
+                    "variantAttrIds": [101, 202],
+                    "collectionStatus": "draft",
+                    "categoryId": 12345,
+                    "descriptionCategoryId": 67890,
+                    "typeId": 24680,
+                    "videoUrls": ["https://cdn.example/product.mp4"],
+                    "colorList": ["Черный"],
+                    "tags": ["Тематика: подарок", "Стиль: минимализм"],
+                    "facts": [
+                        {
+                            "name": "Цвет",
+                            "value": "Черный",
+                            "sourcePath": "Ozon PDP characteristics",
+                        },
+                        {
+                            "name": "Материал",
+                            "value": "Сталь",
+                            "sourcePath": "Ozon PDP characteristics",
+                        },
+                    ],
+                    "variants": [
+                        {
+                            "sku": "2268446233-complete",
+                            "values": [{"name": "Цвет", "value": "Черный"}],
+                            "images": ["https://cdn.example/variant.jpg"],
+                            "unknownNestedFact": {"keep": True},
+                        },
+                    ],
+                    "sourceUrl": "https://www.ozon.ru/product/runtime-2268446233/",
+                    "skuList": [{"sku": "2268446233", "barcode": ""}],
+                    "ozonMetrics": {
+                        "sku": "2268446233-complete",
+                        "articleNumber": "ARTICLE-1",
+                        "brand": "Exact analytics brand",
+                        "category": "Электроника > Аксессуары",
+                        "promotions": ["Скидка продавца"],
+                        "monthlySales": 120,
+                    },
+                    "warehouse": "Москва",
+                    "warehouseId": "WH-1",
+                    "logisticsType": "FBO",
+                    "deliveryMethod": "Курьер",
+                    "deliveryRegion": "Россия",
+                    "deliveryDays": 3,
+                    "discount": "-23%",
+                    "stock": "Осталось 5 штук",
+                    "priceRanges": [{"minQty": 1, "maxQty": 10, "price": 1299}],
+                    "minOrderQty": 1,
+                    "supplierUrl": "https://supplier.example/product-1",
+                    "tradeQuantity": 77,
+                }
+            ]
+        },
+    )
+    assert synced.status_code == 200
+    assert synced.json() == {"success": True, "created": 1, "skipped": 0}
+
+    selected = test_app.get(
+        "/api/selection/products?platform=ozon",
+        headers=headers,
+    )
+    assert selected.status_code == 200
+    products = selected.json()
+    product = next(item for item in products if item["source_id"] == "2268446233-complete")
+    assert product["brand"] == "Exact analytics brand"
+    assert product["tags"] == ["Тематика: подарок", "Стиль: минимализм"]
+    assert product["title"] == "Runtime-boundary factual product"
+    assert product["price"] == 1299.0
+    assert product["old_price"] == 1699.0
+    assert product["currency"] == "RUB"
+    assert product["images"] == ["https://cdn.example/product.jpg"]
+    assert product["rating"] == 4.8
+    assert product["review_count"] == 42
+    assert product["category"] == "Электроника > Аксессуары"
+    assert product["description"] == "Structured PDP description"
+    assert product["description_ru"] == "Описание карточки на русском языке"
+    assert product["record_name"] == "Runtime complete record"
+    assert product["selected_sku"] == "2268446233-complete"
+    assert product["title_ru"] == "Полная фактическая карточка"
+    assert product["variant_attr_ids"] == [101, 202]
+    assert product["collection_status"] == "draft"
+    assert product["ozon_category_path_id"] == 12345
+    assert product["ozon_category_id"] == 67890
+    assert product["ozon_type_id"] == 24680
+    assert product["video_urls"] == ["https://cdn.example/product.mp4"]
+    assert product["color_list"] == ["Черный"]
+    assert product["facts"] == [
+        {
+            "name": "Цвет",
+            "value": "Черный",
+            "sourcePath": "Ozon PDP characteristics",
+        },
+        {
+            "name": "Материал",
+            "value": "Сталь",
+            "sourcePath": "Ozon PDP characteristics",
+        },
+    ]
+    assert product["variants"] == [
+        {
+            "sku": "2268446233-complete",
+            "values": [{"name": "Цвет", "value": "Черный"}],
+            "images": ["https://cdn.example/variant.jpg"],
+            "unknownNestedFact": {"keep": True},
+        },
+    ]
+    assert product["ozon_metrics"]["monthlySales"] == 120
+    assert product["warehouse"] == "Москва"
+    assert product["warehouse_id"] == "WH-1"
+    assert product["logistics_type"] == "FBO"
+    assert product["delivery_method"] == "Курьер"
+    assert product["delivery_region"] == "Россия"
+    assert product["delivery_days"] == 3
+    assert product["discount"] == "-23%"
+    assert product["stock"] == "Осталось 5 штук"
+    assert product["price_ranges"] == [{"minQty": 1, "maxQty": 10, "price": 1299}]
+    assert product["min_order_qty"] == 1
+    assert product["supplier_url"] == "https://supplier.example/product-1"
+    assert product["trade_quantity"] == 77
 
 
 def test_schema_normalizes_extension_payload() -> None:

@@ -112,7 +112,6 @@
               </n-grid>
               <div class="field-label" style="margin-top: 8px">上架标签</div>
               <n-dynamic-tags v-model:value="editProduct.tags" />
-              <div class="field-hint">独立于采集事实；不会自动作为 Ozon 类目属性提交。</div>
             </div>
 
             <!-- 店铺与 Ozon 分类 -->
@@ -1219,6 +1218,26 @@ function normalizeColors(value: unknown): string[] {
   });
 }
 
+function normalizeIntegerList(value: unknown): number[] {
+  return parseArray(value).flatMap((item) => {
+    const number = typeof item === "number" ? item : Number(displayValue(item));
+    return Number.isInteger(number) && number > 0 ? [number] : [];
+  });
+}
+
+function normalizeMetrics(value: unknown): Record<string, unknown> {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return {};
+  return { ...(value as Record<string, unknown>) };
+}
+
+function formatCollectedJson(value: unknown): string {
+  try {
+    return JSON.stringify(value, null, 2);
+  } catch {
+    return displayValue(value);
+  }
+}
+
 function normalizeTags(value: unknown): string[] {
   const seen = new Set<string>();
   return parseArray(value).flatMap((item) => {
@@ -1373,11 +1392,14 @@ function normalizeProduct(product: any) {
   return {
     ...product,
     images: normalizeWritableImageUrls(product?.images),
+    video_urls: normalizeVariantUrls(product?.video_urls),
     sku_list: normalizeSkuList(product?.sku_list),
     spec_list: parseArray(product?.spec_list),
     facts: normalizeFacts(product?.facts),
     tags: normalizeTags(product?.tags),
     color_list: normalizeColors(product?.color_list),
+    variant_attr_ids: normalizeIntegerList(product?.variant_attr_ids),
+    ozon_metrics: normalizeMetrics(product?.ozon_metrics),
     variants: normalizeVariants(product?.variants),
   };
 }
@@ -2082,6 +2104,84 @@ onMounted(() => {
 }
 
 /* ── 采集事实与颜色 ── */
+.collected-facts-panel {
+  padding: 10px 12px;
+  border: 1px solid rgba(32, 128, 240, 0.2);
+  border-radius: 8px;
+  background: var(--bg-elevated);
+}
+
+.collected-meta-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px 10px;
+}
+
+.collected-meta-item {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 2px;
+  padding: 6px 8px;
+  border: 1px solid var(--border-color);
+  border-radius: 5px;
+}
+
+.collected-meta-item span {
+  color: var(--text-muted);
+  font-size: 10px;
+}
+
+.collected-meta-item strong {
+  color: var(--text-secondary);
+  font-size: 12px;
+  word-break: break-word;
+}
+
+.collected-fact-block {
+  margin-top: 10px;
+}
+
+.collected-media-summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+
+.collected-media-summary span {
+  padding: 4px 7px;
+  border: 1px solid var(--border-color);
+  border-radius: 5px;
+}
+
+.collected-video-list {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  margin-top: 6px;
+  font-size: 11px;
+  word-break: break-all;
+}
+
+.collected-video-list a {
+  color: #2080f0;
+}
+
+.collected-json {
+  max-height: 220px;
+  overflow: auto;
+  margin: 8px 0 0;
+  padding: 8px;
+  border-radius: 6px;
+  background: var(--bg-card, #fff);
+  color: var(--text-secondary);
+  font-size: 10px;
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+
 .tag-list,
 .variant-values {
   display: flex;
@@ -2150,6 +2250,12 @@ onMounted(() => {
   font-size: 12px;
   color: var(--text-muted);
   margin-bottom: 4px;
+}
+
+@media (max-width: 600px) {
+  .collected-meta-grid {
+    grid-template-columns: 1fr;
+  }
 }
 
 /* ── Ozon 分类选择反馈 ── */

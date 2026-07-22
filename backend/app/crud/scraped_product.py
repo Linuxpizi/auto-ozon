@@ -50,6 +50,13 @@ def create_scraped_product(db: Session, product: ScrapedProductCreate) -> Scrape
         description=product.description,
         source_url=product.source_url,
         scraped_at=product.scraped_at,
+        record_name=product.record_name,
+        selected_sku=product.selected_sku,
+        title_ru=product.title_ru,
+        description_ru=product.description_ru,
+        variant_attr_ids=product.variant_attr_ids,
+        collection_status=product.collection_status,
+        ozon_category_path_id=product.ozon_category_path_id,
         video_urls=product.video_urls,
         sku_list=product.sku_list,
         variants=product.variants,
@@ -60,6 +67,12 @@ def create_scraped_product(db: Session, product: ScrapedProductCreate) -> Scrape
         ozon_category_id=product.ozon_category_id,
         ozon_type_id=product.ozon_type_id,
         ozon_metrics=product.ozon_metrics,
+        warehouse=product.warehouse,
+        warehouse_id=product.warehouse_id,
+        logistics_type=product.logistics_type,
+        delivery_method=product.delivery_method,
+        delivery_region=product.delivery_region,
+        delivery_days=product.delivery_days,
         price_ranges=product.price_ranges,
         min_order_qty=product.min_order_qty,
         supplier_url=product.supplier_url,
@@ -223,6 +236,13 @@ def bulk_create_scraped_products(
                 description=product.description,
                 source_url=product.source_url,
                 scraped_at=product.scraped_at,
+                record_name=product.record_name,
+                selected_sku=product.selected_sku,
+                title_ru=product.title_ru,
+                description_ru=product.description_ru,
+                variant_attr_ids=product.variant_attr_ids,
+                collection_status=product.collection_status,
+                ozon_category_path_id=product.ozon_category_path_id,
                 video_urls=product.video_urls,
                 sku_list=product.sku_list,
                 variants=product.variants,
@@ -233,6 +253,16 @@ def bulk_create_scraped_products(
                 ozon_category_id=product.ozon_category_id,
                 ozon_type_id=product.ozon_type_id,
                 ozon_metrics=product.ozon_metrics,
+                warehouse=product.warehouse,
+                warehouse_id=product.warehouse_id,
+                logistics_type=product.logistics_type,
+                delivery_method=product.delivery_method,
+                delivery_region=product.delivery_region,
+                delivery_days=product.delivery_days,
+                price_ranges=product.price_ranges,
+                min_order_qty=product.min_order_qty,
+                supplier_url=product.supplier_url,
+                trade_quantity=product.trade_quantity,
                 synced=True,
             )
             db.add(record)
@@ -302,10 +332,25 @@ def bulk_create_scraped_products(
                 record.source_url = product.source_url
                 changed = True
 
+            if product.scraped_at and product.scraped_at != record.scraped_at:
+                record.scraped_at = product.scraped_at
+                changed = True
+
             # ── 补全字段（新值非空时更新） ──
             for field in ('discount', 'stock', 'brand', 'category', 'description'):
                 new_val = getattr(product, field)
                 if new_val and new_val != getattr(record, field):
+                    setattr(record, field, new_val)
+                    changed = True
+
+            # 商品级元数据、物流与 1688 字符串事实：空同步不擦除已有事实。
+            for field in (
+                'record_name', 'selected_sku', 'title_ru', 'description_ru',
+                'collection_status', 'warehouse', 'warehouse_id', 'logistics_type',
+                'delivery_method', 'delivery_region', 'supplier_url',
+            ):
+                new_val = getattr(product, field)
+                if _is_enriched(new_val, getattr(record, field)):
                     setattr(record, field, new_val)
                     changed = True
 
@@ -346,6 +391,12 @@ def bulk_create_scraped_products(
                 record.color_list = merged_colors
                 changed = True
 
+            old_variant_attr_ids = [item for item in _as_list(record.variant_attr_ids) if isinstance(item, int) and item > 0]
+            merged_variant_attr_ids = list(dict.fromkeys(old_variant_attr_ids + product.variant_attr_ids))
+            if merged_variant_attr_ids != old_variant_attr_ids:
+                record.variant_attr_ids = merged_variant_attr_ids
+                changed = True
+
             merged_variants = _merge_variants(record.variants, product.variants)
             if merged_variants != _as_list(record.variants):
                 record.variants = merged_variants
@@ -369,11 +420,18 @@ def bulk_create_scraped_products(
                     changed = True
 
             # 数值字段: 新值 > 0 时更新
-            for field in ('ozon_category_id', 'ozon_type_id'):
+            for field in (
+                'ozon_category_path_id', 'ozon_category_id', 'ozon_type_id',
+                'delivery_days', 'min_order_qty', 'trade_quantity',
+            ):
                 new_val = getattr(product, field)
                 if new_val and new_val > 0 and new_val != getattr(record, field):
                     setattr(record, field, new_val)
                     changed = True
+
+            if _is_enriched(product.price_ranges, record.price_ranges, "list"):
+                record.price_ranges = product.price_ranges
+                changed = True
 
             if changed:
                 updated.append(record)

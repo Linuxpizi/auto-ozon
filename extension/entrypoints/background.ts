@@ -5,6 +5,10 @@ import type {
   OzonboxSellerApiResponse,
 } from '@/lib/ozonbox/contract'
 import { isRecord } from '@/lib/ozonbox/contract'
+import {
+  collectedProductAnalyticsSku,
+  mergeExactSkuAnalyticsBrand,
+} from '@/lib/ozonbox/seller-analytics'
 import { isOzonProductUrl, isOzonUrl } from '@/lib/ozonbox/url'
 import { getAuthSession, getSettings } from '@/lib/utils/storage'
 import {
@@ -314,7 +318,23 @@ async function collectOzonProductInTab(tabId?: number): Promise<OzonboxCollected
       throw new Error(`无法启动 Ozon 采集脚本：${errorMessage(secondError)}；首次尝试：${errorMessage(firstError)}`)
     }
   }
-  return collectedOzonProduct(response)
+  const product = collectedOzonProduct(response)
+  if (typeof product.brand === 'string' && product.brand.trim()) return product
+
+  const sku = collectedProductAnalyticsSku(product)
+  if (!sku) return product
+  try {
+    const sellerId = await readOzonSellerId()
+    const analytics = await fetchSellerAnalytics(sku, sellerId)
+    if (!analytics.ok) {
+      console.warn(`Ozon seller analytics 品牌补充失败（HTTP ${analytics.status}），保留 PDP 采集结果`)
+      return product
+    }
+    return mergeExactSkuAnalyticsBrand(product, analytics.data, sku)
+  } catch (error: unknown) {
+    console.warn('Ozon seller analytics 品牌补充不可用，保留 PDP 采集结果', error)
+    return product
+  }
 }
 
 async function findSellerTab(explicitTabId?: number): Promise<chrome.tabs.Tab> {

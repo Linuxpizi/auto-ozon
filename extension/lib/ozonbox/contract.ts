@@ -55,6 +55,8 @@ export interface OzonboxVariant {
   variantAttrs: Record<string, unknown>
 }
 
+import type { OzonMetrics } from '@/lib/utils/types'
+
 /** Product shape returned by the Ozon collector before category enrichment. */
 export interface OzonboxCollectedProduct {
   source: 'OZON'
@@ -68,7 +70,8 @@ export interface OzonboxCollectedProduct {
   titleRu?: string | null
   description?: string | null
   descriptionRu?: string | null
-  tags?: string | null
+  /** Automatically collected from explicitly named factual PDP characteristics. */
+  tags?: string[]
   images: string[]
   price: number
   specs: Array<Record<string, unknown>>
@@ -78,6 +81,16 @@ export interface OzonboxCollectedProduct {
   categoryId?: number | null
   typeId?: number | null
   descriptionCategoryId?: number | null
+  /** Optional factual analytics/logistics enrichment; absent when unavailable. */
+  ozonMetrics?: OzonMetrics | null
+  warehouse?: string | null
+  warehouseId?: string | null
+  logisticsType?: string | null
+  deliveryMethod?: string | null
+  deliveryRegion?: string | null
+  deliveryDays?: number | null
+  discount?: string | null
+  stock?: string | null
   status: 'draft'
 }
 
@@ -197,6 +210,12 @@ export function assertOzonboxProductRecord(value: unknown): OzonboxProductRecord
   positiveNumber(value.price, '商品价格')
   if (!Array.isArray(value.images) || !Array.isArray(value.specs) || !Array.isArray(value.variantAttrIds)) {
     throw new Error('商品图片、规格和变体属性 ID 必须是数组')
+  }
+  if (value.tags !== undefined && !Array.isArray(value.tags)) {
+    throw new Error('商品标签必须是数组')
+  }
+  if (Array.isArray(value.tags) && value.tags.some((tag) => typeof tag !== 'string' || !tag.trim())) {
+    throw new Error('商品标签必须是非空字符串数组')
   }
   if (!Array.isArray(value.variantsData) || value.variantsData.length === 0) {
     throw new Error('商品必须包含至少一个真实变体')

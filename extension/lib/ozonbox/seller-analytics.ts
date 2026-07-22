@@ -1,5 +1,6 @@
 import {
   isRecord,
+  type OzonboxCollectedProduct,
   type OzonboxRuntimeMessage,
   type OzonboxPackageShopFacts,
   type OzonboxSellerApiResponse,
@@ -84,19 +85,68 @@ function assertSellerApiResponse(value: unknown): OzonboxSellerApiResponse {
   return value as unknown as OzonboxSellerApiResponse
 }
 
-function firstRecord(items: unknown, responseName: string): OzonboxAnalyticsItem | null {
-  if (!Array.isArray(items) || items.length === 0) return null
-  if (!isRecord(items[0])) throw new Error(`${responseName}首条数据不是对象`)
-  return items[0]
+function analyticsItemsFrom(data: unknown): unknown[] {
+  if (!isRecord(data)) throw new Error('Ozon analytics 数据不是对象')
+  if (Array.isArray(data.items)) return data.items
+  if (isRecord(data.result) && Array.isArray(data.result.items)) return data.result.items
+  return []
 }
 
-function analyticsItemFrom(data: unknown): OzonboxAnalyticsItem | null {
-  if (!isRecord(data)) throw new Error('Ozon analytics 数据不是对象')
-  if (Array.isArray(data.items)) return firstRecord(data.items, 'Ozon analytics')
-  if (isRecord(data.result) && Array.isArray(data.result.items)) {
-    return firstRecord(data.result.items, 'Ozon analytics')
+function positiveIntegerText(value: unknown): string | undefined {
+  if (typeof value === 'number') {
+    return Number.isSafeInteger(value) && value > 0 ? String(value) : undefined
+  }
+  if (typeof value !== 'string') return undefined
+  const normalized = value.trim()
+  return /^[1-9]\d*$/.test(normalized) ? normalized : undefined
+}
+
+/**
+ * Seller analytics is queried with an exact SKU filter, but the response can
+ * still contain several rows. Only an explicit numeric `sku`/`skuName` equal
+ * to the requested SKU proves that a row belongs to this product.
+ */
+export function analyticsItemForExactSku(data: unknown, skuValue: string): OzonboxAnalyticsItem | null {
+  const sku = requirePositiveIntegerString(skuValue, 'sku')
+  for (const candidate of analyticsItemsFrom(data)) {
+    if (!isRecord(candidate)) continue
+    const candidateSku = positiveIntegerText(candidate.sku) ?? positiveIntegerText(candidate.skuName)
+    if (candidateSku === sku) return candidate
   }
   return null
+}
+
+function analyticsBrand(item: OzonboxAnalyticsItem): string | undefined {
+  const normalized = normalizeAnalyticsItem(item)
+  for (const key of ['brand', 'brandName']) {
+    const value = normalized[key]
+    if (typeof value === 'string' && value.trim()) return value.trim()
+  }
+  return undefined
+}
+
+export function analyticsBrandForExactSku(data: unknown, skuValue: string): string | undefined {
+  const item = analyticsItemForExactSku(data, skuValue)
+  return item ? analyticsBrand(item) : undefined
+}
+
+export function collectedProductAnalyticsSku(
+  product: Pick<OzonboxCollectedProduct, 'sku' | 'productId'>,
+): string | undefined {
+  // Analytics cards query by the numeric Ozon product ID extracted from the
+  // PDP URL. Keep the same proven identity at the collection boundary.
+  return positiveIntegerText(product.productId) ?? positiveIntegerText(product.sku)
+}
+
+/** Preserve a PDP-proven brand and only fill an empty brand from an exact-SKU row. */
+export function mergeExactSkuAnalyticsBrand<T extends { brand?: string | null }>(
+  product: T,
+  data: unknown,
+  skuValue: string,
+): T {
+  if (typeof product.brand === 'string' && product.brand.trim()) return product
+  const brand = analyticsBrandForExactSku(data, skuValue)
+  return brand ? { ...product, brand } : product
 }
 
 function hasFact(item: OzonboxAnalyticsItem, keys: readonly string[]): boolean {
@@ -362,7 +412,7 @@ export async function fetchOzonAnalyticsItem(
     sku,
     shopId,
   }))
-  const sourceItem = analyticsItemFrom(analyticsResponse.data)
+  const sourceItem = analyticsItemForExactSku(analyticsResponse.data, sku)
   if (!sourceItem) return null
   const item = normalizeAnalyticsItem(sourceItem)
   if (hasFact(item, NORMALIZED_DIMENSION_KEYS) && hasFact(item, NORMALIZED_WEIGHT_KEYS)) return item

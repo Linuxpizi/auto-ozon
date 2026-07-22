@@ -29,19 +29,36 @@ class ScrapedProductBase(BaseModel):
     source_url: str = ""
     scraped_at: Optional[datetime] = None
 
+    # ── Ozon 商品级采集元数据 ──
+    record_name: str = ""
+    selected_sku: str = ""
+    title_ru: str = ""
+    description_ru: str = ""
+    variant_attr_ids: List[int] = []
+    collection_status: str = ""
+    ozon_category_path_id: int = 0
+
     # ── 多值字段 (JSON arrays) ──
     video_urls: List[str] = []
     sku_list: List[dict] = []          # [{"sku": "...", "barcode": "..."}]
     variants: List[dict] = []          # [{"sku": "...", "values": [{"name": "颜色", "value": "黑色"}]}]
     spec_list: List[dict] = []         # [{"weight_g": 0, "depth_mm": 0, "height_mm": 0, "width_mm": 0, "color": "...", "size": "..."}]
     facts: List[dict] = []              # [{"name": "...", "value": "...", "sourcePath": "BCS card"}]
-    tags: List[str] = []                # 用户可编辑上架标签；不等同于页面采集事实
+    tags: List[str] = []                # 平台事实特征自动采集；允许用户在选品页修正
     color_list: List[str] = []
 
     # ── Ozon 内部分类 ──
     ozon_category_id: int = 0
     ozon_type_id: int = 0
     ozon_metrics: dict = {}
+
+    # ── Ozon 物流事实 ──
+    warehouse: str = ""
+    warehouse_id: str = ""
+    logistics_type: str = ""
+    delivery_method: str = ""
+    delivery_region: str = ""
+    delivery_days: int = 0
 
     # ── 1688 专用字段 ──
     price_ranges: List[dict] = []       # [{"minQty": 1, "maxQty": 49, "price": 12.5}]
@@ -51,7 +68,7 @@ class ScrapedProductBase(BaseModel):
 
     @field_validator(
         "images", "video_urls", "sku_list", "variants", "spec_list", "facts", "tags",
-        "color_list", "price_ranges", mode="before",
+        "color_list", "variant_attr_ids", "price_ranges", mode="before",
     )
     @classmethod
     def normalize_list_fields(cls, value):
@@ -85,6 +102,17 @@ class ScrapedProductBase(BaseModel):
         if not isinstance(data, dict):
             return data
         result = {_camel_to_snake(k): v for k, v in data.items()}
+
+        # Ozon 扩展契约中的 categoryId 是分类路径节点 ID，
+        # descriptionCategoryId 是用于上架的描述分类 ID；两者在采集记录中
+        # 分别持久化到不同的 ozon_* 字段。先在输入边界完成映射，避免
+        # Pydantic 因 schema 未声明 category_id 这两个临时名称而静默丢字段。
+        if "category_id" in result and "ozon_category_path_id" not in result:
+            result["ozon_category_path_id"] = result["category_id"]
+        if "description_category_id" in result and "ozon_category_id" not in result:
+            result["ozon_category_id"] = result["description_category_id"]
+        if "type_id" in result and "ozon_type_id" not in result:
+            result["ozon_type_id"] = result["type_id"]
 
         # ── Backward compat: convert old single-value fields → new JSON arrays ──
         # video_url → video_urls

@@ -26,6 +26,17 @@ const OFFER_PRICE = '[data-testid*="price" i], [class*="price" i]'
 const CURRENCY_PATTERN = /(?:₽|руб(?:\.|лей|ля)?)/i
 const MAX_OFFER_GRAPH_SIZE = 300
 const BRAND_SPEC_NAMES = new Set(['brand', 'бренд', '品牌'])
+/**
+ * Only characteristic labels that explicitly describe a product theme/style/
+ * use case are eligible for the editable selection tags field.  Keep this
+ * allowlist narrow: promotional chips, seller labels and title text are not
+ * factual theme tags.
+ */
+const TAG_SPEC_NAMES = new Set([
+  'theme', 'style', 'scenario', 'use case', 'purpose', 'occasion',
+  'тема', 'тематика', 'стиль', 'сценарий', 'сценарий использования', 'назначение', 'повод',
+  '主题', '风格', '场景', '使用场景', '适用场景', '用途', '适用用途', '适用场合',
+])
 
 interface OfferSelectorGroup {
   element: HTMLElement
@@ -101,6 +112,26 @@ export function readFactualBrand(
     if (value) return value
   }
   return undefined
+}
+
+/**
+ * Extract editable selection tags from explicitly named Ozon PDP
+ * characteristics. Each characteristic value remains intact because commas,
+ * slashes and other punctuation may be part of the seller's factual value.
+ */
+export function readFactualTags(specs: Array<Record<string, unknown>>): string[] {
+  const result: string[] = []
+  const seen = new Set<string>()
+  for (const spec of specs) {
+    const name = factualString(spec.name)
+    const value = factualString(spec.value)
+    if (!name || !value || !TAG_SPEC_NAMES.has(canonicalSpecName(name))) continue
+    const key = value.normalize('NFKC').replace(/\s+/g, ' ').trim().toLocaleLowerCase()
+    if (seen.has(key)) continue
+    seen.add(key)
+    result.push(value)
+  }
+  return result
 }
 
 /**
@@ -839,6 +870,7 @@ export async function collectCurrentOzonProduct(): Promise<OzonboxCollectedProdu
   const price = jsonCurrent?.price ?? readDomPrice()
   if (!price) throw new Error('当前 Ozon 商品缺少可核验的正价')
   const specs = readSpecs(structured.specs)
+  const tags = readFactualTags(specs)
   const brand = structured.brand ?? readFactualBrand(undefined, specs) ?? readDomBrand(document)
   const selector = await readOfferSelectorGraph(document, productId, location.href)
   const currentVariant = readOzonVariantFacts(document, productId, sourceUrl, selector.currentAttrs)
@@ -865,7 +897,7 @@ export async function collectCurrentOzonProduct(): Promise<OzonboxCollectedProdu
     source: 'OZON', sourceUrl, productId, recordName: title.slice(0, 200),
     ...(structured.sku ? { sku: structured.sku } : {}),
     title, ...(brand ? { brand } : {}), ...(description ? { description } : {}), images, price,
-    specs, variantsData, variantAttrIds: [],
+    specs, ...(tags.length ? { tags } : {}), variantsData, variantAttrIds: [],
     ...(path ? { categoryPath: path } : {}), status: 'draft',
   }
 }

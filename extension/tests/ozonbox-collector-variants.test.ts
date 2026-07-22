@@ -1,7 +1,20 @@
 import assert from 'node:assert/strict'
 import { parseHTML } from 'linkedom'
-import { readDomBrand, readFactualBrand, readOfferSelector, readOfferSelectorGraph, readOzonVariantFacts } from '../lib/ozonbox/collector'
+import {
+  readDomBrand,
+  readFactualBrand,
+  readFactualTags,
+  readOfferSelector,
+  readOfferSelectorGraph,
+  readOzonVariantFacts,
+} from '../lib/ozonbox/collector'
 import { toSelectionProduct } from '../lib/ozonbox/selection-product'
+import {
+  analyticsBrandForExactSku,
+  analyticsItemForExactSku,
+  collectedProductAnalyticsSku,
+  mergeExactSkuAnalyticsBrand,
+} from '../lib/ozonbox/seller-analytics'
 import { assertCompleteProduct } from '../lib/utils/product-data'
 
 const CURRENT_PRODUCT_ID = '2957860286'
@@ -25,6 +38,25 @@ assert.equal(readFactualBrand(undefined, [
 ]), undefined)
 assert.equal(readFactualBrand(undefined, [{ name: 'Brand', value: '' }]), undefined)
 
+assert.deepEqual(readFactualTags([
+  { name: ' Тематика： ', value: ' Подарок на день рождения ' },
+  { name: 'Стиль', value: 'Минимализм, скандинавский' },
+  { name: '适用场景', value: 'Дом / офис' },
+  { name: 'Theme', value: '  подарок   на день рождения  ' },
+]), [
+  'Подарок на день рождения',
+  'Минимализм, скандинавский',
+  'Дом / офис',
+])
+assert.deepEqual(readFactualTags([
+  { name: 'Брендовая тематика', value: 'Near match' },
+  { name: 'Промо-метка', value: 'Хит продаж' },
+  { name: 'Название', value: 'Theme words in product title' },
+  { name: 'Продавец', value: 'Seller marketing label' },
+  { name: 'Style guide', value: 'Near match' },
+  { name: 'Стиль', value: '' },
+]), [])
+
 function brandFixture(body: string): Document {
   return parseHTML(`<!doctype html><html><body>${body}</body></html>`).document
 }
@@ -47,6 +79,36 @@ assert.equal(readDomBrand(brandFixture(`
   <h1>Title Brand</h1>
   <a href="/seller/not-a-brand/">Seller Brand</a>
 `)), undefined)
+
+const REQUESTED_ANALYTICS_SKU = '2268446233'
+const exactAnalyticsData = {
+  items: [
+    { sku: '9999999999', brand: 'Wrong first-row brand' },
+    {
+      sku: Number(REQUESTED_ANALYTICS_SKU),
+      title: 'Title must not become brand',
+      sellerName: 'Seller must not become brand',
+      promoLabel: 'Promo must not become brand',
+      metrics: { brandName: ' Exact analytics brand ' },
+    },
+  ],
+}
+assert.equal(analyticsItemForExactSku(exactAnalyticsData, REQUESTED_ANALYTICS_SKU)?.sku, 2268446233)
+assert.equal(analyticsBrandForExactSku(exactAnalyticsData, REQUESTED_ANALYTICS_SKU), 'Exact analytics brand')
+assert.equal(analyticsItemForExactSku({ items: [{ sku: '9999999999', brand: 'Wrong brand' }] }, REQUESTED_ANALYTICS_SKU), null)
+assert.equal(analyticsBrandForExactSku({
+  result: { items: [{ skuName: REQUESTED_ANALYTICS_SKU, sellerName: 'Not a brand', title: 'Not a brand' }] },
+}, REQUESTED_ANALYTICS_SKU), undefined)
+assert.equal(analyticsItemForExactSku({ items: [{ skuName: 'SKU 2268446233', brand: 'Unproven' }] }, REQUESTED_ANALYTICS_SKU), null)
+
+const pdpBrandProduct = { brand: 'PDP factual brand', productId: REQUESTED_ANALYTICS_SKU }
+assert.equal(mergeExactSkuAnalyticsBrand(pdpBrandProduct, exactAnalyticsData, REQUESTED_ANALYTICS_SKU), pdpBrandProduct)
+assert.deepEqual(
+  mergeExactSkuAnalyticsBrand({ productId: REQUESTED_ANALYTICS_SKU, brand: null }, exactAnalyticsData, REQUESTED_ANALYTICS_SKU),
+  { productId: REQUESTED_ANALYTICS_SKU, brand: 'Exact analytics brand' },
+)
+assert.equal(collectedProductAnalyticsSku({ sku: 'not-numeric', productId: REQUESTED_ANALYTICS_SKU }), REQUESTED_ANALYTICS_SKU)
+assert.equal(collectedProductAnalyticsSku({ sku: REQUESTED_ANALYTICS_SKU, productId: '9999999999' }), '9999999999')
 
 function aspectsFixture(currentValue: string, targetValue: string, targetProductId: string, fromSku: string): Document {
   const { document } = parseHTML(`
@@ -295,7 +357,9 @@ function richVariantFixture(): Document {
             "additionalProperty": [
               { "name": "Размер упаковки, см", "value": "30 x 20 x 10 см" },
               { "name": "Вес товара с упаковкой", "value": "1.25 кг" },
-              { "name": "Материал", "value": "Сталь" }
+              { "name": "Материал", "value": "Сталь" },
+              { "name": "Тематика", "value": "Подарок на день рождения" },
+              { "name": "Стиль", "value": "Минимализм, скандинавский" }
             ],
             "offers": {
               "@type": "Offer",
@@ -311,6 +375,9 @@ function richVariantFixture(): Document {
         </script>
       </head>
       <body>
+        <h1>Подарочный хит для дома</h1>
+        <a href="/seller/theme-store/">Theme Store</a>
+        <div data-widget="promoBadge">Хит продаж</div>
         <div data-widget="webPrice">
           <span class="price">1 299 ₽</span>
           <del>1 699 ₽</del>
@@ -325,6 +392,7 @@ function richVariantFixture(): Document {
         <div data-widget="webCharacteristics">
           <dl>
             <dt>Цвет</dt><dd>Черный</dd>
+            <dt>适用场景</dt><dd>Дом / офис</dd>
           </dl>
         </div>
       </body>
@@ -365,7 +433,10 @@ assert.deepEqual(richVariant, {
     { name: 'Размер упаковки, см', value: '30 x 20 x 10 см' },
     { name: 'Вес товара с упаковкой', value: '1.25 кг' },
     { name: 'Материал', value: 'Сталь' },
+    { name: 'Тематика', value: 'Подарок на день рождения' },
+    { name: 'Стиль', value: 'Минимализм, скандинавский' },
     { name: 'Цвет', value: 'Черный' },
+    { name: '适用场景', value: 'Дом / офис' },
   ],
   variantAttrs: { 'Объем, мл': '3' },
   depth: 300,
@@ -374,6 +445,48 @@ assert.deepEqual(richVariant, {
   weight: 1250,
 })
 
+const richVariantTags = readFactualTags(richVariant.supplierAttrs)
+assert.deepEqual(richVariantTags, [
+  'Подарок на день рождения',
+  'Минимализм, скандинавский',
+  'Дом / офис',
+])
+
+const richOzonMetrics = {
+  sku: 'SKU-RICH-1',
+  articleNumber: 'ARTICLE-RICH-1',
+  brand: 'Factual Brand',
+  category: 'Электроника > Аксессуары',
+  promotions: ['Скидка продавца'],
+  paidPromotion: 'Нет',
+  monthlyRevenue: 123456,
+  monthlySales: 120,
+  turnoverDynamics: '+12%',
+  followersCount: 45,
+  minPrice: 1199,
+  maxPrice: 1699,
+  rfbsCommission: 18,
+  fbpCommission: 22,
+  conversionRate: 4.5,
+  volumeCm3: 6000,
+  lengthMm: 300,
+  widthMm: 200,
+  heightMm: 100,
+  weightG: 1250,
+  packageWeightG: 1400,
+  packageLengthMm: 320,
+  packageWidthMm: 220,
+  packageHeightMm: 120,
+  warehouse: 'Москва',
+  warehouseId: 'WH-RICH-1',
+  logisticsType: 'FBO',
+  deliveryMethod: 'Курьер',
+  deliveryRegion: 'Россия',
+  deliveryDays: 3,
+  listedAt: '2026-07-22T00:00:00.000Z',
+  missingFields: [],
+}
+
 const normalizedProduct = assertCompleteProduct(toSelectionProduct({
   source: 'OZON',
   sourceUrl: CURRENT_URL,
@@ -381,18 +494,69 @@ const normalizedProduct = assertCompleteProduct(toSelectionProduct({
   recordName: 'Rich factual SKU',
   sku: 'SKU-RICH-1',
   title: 'Rich factual SKU',
+  titleRu: 'Богатая фактическая карточка',
+  description: 'Structured PDP description',
+  descriptionRu: 'Описание карточки на русском языке',
   brand: 'Factual Brand',
   categoryPath: 'Электроника > Аксессуары',
+  categoryId: 12345,
+  descriptionCategoryId: 67890,
+  typeId: 24680,
   images: richVariant.images,
   price: 1299,
+  discount: '-23%',
+  stock: 'Осталось 5 штук',
+  warehouse: 'Москва',
+  warehouseId: 'WH-RICH-1',
+  logisticsType: 'FBO',
+  deliveryMethod: 'Курьер',
+  deliveryRegion: 'Россия',
+  deliveryDays: 3,
+  ozonMetrics: richOzonMetrics,
   specs: richVariant.supplierAttrs,
+  tags: richVariantTags,
   variantsData: [richVariant],
-  variantAttrIds: [],
+  variantAttrIds: [101, 101, 0, -4, 202, Number.NaN],
   status: 'draft',
 }))
 
 assert.equal(normalizedProduct.brand, 'Factual Brand')
 assert.equal(normalizedProduct.category, 'Электроника > Аксессуары')
+assert.equal(normalizedProduct.recordName, 'Rich factual SKU')
+assert.equal(normalizedProduct.selectedSku, 'SKU-RICH-1')
+assert.equal(normalizedProduct.titleRu, 'Богатая фактическая карточка')
+assert.equal(normalizedProduct.description, 'Structured PDP description')
+assert.equal(normalizedProduct.descriptionRu, 'Описание карточки на русском языке')
+assert.equal(normalizedProduct.collectionStatus, 'draft')
+assert.equal(normalizedProduct.ozonCategoryPathId, 12345)
+assert.equal(normalizedProduct.ozonCategoryId, 67890)
+assert.equal(normalizedProduct.ozonTypeId, 24680)
+assert.deepEqual(normalizedProduct.variantAttrIds, [101, 202])
+assert.deepEqual(normalizedProduct.ozonMetrics, richOzonMetrics)
+assert.equal(normalizedProduct.warehouse, 'Москва')
+assert.equal(normalizedProduct.warehouseId, 'WH-RICH-1')
+assert.equal(normalizedProduct.logisticsType, 'FBO')
+assert.equal(normalizedProduct.deliveryMethod, 'Курьер')
+assert.equal(normalizedProduct.deliveryRegion, 'Россия')
+assert.equal(normalizedProduct.deliveryDays, 3)
+assert.equal(normalizedProduct.discount, '-23%')
+assert.equal(normalizedProduct.stock, 'Осталось 5 штук')
+assert.deepEqual(normalizedProduct.videoUrls, [
+  'https://cdn.example/video/product.mp4',
+  'https://cdn.example/video/dom.mp4',
+  'https://www.ozon.ru/media/source.webm',
+])
+assert.deepEqual(normalizedProduct.colorList, ['Черный'])
+assert.deepEqual(normalizedProduct.facts, richVariant.supplierAttrs.map((item) => ({
+  name: item.name ?? item.label,
+  value: item.value,
+  sourcePath: 'Ozon PDP characteristics',
+})).filter((item) => typeof item.name === 'string'))
+assert.deepEqual(normalizedProduct.tags, [
+  'Подарок на день рождения',
+  'Минимализм, скандинавский',
+  'Дом / офис',
+])
 assert.deepEqual(normalizedProduct.skuList, [{ sku: 'SKU-RICH-1', barcode: '' }])
 assert.equal('brand' in normalizedProduct.skuList[0]!, false)
 assert.deepEqual(normalizedProduct.variants, [{
@@ -416,4 +580,18 @@ assert.deepEqual(normalizedProduct.variants, [{
   sourcePath: 'Ozon PDP offer selector / structured data',
 }])
 
-console.log('Ozon variant fixtures passed: selector closure and rich per-SKU facts survive normalization')
+const malformedVariantAttrProduct = toSelectionProduct({
+  source: 'OZON',
+  sourceUrl: CURRENT_URL,
+  productId: `${CURRENT_PRODUCT_ID}9`,
+  title: 'Malformed optional metadata',
+  images: richVariant.images,
+  price: 1299,
+  specs: [],
+  variantsData: [{ ...richVariant, productId: `${CURRENT_PRODUCT_ID}9` }],
+  variantAttrIds: 'not-an-array' as unknown as number[],
+  status: 'draft',
+})
+assert.equal('variantAttrIds' in malformedVariantAttrProduct, false)
+
+console.log('Ozon fixtures passed: selector closure, per-SKU facts and factual tags survive normalization')

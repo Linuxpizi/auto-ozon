@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
-import { analyticsPageForUrl } from '../lib/ozonbox/analytics-card'
+import { analyticsPageForUrl, cardProductContext } from '../lib/ozonbox/analytics-card'
 import {
   analyticsLoadStatus,
   buildAnalyticsDoc,
@@ -204,6 +204,37 @@ assert.deepEqual(analyticsPageForUrl('https://www.ozon.ru/'), { kind: 'list' })
 assert.deepEqual(analyticsPageForUrl('https://www.ozon.ru/cart'), { kind: 'other' })
 assert.deepEqual(analyticsPageForUrl('not a URL'), { kind: 'other' })
 
+const fakeCard = (hrefs: Array<string | null>): ParentNode => ({
+  querySelectorAll: () => hrefs.map((href) => ({
+    getAttribute: (name: string) => name === 'href' ? href : null,
+  })),
+}) as unknown as ParentNode
+
+assert.deepEqual(cardProductContext(
+  fakeCard(['/cart', 'javascript:void(0)', '/product/factual-card-2957860286/?from=search#reviews']),
+  'https://www.ozon.ru/search/?text=cable',
+), {
+  sku: '2957860286',
+  sourceUrl: 'https://www.ozon.ru/product/factual-card-2957860286/',
+})
+assert.deepEqual(cardProductContext(
+  fakeCard(['https://seller.ozon.ru/app/product/not-storefront-12345/', 'https://m.ozon.ru/product/mobile-card-67890/']),
+  'https://www.ozon.ru/category/electronics-15500/',
+), {
+  sku: '67890',
+  sourceUrl: 'https://m.ozon.ru/product/mobile-card-67890/',
+})
+for (const hrefs of [
+  [null, '', '/cart'],
+  ['http://www.ozon.ru/product/insecure-12345/'],
+  ['https://example.com/product/external-12345/'],
+  ['https://www.ozon.ru/product/no-positive-sku-0/'],
+  ['https://www.ozon.ru/category/not-a-product-12345/'],
+  ['not a valid product URL'],
+]) {
+  assert.equal(cardProductContext(fakeCard(hrefs), 'https://www.ozon.ru/search/'), undefined)
+}
+
 assert.deepEqual(parseOzonPanelState({
   launcherPosition: { right: 81, bottom: 92 },
   listCardsHidden: true,
@@ -284,6 +315,7 @@ assert.throws(() => parseSellerCookiesResponse({ cookies: [null] }), /无效响�
 const backgroundSource = readFileSync(new URL('../entrypoints/background.ts', import.meta.url), 'utf8')
 const contentSource = readFileSync(new URL('../entrypoints/ozon.content.ts', import.meta.url), 'utf8')
 const floatingPanelSource = readFileSync(new URL('../lib/ozonbox/floating-panel.ts', import.meta.url), 'utf8')
+const analyticsCardsSource = readFileSync(new URL('../lib/ozonbox/analytics-card.ts', import.meta.url), 'utf8')
 assert.ok(backgroundSource.includes("type === 'OZONBOX_COLLECT_AND_SAVE_CURRENT_PRODUCT'"))
 assert.ok(backgroundSource.includes('collectAndSaveOzonProduct(request.tabId ?? sender.tab?.id)'))
 assert.ok(backgroundSource.includes('handleProductScraped(toSelectionProduct(collected))'))
@@ -292,11 +324,39 @@ assert.ok(backgroundSource.includes('browser.cookies.getAll({ url: `${OZON_SELLE
 assert.ok(contentSource.includes("request.type !== 'COLLECT_PRODUCT'"))
 assert.ok(contentSource.includes('persistLauncherPosition: (launcherPosition) => persistState({ launcherPosition })'))
 assert.ok(contentSource.includes('persistCardVisibility: (visibility) => persistState(visibility)'))
+assert.ok(contentSource.includes("type: 'OZONBOX_COLLECT_CARD_PRODUCT'"))
+assert.ok(contentSource.includes('sku,'))
+assert.ok(contentSource.includes('sourceUrl,'))
+assert.ok(contentSource.includes('const product = assertOzonboxCollectedProduct(response.data)'))
+assert.ok(contentSource.includes('floatingPanel.openListingForProduct(product)'))
 assert.ok(!floatingPanelSource.includes('browser.action.openPopup'))
 assert.ok(!floatingPanelSource.includes('Cookie 已绑定'))
 assert.ok(floatingPanelSource.includes("type: 'OZONBOX_GET_SELLER_COOKIES'"))
 assert.ok(floatingPanelSource.includes("{ type: 'PANEL_ERP_OPEN', route: '/' }"))
 assert.ok(floatingPanelSource.includes('window.location.reload()'))
+assert.ok(floatingPanelSource.includes('panelTools.openListing({ source: listingButton })'))
+assert.ok(floatingPanelSource.includes('openListingForProduct: (product) => panelTools.openListing({ product })'))
+
+for (const operationContract of [
+  "operation.dataset.ozonboxCardOperation = 'true'",
+  "button.textContent = '一键上架'",
+  "button.textContent = '采集中...'",
+  "button.setAttribute('aria-busy', 'true')",
+  'options.onCardListing?.(context)',
+  'status.textContent = errorMessage(error)',
+  'const reconcileListCards = (analyticsVisible: boolean)',
+  "else if (page.kind === 'list') reconcileListCards(!cardVisibility.listCardsHidden)",
+  "const enabled = page.kind === 'list' || (page.kind === 'detail' && cardVisibility.detailCardsVisible)",
+]) {
+  assert.ok(analyticsCardsSource.includes(operationContract), `卡片操作契约缺失：${operationContract}`)
+}
+const removeLiteStart = analyticsCardsSource.indexOf("const removeFramesByType = (type: 'detail' | 'lite')")
+const injectOperationStart = analyticsCardsSource.indexOf('const injectCardOperation', removeLiteStart)
+assert.ok(removeLiteStart >= 0 && injectOperationStart > removeLiteStart)
+assert.ok(
+  !analyticsCardsSource.slice(removeLiteStart, injectOperationStart).includes('CARD_OPERATION_SELECTOR'),
+  '隐藏 lite 分析 iframe 不得移除核心卡片操作区',
+)
 
 assert.equal(analyticsLoadStatus({}), '已加载')
 assert.equal(analyticsLoadStatus({

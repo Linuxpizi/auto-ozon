@@ -1,3 +1,6 @@
+import type { OzonboxCollectedProduct } from './contract'
+import { assertOzonboxCollectedProduct } from './contract'
+
 export type PanelToolMode = 'mock' | 'real'
 export type PanelPricingMode = 'suggest' | 'evaluate'
 export type PanelPricingRoute = 'calculate' | 'calculate2'
@@ -218,8 +221,8 @@ export type PanelToolRequest =
   | { type: 'PANEL_SELECTION_UPDATE'; id: number; input: PanelSelectionRuleInput }
   | { type: 'PANEL_SELECTION_TOGGLE'; id: number; enabled: boolean }
   | { type: 'PANEL_SELECTION_DELETE'; id: number }
-  | { type: 'PANEL_LISTING_PREVIEW' }
-  | { type: 'PANEL_LISTING_PREPARE'; input: PanelListingDraftInput }
+  | { type: 'PANEL_LISTING_PREVIEW'; product?: OzonboxCollectedProduct }
+  | { type: 'PANEL_LISTING_PREPARE'; input: PanelListingDraftInput; product?: OzonboxCollectedProduct }
   | { type: 'PANEL_LISTING_SUBMIT'; draftId: number }
   | { type: 'PANEL_ERP_OPEN'; route: PanelErpRoute }
 
@@ -340,13 +343,24 @@ function isListingDraftInput(value: unknown): value is PanelListingDraftInput {
     && typeof value.floatingPriceEnabled === 'boolean'
 }
 
+function hasValidOptionalCollectedProduct(value: Record<string, unknown>): boolean {
+  if (value.product === undefined) return true
+  try {
+    assertOzonboxCollectedProduct(value.product)
+    return true
+  } catch {
+    return false
+  }
+}
+
 export function isPanelToolRequest(value: unknown): value is PanelToolRequest {
   if (!isRecord(value)) return false
   switch (value.type) {
     case 'PANEL_SETTINGS_GET':
     case 'PANEL_SELECTION_LIST':
-    case 'PANEL_LISTING_PREVIEW':
       return true
+    case 'PANEL_LISTING_PREVIEW':
+      return hasValidOptionalCollectedProduct(value)
     case 'PANEL_SETTINGS_UPDATE':
       return isPanelSettings(value.settings)
     case 'PANEL_PRICING_RUN':
@@ -362,7 +376,7 @@ export function isPanelToolRequest(value: unknown): value is PanelToolRequest {
     case 'PANEL_SELECTION_DELETE':
       return isPositiveInteger(value.id)
     case 'PANEL_LISTING_PREPARE':
-      return isListingDraftInput(value.input)
+      return isListingDraftInput(value.input) && hasValidOptionalCollectedProduct(value)
     case 'PANEL_LISTING_SUBMIT':
       return isPositiveInteger(value.draftId)
     case 'PANEL_ERP_OPEN':

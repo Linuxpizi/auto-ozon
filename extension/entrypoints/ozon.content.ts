@@ -1,6 +1,10 @@
 import { startOzonAnalyticsCards } from '@/lib/ozonbox/analytics-card'
 import { collectCurrentOzonProduct } from '@/lib/ozonbox/collector'
-import type { OzonboxRuntimeMessage } from '@/lib/ozonbox/contract'
+import {
+  assertOzonboxCollectedProduct,
+  isRecord,
+  type OzonboxRuntimeMessage,
+} from '@/lib/ozonbox/contract'
 import { startOzonFloatingPanel } from '@/lib/ozonbox/floating-panel'
 import {
   readOzonPanelState,
@@ -58,6 +62,22 @@ export default defineContentScript({
     analyticsCards = startOzonAnalyticsCards({
       initialState: panelState,
       persistCardVisibility: (visibility) => persistState(visibility),
+      onCardListing: async ({ sku, sourceUrl }) => {
+        const response: unknown = await browser.runtime.sendMessage({
+          type: 'OZONBOX_COLLECT_CARD_PRODUCT',
+          sku,
+          sourceUrl,
+        } satisfies OzonboxRuntimeMessage)
+        if (!isRecord(response) || response.success !== true) {
+          const message = isRecord(response) && typeof response.error === 'string' && response.error.trim()
+            ? response.error.trim()
+            : '所选商品采集服务返回了无效响应'
+          throw new Error(message)
+        }
+        const product = assertOzonboxCollectedProduct(response.data)
+        if (!floatingPanel) throw new Error('鲸智 AI 浮窗尚未就绪')
+        floatingPanel.openListingForProduct(product)
+      },
     })
     floatingPanel = startOzonFloatingPanel({
       initialState: panelState,

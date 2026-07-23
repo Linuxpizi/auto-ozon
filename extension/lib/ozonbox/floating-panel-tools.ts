@@ -15,6 +15,7 @@ import {
   type PanelToolRequest,
   type PanelToolSettings,
 } from './panel-tools-contract'
+import type { OzonboxCollectedProduct } from './contract'
 import { validatedErpBaseUrl } from './erp-url'
 
 const DRAWER_WIDTH_KEY = 'drawerWidth'
@@ -112,12 +113,17 @@ const SELECTION_CONDITION_GROUPS: Array<{
 ]
 
 export interface FloatingPanelToolsController {
-  openListing: (source?: HTMLElement) => void
+  openListing: (options?: FloatingPanelListingOptions) => void
   openPricing: (route: PanelPricingRoute, source?: HTMLElement) => void
   openSelection: (source?: HTMLElement) => void
   openErp: (source?: HTMLElement) => void
   close: () => void
   stop: () => void
+}
+
+export interface FloatingPanelListingOptions {
+  source?: HTMLElement
+  product?: OzonboxCollectedProduct
 }
 
 export interface FloatingPanelToolsOptions {
@@ -292,6 +298,7 @@ export function createFloatingPanelTools(options: FloatingPanelToolsOptions): Fl
   let returnFocus: HTMLElement | null = null
   let listingPreview: PanelListingPreview | undefined
   let listingDraft: PanelListingDraftResult | undefined
+  let listingProduct: OzonboxCollectedProduct | undefined
   let listingRows: ListingRow[] = []
   let listingPage = 1
   let listingFormMemory: ListingFormMemory = { shopIds: [], brand: 'none', imageOrder: 'none', followType: 'hand', watermarkId: 0 }
@@ -359,6 +366,7 @@ export function createFloatingPanelTools(options: FloatingPanelToolsOptions): Fl
 
   const open = (source?: HTMLElement): number => {
     sequence += 1
+    listingProduct = undefined
     if (root.hidden) {
       returnFocus = source ?? (shadow.activeElement instanceof HTMLElement ? shadow.activeElement : null)
     }
@@ -371,6 +379,7 @@ export function createFloatingPanelTools(options: FloatingPanelToolsOptions): Fl
   const close = (): void => {
     if (root.hidden) return
     sequence += 1
+    listingProduct = undefined
     resizing = false
     selectionEditorOpen = false
     editingRule = undefined
@@ -721,13 +730,17 @@ export function createFloatingPanelTools(options: FloatingPanelToolsOptions): Fl
     target.scrollIntoView({ behavior: 'smooth', block: 'nearest' })
   }
 
-  const openListing = (source?: HTMLElement): void => {
-    const token = open(source)
+  const openListing = (options: FloatingPanelListingOptions = {}): void => {
+    const token = open(options.source)
+    listingProduct = options.product
     listingPreview = undefined
     listingDraft = undefined
     setHeader('一键上架到OZON', '', false, false, true)
     showLoading('正在读取当前商品与店铺...')
-    void Promise.all([loadSettings(token), requestPanelTool<PanelListingPreview>({ type: 'PANEL_LISTING_PREVIEW' })]).then(async ([, response]) => {
+    const previewRequest: PanelToolRequest = listingProduct
+      ? { type: 'PANEL_LISTING_PREVIEW', product: listingProduct }
+      : { type: 'PANEL_LISTING_PREVIEW' }
+    void Promise.all([loadSettings(token), requestPanelTool<PanelListingPreview>(previewRequest)]).then(async ([, response]) => {
       if (!isCurrent(token)) return
       updateModeBadge(response.mode)
       listingPreview = response.data
@@ -1295,7 +1308,10 @@ export function createFloatingPanelTools(options: FloatingPanelToolsOptions): Fl
       const token = sequence
       try {
         const input = listingInputFromForm(formElement)
-        void requestPanelTool<PanelListingDraftResult>({ type: 'PANEL_LISTING_PREPARE', input }).then((response) => {
+        const prepareRequest: PanelToolRequest = listingProduct
+          ? { type: 'PANEL_LISTING_PREPARE', input, product: listingProduct }
+          : { type: 'PANEL_LISTING_PREPARE', input }
+        void requestPanelTool<PanelListingDraftResult>(prepareRequest).then((response) => {
           if (!isCurrent(token) || !formElement.isConnected) return
           updateModeBadge(response.mode)
           listingDraft = response.data
@@ -1416,6 +1432,7 @@ export function createFloatingPanelTools(options: FloatingPanelToolsOptions): Fl
       if (stopped) return
       stopped = true
       sequence += 1
+      listingProduct = undefined
       root.remove()
       shadow.querySelector('#jingzhi-panel-tools-style')?.remove()
     },

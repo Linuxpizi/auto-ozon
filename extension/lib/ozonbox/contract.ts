@@ -175,6 +175,13 @@ export interface OzonboxCollectRequest {
   tabId?: number
 }
 
+/** Collect the complete factual PDP represented by one exact list-card link. */
+export interface OzonboxCollectCardProductRequest {
+  type: 'OZONBOX_COLLECT_CARD_PRODUCT'
+  sku: string
+  sourceUrl: string
+}
+
 /** A separate end-to-end action; never alias this truthful save flow to listing. */
 export interface OzonboxCollectAndSaveRequest {
   type: 'OZONBOX_COLLECT_AND_SAVE_CURRENT_PRODUCT'
@@ -199,6 +206,7 @@ export type OzonboxCollectAndSaveResult =
 
 export type OzonboxRuntimeMessage =
   | OzonboxCollectRequest
+  | OzonboxCollectCardProductRequest
   | OzonboxCollectAndSaveRequest
   | OzonboxSellerIdRequest
   | OzonboxSellerCookiesRequest
@@ -247,14 +255,10 @@ function validateVariant(value: unknown, index: number): OzonboxVariant {
   return value as unknown as OzonboxVariant
 }
 
-/** Validate facts immediately before they cross the save API boundary. */
-export function assertOzonboxProductRecord(value: unknown): OzonboxProductRecord {
-  if (!isRecord(value)) throw new Error('Ozon 商品记录必须是对象')
+/** Validate the complete factual product at every runtime/message boundary. */
+export function assertOzonboxCollectedProduct(value: unknown): OzonboxCollectedProduct {
+  if (!isRecord(value)) throw new Error('Ozon 商品必须是对象')
   if (value.source !== 'OZON') throw new Error('商品来源必须是 OZON')
-  const storeId = value.storeId
-  if (typeof storeId !== 'number' || !Number.isInteger(storeId) || storeId <= 0) {
-    throw new Error('必须选择有效的目标店铺')
-  }
   const productId = nonEmptyString(value.productId, 'productId')
   if (!/^\d+$/.test(productId) || Number(productId) <= 0) {
     throw new Error('productId 必须是正整数的字符串')
@@ -281,7 +285,18 @@ export function assertOzonboxProductRecord(value: unknown): OzonboxProductRecord
     && value.categoryId !== value.descriptionCategoryId) {
     throw new Error('categoryId 与 descriptionCategoryId 必须一致')
   }
-  return value as unknown as OzonboxProductRecord
+  if (value.status !== 'draft') throw new Error('Ozon 商品状态必须是 draft')
+  return value as unknown as OzonboxCollectedProduct
+}
+
+/** Validate facts immediately before they cross the save API boundary. */
+export function assertOzonboxProductRecord(value: unknown): OzonboxProductRecord {
+  const product = assertOzonboxCollectedProduct(value)
+  const storeId = (value as Record<string, unknown>).storeId
+  if (typeof storeId !== 'number' || !Number.isInteger(storeId) || storeId <= 0) {
+    throw new Error('必须选择有效的目标店铺')
+  }
+  return product as OzonboxProductRecord
 }
 
 export function assertOzonboxEnvelope<T>(value: unknown): OzonboxEnvelope<T> {

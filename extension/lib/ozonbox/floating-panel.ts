@@ -1,6 +1,7 @@
 import { analyticsPageForUrl } from './analytics-card'
 import type {
   OzonboxCollectAndSaveResult,
+  OzonboxCollectedProduct,
   OzonboxSellerCookie,
   OzonboxSellerCookiesResponse,
 } from './contract'
@@ -31,6 +32,7 @@ export const OZON_PANEL_DRAG_RELEASE_DELAY_MS = 100
 
 export interface OzonFloatingPanelController {
   reconcile: () => void
+  openListingForProduct: (product: OzonboxCollectedProduct) => void
   stop: () => void
 }
 
@@ -602,7 +604,7 @@ export function startOzonFloatingPanel(options: OzonFloatingPanelOptions = {}): 
   bindCookieButton.addEventListener('click', () => {
     void bindSellerCookies()
   }, { signal })
-  listingButton.addEventListener('click', () => panelTools.openListing(listingButton), { signal })
+  listingButton.addEventListener('click', () => panelTools.openListing({ source: listingButton }), { signal })
   profitButton.addEventListener('click', () => panelTools.openPricing('calculate2', profitButton), { signal })
   pricingButton.addEventListener('click', () => panelTools.openPricing('calculate', pricingButton), { signal })
   selectionButton.addEventListener('click', () => panelTools.openSelection(selectionButton), { signal })
@@ -654,6 +656,7 @@ export function startOzonFloatingPanel(options: OzonFloatingPanelOptions = {}): 
 
   const controller: OzonFloatingPanelController = {
     reconcile,
+    openListingForProduct: (product) => panelTools.openListing({ product }),
     stop: () => {
       if (stopped) return
       stopped = true

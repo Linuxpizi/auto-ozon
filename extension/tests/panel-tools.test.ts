@@ -218,6 +218,19 @@ const draftInput: PanelListingDraftInput = {
   modelImagesEnabled: false,
   floatingPriceEnabled: false,
 }
+assert.ok(isPanelToolRequest({ type: 'PANEL_LISTING_PREVIEW' }))
+assert.ok(isPanelToolRequest({ type: 'PANEL_LISTING_PREVIEW', product }))
+assert.ok(!isPanelToolRequest({
+  type: 'PANEL_LISTING_PREVIEW',
+  product: { ...product, productId: '0' },
+}))
+assert.ok(isPanelToolRequest({ type: 'PANEL_LISTING_PREPARE', input: draftInput }))
+assert.ok(isPanelToolRequest({ type: 'PANEL_LISTING_PREPARE', input: draftInput, product }))
+assert.ok(!isPanelToolRequest({
+  type: 'PANEL_LISTING_PREPARE',
+  input: draftInput,
+  product: { ...product, variantsData: [] },
+}))
 const draft = prepareMockListingDraft(draftInput)
 assert.equal(draft.status, 'ready')
 assert.equal(draft.selectedVariantCount, 1)
@@ -238,6 +251,7 @@ assert.match(submitted.message, /未向 Ozon 发送任何请求/)
 
 const backgroundSource = readFileSync(new URL('../entrypoints/background.ts', import.meta.url), 'utf8')
 const panelToolsSource = readFileSync(new URL('../lib/ozonbox/floating-panel-tools.ts', import.meta.url), 'utf8')
+const floatingPanelSource = readFileSync(new URL('../lib/ozonbox/floating-panel.ts', import.meta.url), 'utf8')
 assert.ok(backgroundSource.includes('requireAuthentication: false'))
 assert.ok(backgroundSource.includes('enrichFromSeller: false'))
 assert.ok(backgroundSource.includes("case 'PANEL_LISTING_PREPARE'"))
@@ -245,6 +259,37 @@ assert.ok(backgroundSource.includes("case 'PANEL_LISTING_SUBMIT'"))
 assert.ok(backgroundSource.indexOf("case 'PANEL_LISTING_PREPARE'") < backgroundSource.indexOf("case 'PANEL_LISTING_SUBMIT'"))
 assert.ok(backgroundSource.includes("from '@/lib/ozonbox/erp-url'"))
 assert.ok(!backgroundSource.includes('function validatedErpBaseUrl'))
+const explicitProductIndex = backgroundSource.indexOf(
+  'if (product !== undefined) return Promise.resolve(assertOzonboxCollectedProduct(product))',
+)
+const currentTabFallbackIndex = backgroundSource.indexOf(
+  'return collectOzonProductInTab(tabId, options)',
+  explicitProductIndex,
+)
+assert.ok(
+  explicitProductIndex >= 0 && explicitProductIndex < currentTabFallbackIndex,
+  'an explicit listing product must be validated and returned before current-tab collection is considered',
+)
+const exactCardCollectionFacts = [
+  'const sourceUrl = requireExactCardProductUrl(request.sourceUrl, sku)',
+  'const temporaryTab = await browser.tabs.create({ url: sourceUrl, active: false })',
+  'await waitForExactOzonProductTab(temporaryTabId, sku)',
+  'const product = await collectOzonProductInTab(temporaryTabId)',
+  'requireExactLoadedProductUrl(finalTab.url, sku)',
+  'return assertExactCollectedCardIdentity(product, sku)',
+  'finally {',
+  'await browser.tabs.remove(temporaryTabId)',
+  "type === 'OZONBOX_COLLECT_CARD_PRODUCT'",
+  'collectExactCardProduct(request).then((product) => {',
+]
+for (const fact of exactCardCollectionFacts) {
+  assert.ok(backgroundSource.includes(fact), `exact card collection is missing: ${fact}`)
+}
+assert.ok(backgroundSource.includes('listingProductForRequest(request.product, tabId, {'))
+assert.ok(backgroundSource.includes('listingProductForRequest(request.product, tabId), listOzonboxStores()'))
+assert.ok(backgroundSource.includes('const product = await listingProductForRequest(request.product, tabId)'))
+assert.ok(floatingPanelSource.includes("panelTools.openListing({ source: listingButton })"))
+assert.ok(floatingPanelSource.includes('openListingForProduct: (product) => panelTools.openListing({ product })'))
 assert.ok(panelToolsSource.includes("from './erp-url'"))
 assert.ok(panelToolsSource.includes("type: 'PANEL_SETTINGS_GET'"))
 assert.ok(panelToolsSource.includes("type: 'PANEL_PRICING_CONTEXT'"))
@@ -407,7 +452,40 @@ for (const name of ['offerRule', 'batchPriceMode', 'batchOldPriceMode', 'currenc
 }
 
 assert.ok(panelToolsSource.includes("type: 'PANEL_LISTING_PREVIEW'"))
-const prepareRequestIndex = panelToolsSource.indexOf("requestPanelTool<PanelListingDraftResult>({ type: 'PANEL_LISTING_PREPARE', input })")
+assert.ok(panelToolsSource.includes('let listingProduct: OzonboxCollectedProduct | undefined'))
+const listingProductAssignmentIndex = panelToolsSource.indexOf('listingProduct = options.product')
+const explicitPreviewRequestIndex = panelToolsSource.indexOf(
+  "? { type: 'PANEL_LISTING_PREVIEW', product: listingProduct }",
+  listingProductAssignmentIndex,
+)
+const omittedPreviewRequestIndex = panelToolsSource.indexOf(
+  ": { type: 'PANEL_LISTING_PREVIEW' }",
+  explicitPreviewRequestIndex,
+)
+const explicitPrepareRequestIndex = panelToolsSource.indexOf(
+  "? { type: 'PANEL_LISTING_PREPARE', input, product: listingProduct }",
+  explicitPreviewRequestIndex,
+)
+const omittedPrepareRequestIndex = panelToolsSource.indexOf(
+  ": { type: 'PANEL_LISTING_PREPARE', input }",
+  explicitPrepareRequestIndex,
+)
+assert.ok(
+  listingProductAssignmentIndex >= 0
+    && listingProductAssignmentIndex < explicitPreviewRequestIndex
+    && explicitPreviewRequestIndex < omittedPreviewRequestIndex
+    && omittedPreviewRequestIndex < explicitPrepareRequestIndex
+    && explicitPrepareRequestIndex < omittedPrepareRequestIndex,
+  'one modal-scoped selected product must feed both PREVIEW and PREPARE while detail mode may omit it',
+)
+assert.ok(
+  (panelToolsSource.match(/listingProduct = undefined/g) ?? []).length >= 3,
+  'generic open, close, and stop must clear stale selected-card product context',
+)
+const prepareRequestIndex = panelToolsSource.indexOf(
+  'requestPanelTool<PanelListingDraftResult>(prepareRequest)',
+  explicitPrepareRequestIndex,
+)
 const draftAssignmentIndex = panelToolsSource.indexOf('listingDraft = response.data', prepareRequestIndex)
 const draftRenderIndex = panelToolsSource.indexOf('renderListingDraft(response.data)', draftAssignmentIndex)
 assert.ok(

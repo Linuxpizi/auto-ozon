@@ -16,6 +16,7 @@ import {
 const LIST_CARD_SELECTOR = '.tile-root'
 const DETAIL_PRICE_SELECTOR = 'div[data-widget="webSale"]'
 const GENERATED_IFRAME_SELECTOR = 'iframe[data-ozonbox-analytics="true"], iframe[id^="ozon-analytics-"]'
+const CARD_OPERATION_SELECTOR = '[data-ozonbox-card-operation="true"]'
 const RECONCILE_DELAY_MS = 80
 const LIST_INSERT_DELAY_MS = 900
 
@@ -35,6 +36,12 @@ export interface OzonAnalyticsCardsController {
 export interface OzonAnalyticsCardsOptions {
   initialState?: OzonPanelState
   persistCardVisibility?: (visibility: OzonCardVisibility) => Promise<void>
+  onCardListing?: (context: OzonCardProductContext) => Promise<void>
+}
+
+export interface OzonCardProductContext {
+  sku: string
+  sourceUrl: string
 }
 
 const sellerIdCache = new SuccessfulRequestCache<'seller-id', string>()
@@ -128,9 +135,26 @@ function mutationsContainTarget(records: MutationRecord[], page: OzonAnalyticsPa
   )))
 }
 
-function cardSku(card: HTMLElement): string | undefined {
-  const href = card.querySelector<HTMLAnchorElement>('a')?.getAttribute('href')
-  return href ? extractOzonProductId(href, window.location.origin) : undefined
+/** Read one exact, canonical Ozon PDP identity from a list card. */
+export function cardProductContext(
+  card: ParentNode,
+  baseUrl = window.location.href,
+): OzonCardProductContext | undefined {
+  for (const anchor of card.querySelectorAll<HTMLAnchorElement>('a[href]')) {
+    const href = anchor.getAttribute('href')
+    if (!href) continue
+    try {
+      const url = new URL(href, baseUrl)
+      const sku = extractOzonProductId(url.href)
+      if (!sku || !isOzonProductUrl(url.href)) continue
+      url.search = ''
+      url.hash = ''
+      return { sku, sourceUrl: url.href }
+    } catch {
+      // Non-URL card actions are not product identities.
+    }
+  }
+  return undefined
 }
 
 /** Start one idempotent, mutation-driven Ozon analytics enhancement lifecycle. */
@@ -179,6 +203,7 @@ export function startOzonAnalyticsCards(options: OzonAnalyticsCardsOptions = {})
     }
     for (const card of document.querySelectorAll<HTMLElement>(LIST_CARD_SELECTOR)) {
       card.classList.remove('has-analytics', 'loading-analytics')
+      card.querySelector(CARD_OPERATION_SELECTOR)?.remove()
     }
   }
 
@@ -191,6 +216,45 @@ export function startOzonAnalyticsCards(options: OzonAnalyticsCardsOptions = {})
         card.classList.remove('has-analytics', 'loading-analytics')
       }
     }
+  }
+
+  const injectCardOperation = (card: HTMLElement, context: OzonCardProductContext): void => {
+    const existing = card.querySelector<HTMLElement>(CARD_OPERATION_SELECTOR)
+    if (existing?.dataset.sku === context.sku && existing.dataset.sourceUrl === context.sourceUrl) return
+    existing?.remove()
+
+    const operation = document.createElement('div')
+    operation.dataset.ozonboxCardOperation = 'true'
+    operation.dataset.sku = context.sku
+    operation.dataset.sourceUrl = context.sourceUrl
+    operation.style.cssText = 'display:flex;align-items:center;gap:8px;margin:8px 0;padding:8px;border:1px solid #e5e7eb;border-radius:8px;background:#fff;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"PingFang SC","Microsoft YaHei",sans-serif;'
+    const button = document.createElement('button')
+    button.type = 'button'
+    button.textContent = '一键上架'
+    button.style.cssText = 'min-height:30px;padding:4px 14px;border:1px solid #1677ff;border-radius:9999px;background:#1677ff;color:#fff;font:500 13px/20px inherit;cursor:pointer;'
+    const status = document.createElement('span')
+    status.setAttribute('role', 'status')
+    status.style.cssText = 'min-width:0;color:#cf1322;font-size:12px;line-height:18px;word-break:break-word;'
+    operation.append(button, status)
+    card.append(operation)
+
+    button.addEventListener('click', () => {
+      if (button.disabled) return
+      button.disabled = true
+      button.setAttribute('aria-busy', 'true')
+      button.textContent = '采集中...'
+      status.textContent = ''
+      void Promise.resolve(options.onCardListing?.(context))
+        .catch((error: unknown) => {
+          if (operation.isConnected) status.textContent = errorMessage(error)
+        })
+        .finally(() => {
+          if (!operation.isConnected) return
+          button.disabled = false
+          button.setAttribute('aria-busy', 'false')
+          button.textContent = '一键上架'
+        })
+    }, { signal: eventAbortController.signal })
   }
 
   const initializeIframe = (
@@ -220,13 +284,23 @@ export function startOzonAnalyticsCards(options: OzonAnalyticsCardsOptions = {})
     initializeIframe(iframe, sku, readOzonCategoryPath)
   }
 
-  const injectListAnalytics = (): void => {
+  const reconcileListCards = (analyticsVisible: boolean): void => {
     let insertionIndex = insertionTimers.size
     for (const card of document.querySelectorAll<HTMLElement>(LIST_CARD_SELECTOR)) {
-      const sku = cardSku(card)
-      if (!sku) continue
+      const context = cardProductContext(card)
+      if (!context) {
+        card.querySelector(CARD_OPERATION_SELECTOR)?.remove()
+        continue
+      }
+      const { sku } = context
+      injectCardOperation(card, context)
 
       const existing = card.querySelector<HTMLIFrameElement>(GENERATED_IFRAME_SELECTOR)
+      if (!analyticsVisible) {
+        existing?.remove()
+        card.classList.remove('has-analytics', 'loading-analytics')
+        continue
+      }
       if (existing?.dataset.sku === sku) {
         card.classList.add('has-analytics')
         card.classList.remove('loading-analytics')
@@ -241,11 +315,17 @@ export function startOzonAnalyticsCards(options: OzonAnalyticsCardsOptions = {})
       card.classList.add('loading-analytics')
       const timer = schedule(() => {
         insertionTimers.delete(card)
-        if (stopped || !card.isConnected || analyticsPageForUrl(window.location.href).kind !== 'list') {
+        if (
+          stopped
+          || cardVisibility.listCardsHidden
+          || !card.isConnected
+          || analyticsPageForUrl(window.location.href).kind !== 'list'
+        ) {
           card.classList.remove('loading-analytics')
           return
         }
-        if (cardSku(card) !== sku) {
+        const currentContext = cardProductContext(card)
+        if (currentContext?.sku !== sku || currentContext.sourceUrl !== context.sourceUrl) {
           card.classList.remove('loading-analytics')
           scheduleReconcile()
           return
@@ -272,7 +352,7 @@ export function startOzonAnalyticsCards(options: OzonAnalyticsCardsOptions = {})
     }
 
     if (page.kind === 'detail' && cardVisibility.detailCardsVisible) injectDetailAnalytics(page.sku)
-    else if (page.kind === 'list' && !cardVisibility.listCardsHidden) injectListAnalytics()
+    else if (page.kind === 'list') reconcileListCards(!cardVisibility.listCardsHidden)
   }
 
   function scheduleReconcile(): void {
@@ -285,7 +365,7 @@ export function startOzonAnalyticsCards(options: OzonAnalyticsCardsOptions = {})
 
   const observer = new MutationObserver((records) => {
     const page = analyticsPageForUrl(window.location.href)
-    const enabled = page.kind === 'detail' ? cardVisibility.detailCardsVisible : !cardVisibility.listCardsHidden
+    const enabled = page.kind === 'list' || (page.kind === 'detail' && cardVisibility.detailCardsVisible)
     if (enabled && mutationsContainTarget(records, page)) scheduleReconcile()
   })
 

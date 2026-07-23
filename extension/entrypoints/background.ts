@@ -2,11 +2,12 @@ import type { ScrapedProduct } from '@/lib/utils/types'
 import type {
   OzonboxCollectAndSaveRequest,
   OzonboxCollectAndSaveResponse,
+  OzonboxCollectCardProductRequest,
   OzonboxCollectedProduct,
   OzonboxRuntimeMessage,
   OzonboxSellerApiResponse,
 } from '@/lib/ozonbox/contract'
-import { isRecord } from '@/lib/ozonbox/contract'
+import { assertOzonboxCollectedProduct, isRecord } from '@/lib/ozonbox/contract'
 import { validatedErpBaseUrl } from '@/lib/ozonbox/erp-url'
 import type {
   PanelListingDraftInput,
@@ -40,7 +41,7 @@ import {
   OZON_SELLER_ORIGIN,
   requireOzonCompanyId,
 } from '@/lib/ozonbox/seller-session'
-import { isOzonProductUrl, isOzonUrl } from '@/lib/ozonbox/url'
+import { extractOzonProductId, isOzonProductUrl, isOzonUrl } from '@/lib/ozonbox/url'
 import { getAuthSession, getSettings, saveSettings } from '@/lib/utils/storage'
 import {
   syncProducts,
@@ -61,6 +62,7 @@ import {
 
 const OZON_CONTENT_SCRIPT = '/content-scripts/ozon.js'
 const SELLER_URL_PATTERN = 'https://seller.ozon.ru/*'
+const OZON_PRODUCT_TAB_TIMEOUT_MS = 20_000
 
 function isSellerUrl(value: string): boolean {
   try {
@@ -79,7 +81,7 @@ function collectedOzonProduct(response: unknown): OzonboxCollectedProduct {
   if (isRecord(response) && typeof response.error === 'string' && response.error.trim()) {
     throw new Error(response.error.trim())
   }
-  return response as OzonboxCollectedProduct
+  return assertOzonboxCollectedProduct(response)
 }
 
 function factualPricingContext(
@@ -106,6 +108,106 @@ function requirePositiveIntegerString(value: unknown, field: string): string {
     throw new Error(`${field} 必须是真实的正整数`)
   }
   return value.trim()
+}
+
+function requireExactCardProductUrl(value: unknown, sku: string): string {
+  if (typeof value !== 'string' || !value.trim()) throw new Error('商品卡片缺少真实的详情页地址')
+  const sourceUrl = new URL(value.trim())
+  if (sourceUrl.search || sourceUrl.hash || extractOzonProductId(sourceUrl.href) !== sku) {
+    throw new Error('商品卡片详情页地址与 SKU 不一致或不是规范 Ozon 商品地址')
+  }
+  return sourceUrl.href
+}
+
+function requireExactLoadedProductUrl(value: string | undefined, sku: string): string {
+  if (!value || !isOzonProductUrl(value) || extractOzonProductId(value) !== sku) {
+    throw new Error('临时标签页最终地址与所选商品 SKU 不一致')
+  }
+  return value
+}
+
+async function waitForExactOzonProductTab(tabId: number, sku: string): Promise<string> {
+  return new Promise((resolve, reject) => {
+    let settled = false
+    const finish = (error?: Error, url?: string) => {
+      if (settled) return
+      settled = true
+      clearTimeout(timeout)
+      browser.tabs.onUpdated.removeListener(onUpdated)
+      if (error) reject(error)
+      else resolve(url!)
+    }
+    const inspect = (tab: Browser.tabs.Tab) => {
+      if (tab.id !== tabId || tab.status !== 'complete') return
+      try {
+        finish(undefined, requireExactLoadedProductUrl(tab.url, sku))
+      } catch (error: unknown) {
+        finish(error instanceof Error ? error : new Error(errorMessage(error)))
+      }
+    }
+    const onUpdated = (updatedTabId: number, changeInfo: Browser.tabs.OnUpdatedInfo, tab: Browser.tabs.Tab) => {
+      if (updatedTabId === tabId && changeInfo.status === 'complete') inspect(tab)
+    }
+    const timeout = setTimeout(() => finish(new Error('等待所选商品详情页加载超时')), OZON_PRODUCT_TAB_TIMEOUT_MS)
+    browser.tabs.onUpdated.addListener(onUpdated)
+    browser.tabs.get(tabId).then(inspect).catch((error: unknown) => {
+      finish(new Error(`无法读取临时商品标签页：${errorMessage(error)}`))
+    })
+  })
+}
+
+function assertExactCollectedCardIdentity(product: OzonboxCollectedProduct, sku: string): OzonboxCollectedProduct {
+  if (extractOzonProductId(product.sourceUrl) !== sku) {
+    throw new Error('采集结果来源地址与所选商品 SKU 不一致')
+  }
+  const identities = new Set<string>()
+  const addIdentity = (value: unknown) => {
+    if (typeof value === 'string' && /^[1-9]\d*$/.test(value.trim())) identities.add(value.trim())
+  }
+  addIdentity(product.productId)
+  addIdentity(product.sku)
+  product.variantsData.forEach((variant) => {
+    addIdentity(variant.id)
+    addIdentity(variant.productId)
+    addIdentity(variant.sku)
+  })
+  if (!identities.has(sku)) throw new Error('采集结果不包含所选商品的真实 SKU 身份')
+  return product
+}
+
+async function collectExactCardProduct(request: OzonboxCollectCardProductRequest): Promise<OzonboxCollectedProduct> {
+  const sku = requirePositiveIntegerString(request.sku, 'sku')
+  const sourceUrl = requireExactCardProductUrl(request.sourceUrl, sku)
+  if (!(await isAuthenticated())) throw new Error(authRequired().error)
+
+  let temporaryTabId: number | undefined
+  try {
+    const temporaryTab = await browser.tabs.create({ url: sourceUrl, active: false })
+    temporaryTabId = temporaryTab.id
+    if (!temporaryTabId) throw new Error('无法创建所选商品的临时标签页')
+    await waitForExactOzonProductTab(temporaryTabId, sku)
+    const product = await collectOzonProductInTab(temporaryTabId)
+    const finalTab = await browser.tabs.get(temporaryTabId)
+    requireExactLoadedProductUrl(finalTab.url, sku)
+    return assertExactCollectedCardIdentity(product, sku)
+  } finally {
+    if (temporaryTabId) {
+      try {
+        await browser.tabs.remove(temporaryTabId)
+      } catch {
+        // The user/browser may already have removed the temporary tab.
+      }
+    }
+  }
+}
+
+function listingProductForRequest(
+  product: OzonboxCollectedProduct | undefined,
+  tabId?: number,
+  options?: OzonCollectionOptions,
+): Promise<OzonboxCollectedProduct> {
+  if (product !== undefined) return Promise.resolve(assertOzonboxCollectedProduct(product))
+  return collectOzonProductInTab(tabId, options)
 }
 
 /** 更新 badge 显示后端未匹配数量 */
@@ -200,7 +302,7 @@ async function dispatchPanelTool(
       case 'PANEL_LISTING_PREVIEW': return {
         success: true,
         mode,
-        data: buildMockListingPreview(await collectOzonProductInTab(tabId, {
+        data: buildMockListingPreview(await listingProductForRequest(request.product, tabId, {
           requireAuthentication: false,
           enrichFromSeller: false,
         })),
@@ -218,11 +320,11 @@ async function dispatchPanelTool(
     case 'PANEL_SELECTION_TOGGLE': return { success: true, mode, data: await togglePanelSelectionRule(request.id, request.enabled) }
     case 'PANEL_SELECTION_DELETE': return { success: true, mode, data: await deletePanelSelectionRule(request.id) }
     case 'PANEL_LISTING_PREVIEW': {
-      const [product, stores] = await Promise.all([collectOzonProductInTab(tabId), listOzonboxStores()])
+      const [product, stores] = await Promise.all([listingProductForRequest(request.product, tabId), listOzonboxStores()])
       return { success: true, mode, data: buildPanelListingPreview(product, toPanelListingStores(stores), []) }
     }
     case 'PANEL_LISTING_PREPARE': {
-      const product = await collectOzonProductInTab(tabId)
+      const product = await listingProductForRequest(request.product, tabId)
       return { success: true, mode, data: await preparePanelListingDraft(realListingProduct(product, request.input), request.input) }
     }
     case 'PANEL_LISTING_SUBMIT': return { success: true, mode, data: await submitPanelListingDraft(request.draftId) }
@@ -247,6 +349,16 @@ export default defineBackground(() => {
 
     if ((message as Partial<OzonboxRuntimeMessage>).type === 'COLLECT_PRODUCT') {
       collectOzonProductInTab((message as { tabId?: number }).tabId ?? sender.tab?.id).then((product) => {
+        sendResponse({ success: true, data: product })
+      }).catch((error: unknown) => {
+        sendResponse({ success: false, error: errorMessage(error) })
+      })
+      return true
+    }
+
+    if ((message as Partial<OzonboxRuntimeMessage>).type === 'OZONBOX_COLLECT_CARD_PRODUCT') {
+      const request = message as OzonboxCollectCardProductRequest
+      collectExactCardProduct(request).then((product) => {
         sendResponse({ success: true, data: product })
       }).catch((error: unknown) => {
         sendResponse({ success: false, error: errorMessage(error) })

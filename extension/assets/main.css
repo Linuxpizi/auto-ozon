@@ -8,8 +8,8 @@
 }
 
 *, *::before, *::after { box-sizing: border-box; }
-html, body, #app { margin: 0; width: 420px; min-width: 420px; min-height: 600px; }
-body { overflow-x: hidden; background: #f4f5fa; color: #202236; }
+html, body, #app { margin: 0; width: 320px; min-width: 320px; min-height: 0; }
+body { overflow-x: hidden; background: #fff; color: #262626; }
 button, input, select, textarea { font: inherit; }
 button { -webkit-tap-highlight-color: transparent; }
 ::-webkit-scrollbar { width: 6px; }

@@ -1,7 +1,12 @@
 import { analyticsPageForUrl } from './analytics-card'
-import type { OzonboxCollectAndSaveResult } from './contract'
+import type {
+  OzonboxCollectAndSaveResult,
+  OzonboxSellerCookie,
+  OzonboxSellerCookiesResponse,
+} from './contract'
 import { isRecord } from './contract'
 import { createFloatingPanelTools } from './floating-panel-tools'
+import { requirePanelToolData, type PanelToolRequest } from './panel-tools-contract'
 import {
   clampOzonPanelPosition,
   DEFAULT_OZON_PANEL_STATE,
@@ -15,10 +20,14 @@ import {
   OZON_COMPANY_ID_COOKIE_MISSING_MESSAGE,
   OZON_SELLER_DASHBOARD_URL,
 } from './seller-session'
+import { getAuthSession } from '../utils/storage'
 
 export const OZON_FLOATING_PANEL_HOST_ID = 'jingzhi-ai-ozon-floating-panel'
 export const OZON_SELLER_RECHECK_DELAY_MS = 5_000
+export const OZON_AUTH_POLL_INTERVAL_MS = 2_000
+export const OZON_AUTH_POLL_TIMEOUT_MS = 30_000
 export const OZON_PANEL_DRAG_THRESHOLD_PX = 5
+export const OZON_PANEL_DRAG_RELEASE_DELAY_MS = 100
 
 export interface OzonFloatingPanelController {
   reconcile: () => void
@@ -50,7 +59,8 @@ interface DialogOptions {
 interface DragStart {
   clientX: number
   clientY: number
-  position: OzonPanelPosition
+  offsetX: number
+  offsetY: number
 }
 
 let activeController: OzonFloatingPanelController | undefined
@@ -95,86 +105,111 @@ export function parseCollectAndSaveResult(value: unknown): OzonboxCollectAndSave
   }
 }
 
+export function parseSellerCookiesResponse(value: unknown): OzonboxSellerCookie[] {
+  if (isRecord(value) && typeof value.error === 'string' && value.error.trim()) {
+    throw new Error(value.error.trim())
+  }
+  if (!isRecord(value) || !Array.isArray(value.cookies) || !value.cookies.every(isRecord)) {
+    throw new Error('Cookie 服务返回了无效响应')
+  }
+  return (value as unknown as OzonboxSellerCookiesResponse).cookies
+}
+
 export function buildOzonFloatingPanelShadow(logoUrl: string): string {
   return `<style>
     :host{all:initial}
     *,*::before,*::after{box-sizing:border-box}
     [hidden]{display:none!important}
     button{font:inherit}
-    .panel,.launcher,.modal-backdrop{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"PingFang SC","Microsoft YaHei",sans-serif}
-    .panel{position:fixed;right:20px;bottom:20px;width:144px;padding:0 0 8px;background:#fff;border:1px solid #f3f4f6;border-radius:12px;box-shadow:0 0 16px 4px rgba(238,19,27,.2);color:#20242c;pointer-events:auto;transition:all 300ms ease}
-    .header{display:flex;align-items:center;justify-content:space-between;padding:8px 12px 0}
-    .brand{display:flex;align-items:center;min-width:0;flex-wrap:nowrap}
-    .brand-logo{display:block;width:20px;height:20px;margin-right:8px;flex:0 0 auto;border-radius:4px;object-fit:contain}
-    .brand-name{overflow:hidden;color:#24262c;font-size:14px;font-weight:600;line-height:20px;white-space:nowrap;text-overflow:ellipsis}
-    .collapse{display:flex;align-items:center;justify-content:center;width:14px;height:14px;padding:0;flex:0 0 auto;border:0;border-radius:999px;background:#eab308;color:#fef08a;font-size:12px;font-weight:800;line-height:14px;cursor:pointer}
-    .collapse:hover{background:#ca8a04}
-    .actions{display:flex;flex-direction:column;align-items:stretch;justify-content:center;gap:8px;padding:8px 20px 0}
-    .action{min-height:28px;padding:4px 7px;border-radius:999px;font-size:12px;font-weight:600;line-height:18px;text-align:center;white-space:nowrap;cursor:pointer}
-    .action.link{border:1px solid transparent;background:transparent;color:#1677ff}
-    .action.link:hover{background:#f0f6ff}
-    .action.danger{border:1px solid #ee131b;background:#ee131b;color:#fff;box-shadow:0 3px 8px rgba(238,19,27,.22)}
-    .action.danger:hover{border-color:#c91017;background:#c91017}
-    .action.primary{border:1px solid #1677ff;background:#1677ff;color:#fff;box-shadow:0 3px 8px rgba(22,119,255,.22)}
-    .action.primary:hover{border-color:#0958d9;background:#0958d9}
-    .action.amber{border:1px solid #f59e0b;background:#f59e0b;color:#fff;box-shadow:0 3px 8px rgba(245,158,11,.2)}
-    .action.amber:hover{border-color:#d97706;background:#d97706}
-    .action.default{border:1px solid #d1d5db;background:#fff;color:#374151}
-    .action.default:hover{background:#f9fafb}
-    .action.entry{border:1px solid transparent;background:transparent;color:#ee131b}
-    .action.entry:hover{background:#fff1f2}
-    .action:disabled{cursor:not-allowed;opacity:.58;box-shadow:none}
-    .switch-row{display:flex;align-items:center;justify-content:space-between;gap:6px;min-height:24px;color:#4b5563;font-size:12px;line-height:18px;white-space:nowrap}
-    .switch{position:relative;width:28px;height:16px;padding:0;flex:0 0 auto;border:0;border-radius:999px;background:#d1d5db;cursor:pointer;transition:background-color 160ms ease}
-    .switch::after{position:absolute;top:2px;left:2px;width:12px;height:12px;border-radius:50%;background:#fff;box-shadow:0 1px 3px rgba(0,0,0,.22);content:"";transition:transform 160ms ease}
-    .switch[aria-checked="true"]{background:#1677ff}
-    .switch[aria-checked="true"]::after{transform:translateX(12px)}
-    .switch:disabled{cursor:not-allowed;opacity:.58}
-    .status{display:flex;align-items:flex-start;gap:6px;margin:8px 20px 0;color:#6b7280;font-size:10px;line-height:1.4;word-break:break-word}
-    .status-dot{width:6px;height:6px;margin-top:4px;flex:0 0 auto;border-radius:50%;background:#f59e0b;box-shadow:0 0 0 2px rgba(245,158,11,.12)}
-    .status.connected .status-dot{background:#16a34a;box-shadow:0 0 0 2px rgba(22,163,74,.12)}
-    .action:focus-visible,.collapse:focus-visible,.launcher:focus-visible,.switch:focus-visible,.modal-button:focus-visible{outline:3px solid rgba(22,119,255,.28);outline-offset:2px}
-    .launcher{position:fixed;width:64px;height:64px;padding:12px;border:0;border-radius:50%;background:#fff;box-shadow:0 0 16px 4px rgba(238,19,27,.6);pointer-events:auto;cursor:move;transition:all 300ms ease;touch-action:none}
-    .launcher img{display:block;width:40px;height:40px;border-radius:8px;object-fit:contain;pointer-events:none;user-select:none}
-    .modal-backdrop{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;padding:24px;background:rgba(15,23,42,.38);pointer-events:auto}
-    .modal{width:min(420px,calc(100vw - 48px));padding:22px;background:#fff;border-radius:14px;box-shadow:0 20px 60px rgba(15,23,42,.28);color:#20242c}
-    .modal-title{margin:0;color:#1f2937;font-size:18px;font-weight:700;line-height:1.4}
-    .modal-content{margin:11px 0 0;color:#5f6672;font-size:14px;line-height:1.65;white-space:pre-line}
-    .modal-actions{display:flex;justify-content:flex-end;gap:10px;margin-top:20px}
-    .modal-button{min-height:34px;padding:6px 15px;border-radius:8px;font-size:13px;font-weight:600;cursor:pointer}
-    .modal-button.cancel{border:1px solid #d9d9d9;background:#fff;color:#3f4650}
-    .modal-button.confirm{border:1px solid #1677ff;background:#1677ff;color:#fff}
-    .modal-button:disabled{cursor:not-allowed;opacity:.58}
-    @media (max-width:480px){.modal-backdrop{padding:16px}.modal{width:calc(100vw - 32px)}}
+    .sidebar,.launcher,.ant-modal-root,.ant-tooltip{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"PingFang SC","Microsoft YaHei",sans-serif}
+    .sidebar{position:fixed;right:20px;bottom:20px;z-index:2147483647;display:flex;width:144px;flex-direction:column;align-items:stretch;padding-bottom:8px;border-radius:12px;background:#fff;box-shadow:0 0 0 1px oklch(96.7% .003 264.542),0 0 16px 4px rgba(238,19,27,.2);color:#000000e0;pointer-events:auto;transition:all .3s}
+    .sidebar-header{display:flex;align-items:center;justify-content:space-between;padding:8px 12px 0}
+    .sidebar-brand{display:flex;align-items:center;flex-wrap:nowrap}
+    .brand-logo{display:block;width:20px;height:20px;margin-right:8px;object-fit:contain}
+    .brand-name{font-size:14px;line-height:20px;white-space:nowrap}
+    .collapse{display:flex;align-items:center;justify-content:center;width:14px;height:14px;padding:0;border:1px solid #eab308;border-radius:9999px;background:#eab308;color:#facc15;cursor:pointer;box-shadow:0 1px 2px 0 #0000000d;transition-property:color,background-color,border-color,outline-color,text-decoration-color,fill,stroke,--tw-gradient-from,--tw-gradient-via,--tw-gradient-to;transition-timing-function:cubic-bezier(.4,0,.2,1);transition-duration:.15s}
+    .collapse:hover{background:#facc15}
+    .collapse-icon{display:inline-flex;font-size:7px;line-height:0}
+    .collapse-icon svg{display:inline-block;width:1em;height:1em;fill:currentColor}
+    .authenticated-actions{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px;padding:8px 20px 0}
+    .ant-btn{outline:none;position:relative;display:inline-block;font-weight:400;white-space:nowrap;text-align:center;background-image:none;background-color:transparent;border:1px solid transparent;cursor:pointer;transition:all .2s cubic-bezier(.645,.045,.355,1);user-select:none;touch-action:manipulation;line-height:1.5714285714285714;color:#000000e0;font-size:14px;height:32px;padding:4px 15px;border-radius:6px}
+    .ant-btn.ant-btn-round{border-radius:32px;padding-inline-start:16px;padding-inline-end:16px}
+    .ant-btn.ant-btn-block{width:100%}
+    .ant-btn-default{background:#fff;border-color:#d9d9d9;box-shadow:0 2px #00000005}
+    .ant-btn-default:not(:disabled):hover{color:#4096ff;border-color:#4096ff}
+    .ant-btn-primary{color:#fff;background:#1677ff;box-shadow:0 2px #0591ff1a}
+    .ant-btn-primary:not(:disabled):hover{color:#fff;background:#4096ff}
+    .ant-btn-primary:not(:disabled):active{color:#fff;background:#0958d9}
+    .ant-btn-primary.ant-btn-dangerous{background:#ff4d4f;box-shadow:0 2px #ff4d4f17}
+    .ant-btn-primary.ant-btn-dangerous:not(:disabled):hover{background:#ff7875}
+    .ant-btn-primary.ant-btn-dangerous:not(:disabled):active{background:#d9363e}
+    .ant-btn-link{color:#1677ff;background:transparent;box-shadow:none}
+    .ant-btn-link:not(:disabled):hover{color:#69b1ff}
+    .ant-btn-link:not(:disabled):active{color:#0958d9}
+    .ant-btn-sm{height:24px;padding:0 7px;border-radius:4px;font-size:14px}
+    .ant-btn-amber{color:#fff!important;background:#f59e0b!important;border-color:#f59e0b!important;box-shadow:none!important}
+    .ant-btn-amber:not(:disabled):hover{color:#fff!important;background:#fbbf24!important;border-color:#fbbf24!important}
+    .ant-btn-amber:not(:disabled):active{background:#d97706!important;border-color:#d97706!important}
+    .ant-btn:disabled{cursor:not-allowed;color:#00000040;border-color:#d9d9d9;background:#0000000a;box-shadow:none}
+    .switch-control{display:flex;align-items:center;justify-content:center}
+    .ant-switch{position:relative;display:inline-block;box-sizing:border-box;min-width:44px;height:22px;padding:0;overflow:hidden;color:#fff;font-size:14px;line-height:22px;vertical-align:middle;background:#00000040;border:0;border-radius:100px;cursor:pointer;transition:all .2s}
+    .ant-switch-handle{position:absolute;top:2px;inset-inline-start:2px;width:18px;height:18px;transition:all .2s ease-in-out}
+    .ant-switch-handle::before{position:absolute;inset:0;background:#fff;border-radius:9px;box-shadow:0 2px 4px #00230b33;content:""}
+    .ant-switch-inner{display:block;overflow:hidden;border-radius:100px;height:100%;padding-inline-start:24px;padding-inline-end:9px;transition:padding-inline-start .2s ease-in-out,padding-inline-end .2s ease-in-out}
+    .ant-switch-inner-checked,.ant-switch-inner-unchecked{display:block;color:#fff;font-size:12px;transition:margin-inline-start .2s ease-in-out,margin-inline-end .2s ease-in-out}
+    .ant-switch[aria-checked="true"]{background:#1677ff}
+    .ant-switch[aria-checked="true"] .ant-switch-handle{inset-inline-start:calc(100% - 20px)}
+    .ant-switch[aria-checked="true"] .ant-switch-inner{padding-inline-start:9px;padding-inline-end:24px}
+    .ant-switch:disabled{cursor:not-allowed;opacity:.65}
+    .login-actions{padding:20px}
+    .login-help{position:relative;margin-top:8px}
+    .ant-tooltip{position:absolute;right:calc(100% + 8px);top:50%;z-index:999999;width:max-content;max-width:250px;padding:6px 8px;border-radius:6px;background:#000000d9;color:#fff;font-size:14px;line-height:1.5714285714285714;opacity:0;pointer-events:none;transform:translateY(-50%);transition:opacity .2s}
+    .login-help:hover .ant-tooltip,.login-help:focus-within .ant-tooltip{opacity:1}
+    .launcher{position:fixed;z-index:9999;width:64px;height:64px;padding:12px;border:0;border-radius:9999px;background:#fff;box-shadow:0 0 16px 4px rgba(238,19,27,.6);pointer-events:auto;cursor:move;transition:all .3s;touch-action:none}
+    .launcher img{display:block;width:40px;height:40px;object-fit:contain;pointer-events:none;user-select:none}
+    .ant-modal-root{position:fixed;inset:0;z-index:2147483647;pointer-events:auto}
+    .ant-modal-mask{position:absolute;inset:0;background:#00000073}
+    .ant-modal-wrap{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;overflow:auto;outline:0}
+    .ant-modal{position:relative;width:416px;max-width:calc(100vw - 32px);padding-bottom:0;color:#000000e0;font-size:14px;line-height:1.5714285714285714}
+    .ant-modal-content{position:relative;padding:20px 24px;border-radius:8px;background:#fff;box-shadow:0 6px 16px 0 #00000014,0 3px 6px -4px #0000001f,0 9px 28px 8px #0000000d}
+    .ant-modal-confirm-title{display:block;overflow:hidden;color:#000000e0;font-size:16px;line-height:1.5}
+    .ant-modal-confirm-content{margin-top:8px;color:#000000e0;font-size:14px;line-height:1.5714285714285714;white-space:pre-line}
+    .ant-modal-confirm-btns{display:flex;flex-direction:row-reverse;gap:8px;margin-top:24px}
   </style>
-  <section class="panel" id="ozon-floating-panel" aria-label="鲸智 AI Ozon 工具">
-    <header class="header">
-      <div class="brand"><img class="brand-logo" src="${logoUrl}" width="20" height="20" alt=""><span class="brand-name">鲸智 AI</span></div>
-      <button class="collapse" id="ozon-panel-collapse" type="button" aria-label="收起鲸智 AI 浮窗">−</button>
+  <section class="sidebar fixed bottom-5 right-5 bg-white rounded-xl z-[2147483647] flex flex-col items-stretch shadow-[0_0_16px_4px_rgba(238,19,27,0.2)] ring ring-gray-100 w-36 transition-all duration-300 pb-2" id="ozon-floating-panel" aria-label="鲸智 AI Ozon 工具">
+    <header class="sidebar-header flex items-center justify-between px-3 pt-2">
+      <div class="sidebar-brand flex items-center flex-nowrap"><img class="brand-logo w-5 h-5 mr-2" src="${logoUrl}" width="20" height="20" alt=""><span class="brand-name text-sm">鲸智 AI</span></div>
+      <button class="collapse" id="ozon-panel-collapse" type="button" aria-label="收起鲸智 AI 浮窗"><span class="collapse-icon" aria-hidden="true"><svg viewBox="64 64 896 896" focusable="false"><path fill="currentColor" d="M872 474H152c-4.4 0-8 3.6-8 8v60c0 4.4 3.6 8 8 8h720c4.4 0 8-3.6 8-8v-60c0-4.4-3.6-8-8-8z"></path></svg></span></button>
     </header>
-    <div class="actions" id="ozon-panel-actions">
-      <button class="action link" id="ozon-open-seller" type="button">打开OZON后台</button>
-      <button class="action danger" id="ozon-one-click-listing" type="button" data-page="detail">一键上架</button>
-      <button class="action primary" id="ozon-profit-calculator" type="button">计算利润</button>
-      <button class="action amber" id="ozon-pricing-tool" type="button">定价工具</button>
-      <button class="action primary" id="ozon-bind-cookie" type="button" aria-busy="false">绑定Cookie</button>
-      <button class="action default" id="ozon-selection-settings" type="button">设置选品</button>
-      <div class="switch-row" id="ozon-list-card-control" data-page="list"><span>隐藏卡片</span><button class="switch" id="ozon-list-card-switch" type="button" role="switch" aria-label="隐藏列表分析卡片" aria-checked="false"></button></div>
-      <div class="switch-row" id="ozon-detail-card-control" data-page="detail"><span>其它卡片</span><button class="switch" id="ozon-detail-card-switch" type="button" role="switch" aria-label="显示商品详情分析卡片" aria-checked="true"></button></div>
-      <button class="action entry" id="ozon-enter-erp" type="button">进入ERP</button>
+    <div class="authenticated-actions px-5 pt-2 flex flex-col items-center justify-center gap-2" id="ozon-panel-actions" hidden>
+      <button class="ant-btn ant-btn-link ant-btn-block ant-btn-round" id="ozon-open-seller" type="button">打开OZON后台</button>
+      <button class="ant-btn ant-btn-primary ant-btn-dangerous ant-btn-block ant-btn-round" id="ozon-one-click-listing" type="button" data-page="detail">一键上架</button>
+      <button class="ant-btn ant-btn-primary ant-btn-block ant-btn-round" id="ozon-profit-calculator" type="button">计算利润</button>
+      <button class="ant-btn ant-btn-default ant-btn-amber ant-btn-block ant-btn-round" id="ozon-pricing-tool" type="button">定价工具</button>
+      <button class="ant-btn ant-btn-primary ant-btn-block ant-btn-round" id="ozon-bind-cookie" type="button" aria-busy="false">绑定Cookie</button>
+      <button class="ant-btn ant-btn-default ant-btn-block ant-btn-round" id="ozon-selection-settings" type="button">设置选品</button>
+      <div class="switch-control" id="ozon-list-card-control" data-page="list"><button class="ant-switch" id="ozon-list-card-switch" type="button" role="switch" aria-label="隐藏列表分析卡片" aria-checked="false"><span class="ant-switch-handle"></span><span class="ant-switch-inner"><span class="ant-switch-inner-checked">隐藏卡片</span></span></button></div>
+      <div class="switch-control" id="ozon-detail-card-control" data-page="detail"><button class="ant-switch" id="ozon-detail-card-switch" type="button" role="switch" aria-label="显示商品详情分析卡片" aria-checked="true"><span class="ant-switch-handle"></span><span class="ant-switch-inner"><span class="ant-switch-inner-checked">其它卡片</span></span></button></div>
+      <button class="ant-btn ant-btn-link ant-btn-sm" id="ozon-enter-erp" type="button">进入ERP</button>
     </div>
-    <div class="status" id="ozon-seller-status" role="status" aria-live="polite"><span class="status-dot" aria-hidden="true"></span><span id="ozon-seller-status-text">正在检测 Ozon Seller...</span></div>
+    <div class="login-actions p-5" id="ozon-panel-login-actions" hidden>
+      <button class="ant-btn ant-btn-primary ant-btn-block ant-btn-round" id="ozon-panel-login" type="button">请登录</button>
+      <div class="login-help"><button class="ant-btn ant-btn-link ant-btn-block ant-btn-round" id="ozon-panel-login-help" type="button" aria-describedby="ozon-panel-login-tooltip">登录有问题？</button><div class="ant-tooltip" id="ozon-panel-login-tooltip" role="tooltip">1.关闭浏览器重新打开<br>2.卸载插件重新安装<br>3.仍然无法登录请联系客服</div></div>
+    </div>
   </section>
-  <button class="launcher" id="ozon-panel-launcher" type="button" aria-label="展开鲸智 AI 浮窗" hidden><img src="${logoUrl}" width="40" draggable="false" alt="鲸智 AI" style="pointer-events:none;user-select:none"></button>
-  <div class="modal-backdrop" id="ozon-tool-dialog-backdrop" hidden>
-    <section class="modal" id="ozon-tool-dialog" role="dialog" aria-modal="true" aria-labelledby="ozon-tool-dialog-title" aria-describedby="ozon-tool-dialog-content">
-      <h2 class="modal-title" id="ozon-tool-dialog-title"></h2>
-      <p class="modal-content" id="ozon-tool-dialog-content"></p>
-      <div class="modal-actions">
-        <button class="modal-button cancel" id="ozon-tool-dialog-cancel" type="button">取消</button>
-        <button class="modal-button confirm" id="ozon-tool-dialog-confirm" type="button" aria-busy="false">确定</button>
-      </div>
-    </section>
+  <button class="launcher fixed bg-white rounded-full shadow-[0_0_16px_4px_rgba(238,19,27,0.6)] z-[9999] p-3 flex items-center justify-center transition-all duration-300 cursor-move" id="ozon-panel-launcher" type="button" aria-label="展开鲸智 AI 浮窗" hidden><img src="${logoUrl}" width="40px" draggable="false" alt="鲸智 AI" style="pointer-events:none;user-select:none"></button>
+  <div class="ant-modal-root" id="ozon-tool-dialog-backdrop" hidden>
+    <div class="ant-modal-mask"></div>
+    <div class="ant-modal-wrap" role="dialog" aria-modal="true" aria-labelledby="ozon-tool-dialog-title" aria-describedby="ozon-tool-dialog-content">
+      <div class="ant-modal"><div class="ant-modal-content"><div class="ant-modal-confirm-body-wrapper">
+        <div class="ant-modal-confirm-title" id="ozon-tool-dialog-title"></div>
+        <div class="ant-modal-confirm-content" id="ozon-tool-dialog-content"></div>
+        <div class="ant-modal-confirm-btns">
+          <button class="ant-btn ant-btn-primary" id="ozon-tool-dialog-confirm" type="button" aria-busy="false">确定</button>
+          <button class="ant-btn ant-btn-default" id="ozon-tool-dialog-cancel" type="button">取消</button>
+        </div>
+      </div></div></div>
+    </div>
   </div>`
 }
 
@@ -199,8 +234,9 @@ export function startOzonFloatingPanel(options: OzonFloatingPanelOptions = {}): 
   const panel = requiredElement<HTMLElement>(shadow, 'ozon-floating-panel')
   const launcher = requiredElement<HTMLButtonElement>(shadow, 'ozon-panel-launcher')
   const collapseButton = requiredElement<HTMLButtonElement>(shadow, 'ozon-panel-collapse')
-  const status = requiredElement<HTMLElement>(shadow, 'ozon-seller-status')
-  const statusText = requiredElement<HTMLElement>(shadow, 'ozon-seller-status-text')
+  const actions = requiredElement<HTMLElement>(shadow, 'ozon-panel-actions')
+  const loginActions = requiredElement<HTMLElement>(shadow, 'ozon-panel-login-actions')
+  const loginButton = requiredElement<HTMLButtonElement>(shadow, 'ozon-panel-login')
   const openSellerButton = requiredElement<HTMLButtonElement>(shadow, 'ozon-open-seller')
   const listingButton = requiredElement<HTMLButtonElement>(shadow, 'ozon-one-click-listing')
   const profitButton = requiredElement<HTMLButtonElement>(shadow, 'ozon-profit-calculator')
@@ -230,36 +266,67 @@ export function startOzonFloatingPanel(options: OzonFloatingPanelOptions = {}): 
     detailCardsVisible: initialState.detailCardsVisible,
   }
   let stopped = false
-  let requestSequence = 0
+  let sellerRequestSequence = 0
+  let cookieRequestSequence = 0
+  let authSequence = 0
   let dialogSequence = 0
   let sellerRecheckTimer: number | undefined
+  let authPollTimer: number | undefined
+  let authPollStartedAt: number | undefined
+  let dragReleaseTimer: number | undefined
   let dialogReturnFocus: HTMLElement | null = null
   let dialogConfirmAction: (() => void | Promise<void>) | undefined
   let dialogBusy = false
   let dragStart: DragStart | undefined
   let dragging = false
   let suppressLauncherClick = false
+  let expanded = true
+  let pageSupported = true
 
-  const setExpanded = (expanded: boolean): void => {
-    panel.hidden = !expanded
-    launcher.hidden = expanded
-    if (expanded) collapseButton.focus()
+  const syncPanelVisibility = (): void => {
+    panel.hidden = !pageSupported || !expanded
+    launcher.hidden = !pageSupported || expanded
+  }
+
+  const setExpanded = (nextExpanded: boolean): void => {
+    expanded = nextExpanded
+    syncPanelVisibility()
+    if (nextExpanded && pageSupported) collapseButton.focus()
   }
 
   const setConnected = (connected: boolean): void => {
-    status.classList.toggle('connected', connected)
     openSellerButton.hidden = connected
   }
 
-  const setStatus = (text: string): void => {
-    statusText.textContent = text
+  // The reference sidebar has no status region. Existing tool adapters still
+  // accept this callback, so keep it deliberately non-visual.
+  const setStatus = (_text: string): void => undefined
+
+  const syncAuthentication = async (showLoading = true): Promise<boolean> => {
+    const sequence = ++authSequence
+    if (showLoading) {
+      actions.hidden = true
+      loginActions.hidden = true
+    }
+    try {
+      const session = await getAuthSession()
+      if (stopped || sequence !== authSequence) return false
+      const authenticated = Boolean(session?.access_token)
+      actions.hidden = !authenticated
+      loginActions.hidden = authenticated
+      return authenticated
+    } catch (error: unknown) {
+      if (!stopped && sequence === authSequence) {
+        console.error('登录状态读取失败:', error)
+      }
+      return false
+    }
   }
 
   const panelTools = createFloatingPanelTools({ shadow, signal, setStatus })
 
   const setBinding = (busy: boolean): void => {
     bindCookieButton.disabled = busy
-    bindCookieButton.textContent = busy ? '绑定中...' : '绑定Cookie'
     bindCookieButton.setAttribute('aria-busy', String(busy))
   }
 
@@ -298,48 +365,100 @@ export function startOzonFloatingPanel(options: OzonFloatingPanelOptions = {}): 
   const showCookieFailure = (): void => {
     showDialog({
       title: '获取Cookie失败',
-      content: '请登录 Ozon Seller 后，再点击“绑定Cookie”。当前扩展只读取 sc_company_id，不会上传或持久化原始 Cookie。',
+      content: '请登录ozon后台后,再点击获取Cookie,请至少一个店铺有有效Cookie,否则无法上架产品和查看销量关键信息',
       cancelText: '取消',
       confirmText: '立即前往Ozon Seller',
       onConfirm: () => openSeller(),
     })
   }
 
-  const checkSeller = async (explicitCookieBinding: boolean, successMessage: string): Promise<void> => {
-    const sequence = ++requestSequence
-    if (explicitCookieBinding) {
-      closeDialog(false)
-      setBinding(true)
-      setStatus('正在绑定 Cookie...')
-    } else {
-      setStatus('正在检测 Ozon Seller...')
-    }
+  const showFailure = (title: string, error: unknown): void => {
+    showDialog({
+      title,
+      content: errorMessage(error),
+      confirmText: '确定',
+    })
+  }
 
+  const openErpRoot = async (): Promise<void> => {
+    const request: PanelToolRequest = { type: 'PANEL_ERP_OPEN', route: '/' }
+    requirePanelToolData(await browser.runtime.sendMessage(request))
+  }
+
+  const stopAuthPolling = (): void => {
+    if (authPollTimer !== undefined) window.clearTimeout(authPollTimer)
+    authPollTimer = undefined
+    authPollStartedAt = undefined
+  }
+
+  const scheduleAuthPoll = (): void => {
+    if (stopped || authPollStartedAt === undefined) return
+    if (Date.now() - authPollStartedAt >= OZON_AUTH_POLL_TIMEOUT_MS) {
+      stopAuthPolling()
+      return
+    }
+    if (authPollTimer !== undefined) window.clearTimeout(authPollTimer)
+    authPollTimer = window.setTimeout(() => {
+      authPollTimer = undefined
+      void syncAuthentication(false).then((authenticated) => {
+        if (authenticated) stopAuthPolling()
+        else scheduleAuthPoll()
+      })
+    }, OZON_AUTH_POLL_INTERVAL_MS)
+  }
+
+  const startAuthPolling = (): void => {
+    stopAuthPolling()
+    authPollStartedAt = Date.now()
+    scheduleAuthPoll()
+  }
+
+  const checkSeller = async (): Promise<void> => {
+    const sequence = ++sellerRequestSequence
     try {
       await readOzonSellerId()
-      if (stopped || sequence !== requestSequence) return
+      if (stopped || sequence !== sellerRequestSequence) return
       setConnected(true)
-      setStatus(successMessage)
-      closeDialog(false)
     } catch (error: unknown) {
-      if (stopped || sequence !== requestSequence) return
-      const state = sellerInteractionErrorState(error, explicitCookieBinding)
+      if (stopped || sequence !== sellerRequestSequence) return
       setConnected(false)
-      setStatus(state.message)
-      if (state.showCookieFailure) showCookieFailure()
+      console.error('检查seller tab失败:', error)
+    }
+  }
+
+  const bindSellerCookies = async (): Promise<void> => {
+    const sequence = ++cookieRequestSequence
+    closeDialog(false)
+    setBinding(true)
+    try {
+      const cookies = parseSellerCookiesResponse(await browser.runtime.sendMessage({
+        type: 'OZONBOX_GET_SELLER_COOKIES',
+      }))
+      if (stopped || sequence !== cookieRequestSequence) return
+      if (cookies.length === 0) {
+        showCookieFailure()
+        return
+      }
+      showDialog({
+        title: '绑定Cookie失败',
+        content: `已获取 ${cookies.length} 个 Ozon Seller Cookie，但当前项目未提供 Cookie 绑定接口，未执行绑定。`,
+        confirmText: '确定',
+      })
+    } catch (error: unknown) {
+      if (stopped || sequence !== cookieRequestSequence) return
+      showFailure('获取Cookie失败', error)
     } finally {
-      if (!stopped && sequence === requestSequence && explicitCookieBinding) setBinding(false)
+      if (!stopped && sequence === cookieRequestSequence) setBinding(false)
     }
   }
 
   const openSeller = (): void => {
     if (!dialogBusy) closeDialog(false)
     window.open(OZON_SELLER_DASHBOARD_URL, '_blank', 'noopener,noreferrer')
-    setStatus('已打开 Ozon Seller，登录后将自动重新检测')
     if (sellerRecheckTimer !== undefined) window.clearTimeout(sellerRecheckTimer)
     sellerRecheckTimer = window.setTimeout(() => {
       sellerRecheckTimer = undefined
-      if (!stopped && host.isConnected) void checkSeller(false, 'Ozon Seller 已连接')
+      if (!stopped && host.isConnected) void checkSeller()
     }, OZON_SELLER_RECHECK_DELAY_MS)
   }
 
@@ -355,6 +474,9 @@ export function startOzonFloatingPanel(options: OzonFloatingPanelOptions = {}): 
   const reconcile = (): void => {
     if (stopped) return
     const page = analyticsPageForUrl(window.location.href)
+    pageSupported = page.kind !== 'other'
+    syncPanelVisibility()
+    if (!pageSupported && !dialogBackdrop.hidden) closeDialog(false)
     listingButton.hidden = page.kind !== 'detail'
     detailCardControl.hidden = page.kind !== 'detail'
     listCardControl.hidden = page.kind !== 'list'
@@ -363,7 +485,7 @@ export function startOzonFloatingPanel(options: OzonFloatingPanelOptions = {}): 
 
   const persistPosition = (position: OzonPanelPosition): void => {
     void options.persistLauncherPosition?.({ ...position }).catch((error: unknown) => {
-      if (!stopped) setStatus(`浮窗位置保存失败：${errorMessage(error)}`)
+      if (!stopped) console.error('浮窗位置保存失败:', error)
     })
   }
 
@@ -381,10 +503,10 @@ export function startOzonFloatingPanel(options: OzonFloatingPanelOptions = {}): 
       await options.setListCardsHidden?.(hidden)
       fallbackVisibility = { ...fallbackVisibility, listCardsHidden: hidden }
       syncCardSwitches()
-      setStatus(hidden ? '已隐藏列表分析卡片' : '已显示列表分析卡片')
+      window.location.reload()
     } catch (error: unknown) {
       syncCardSwitches()
-      setStatus(`列表卡片设置失败：${errorMessage(error)}`)
+      console.error('列表卡片设置失败:', error)
     } finally {
       if (!stopped) listCardSwitch.disabled = false
     }
@@ -397,10 +519,10 @@ export function startOzonFloatingPanel(options: OzonFloatingPanelOptions = {}): 
       await options.setDetailCardsVisible?.(visible)
       fallbackVisibility = { ...fallbackVisibility, detailCardsVisible: visible }
       syncCardSwitches()
-      setStatus(visible ? '已显示商品详情分析卡片' : '已隐藏商品详情分析卡片')
+      window.location.reload()
     } catch (error: unknown) {
       syncCardSwitches()
-      setStatus(`详情卡片设置失败：${errorMessage(error)}`)
+      console.error('详情卡片设置失败:', error)
     } finally {
       if (!stopped) detailCardSwitch.disabled = false
     }
@@ -417,12 +539,19 @@ export function startOzonFloatingPanel(options: OzonFloatingPanelOptions = {}): 
   launcher.addEventListener('mousedown', (event) => {
     if (event.button !== 0) return
     event.preventDefault()
+    if (dragReleaseTimer !== undefined) {
+      window.clearTimeout(dragReleaseTimer)
+      dragReleaseTimer = undefined
+    }
+    const rect = launcher.getBoundingClientRect()
     dragStart = {
       clientX: event.clientX,
       clientY: event.clientY,
-      position: { ...launcherPosition },
+      offsetX: event.clientX - rect.left,
+      offsetY: event.clientY - rect.top,
     }
     dragging = false
+    suppressLauncherClick = false
   }, { signal })
   document.addEventListener('mousemove', (event) => {
     if (!dragStart) return
@@ -432,8 +561,8 @@ export function startOzonFloatingPanel(options: OzonFloatingPanelOptions = {}): 
     dragging = true
     event.preventDefault()
     applyLauncherPosition(clampOzonPanelPosition({
-      right: dragStart.position.right - deltaX,
-      bottom: dragStart.position.bottom - deltaY,
+      right: window.innerWidth - (event.clientX - dragStart.offsetX) - launcher.offsetWidth,
+      bottom: window.innerHeight - (event.clientY - dragStart.offsetY) - launcher.offsetHeight,
     }, window.innerWidth, window.innerHeight), true)
   }, { signal })
   document.addEventListener('mouseup', () => {
@@ -447,22 +576,44 @@ export function startOzonFloatingPanel(options: OzonFloatingPanelOptions = {}): 
       applyLauncherPosition(snapped, true)
       suppressLauncherClick = true
     }
-    dragStart = undefined
-    dragging = false
+    if (dragReleaseTimer !== undefined) window.clearTimeout(dragReleaseTimer)
+    dragReleaseTimer = window.setTimeout(() => {
+      dragReleaseTimer = undefined
+      dragStart = undefined
+      dragging = false
+      suppressLauncherClick = false
+    }, OZON_PANEL_DRAG_RELEASE_DELAY_MS)
   }, { signal })
   window.addEventListener('resize', () => {
     const clamped = clampOzonPanelPosition(launcherPosition, window.innerWidth, window.innerHeight)
     if (!samePosition(clamped, launcherPosition)) applyLauncherPosition(clamped, true)
   }, { signal })
   openSellerButton.addEventListener('click', openSeller, { signal })
+  loginButton.addEventListener('click', () => {
+    loginButton.disabled = true
+    void openErpRoot().then(() => {
+      if (!stopped) startAuthPolling()
+    }).catch((error: unknown) => {
+      if (!stopped) showFailure('登录页面打开失败', error)
+    }).finally(() => {
+      if (!stopped) loginButton.disabled = false
+    })
+  }, { signal })
   bindCookieButton.addEventListener('click', () => {
-    void checkSeller(true, 'Cookie 已绑定')
+    void bindSellerCookies()
   }, { signal })
   listingButton.addEventListener('click', () => panelTools.openListing(listingButton), { signal })
   profitButton.addEventListener('click', () => panelTools.openPricing('calculate2', profitButton), { signal })
   pricingButton.addEventListener('click', () => panelTools.openPricing('calculate', pricingButton), { signal })
   selectionButton.addEventListener('click', () => panelTools.openSelection(selectionButton), { signal })
-  enterErpButton.addEventListener('click', () => panelTools.openErp(enterErpButton), { signal })
+  enterErpButton.addEventListener('click', () => {
+    enterErpButton.disabled = true
+    void openErpRoot().catch((error: unknown) => {
+      if (!stopped) showFailure('ERP 打开失败', error)
+    }).finally(() => {
+      if (!stopped) enterErpButton.disabled = false
+    })
+  }, { signal })
   listCardSwitch.addEventListener('click', () => {
     void toggleListCards()
   }, { signal })
@@ -485,24 +636,42 @@ export function startOzonFloatingPanel(options: OzonFloatingPanelOptions = {}): 
     if (event instanceof KeyboardEvent && event.key === 'Escape' && !dialogBackdrop.hidden) closeDialog()
   }, { signal })
 
+  const handleStorageChange: Parameters<typeof browser.storage.onChanged.addListener>[0] = (
+    changes,
+    areaName,
+  ) => {
+    if (areaName === 'local' && 'plugin_auth' in changes) {
+      void syncAuthentication().then((authenticated) => {
+        if (authenticated) stopAuthPolling()
+      })
+    }
+  }
+  browser.storage.onChanged.addListener(handleStorageChange)
+
   applyLauncherPosition(launcherPosition, !samePosition(launcherPosition, initialState.launcherPosition))
   reconcile()
+  void syncAuthentication()
 
   const controller: OzonFloatingPanelController = {
     reconcile,
     stop: () => {
       if (stopped) return
       stopped = true
-      requestSequence += 1
+      sellerRequestSequence += 1
+      cookieRequestSequence += 1
+      authSequence += 1
       dialogSequence += 1
       panelTools.stop()
       eventAbortController.abort()
+      browser.storage.onChanged.removeListener(handleStorageChange)
       if (sellerRecheckTimer !== undefined) window.clearTimeout(sellerRecheckTimer)
+      stopAuthPolling()
+      if (dragReleaseTimer !== undefined) window.clearTimeout(dragReleaseTimer)
       host.remove()
       if (activeController === controller) activeController = undefined
     },
   }
   activeController = controller
-  void checkSeller(false, 'Ozon Seller 已连接')
+  void checkSeller()
   return controller
 }

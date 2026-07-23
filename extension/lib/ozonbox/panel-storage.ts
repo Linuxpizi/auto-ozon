@@ -61,10 +61,10 @@ export function snapOzonPanelPositionToNearestEdge(
   const maxRight = viewportMaximum(viewportWidth, launcherSize, margin)
   const maxBottom = viewportMaximum(viewportHeight, launcherSize, margin)
   const edges = [
-    { distance: clamped.right - margin, position: { ...clamped, right: margin } },
     { distance: maxRight - clamped.right, position: { ...clamped, right: maxRight } },
-    { distance: clamped.bottom - margin, position: { ...clamped, bottom: margin } },
+    { distance: clamped.right - margin, position: { ...clamped, right: margin } },
     { distance: maxBottom - clamped.bottom, position: { ...clamped, bottom: maxBottom } },
+    { distance: clamped.bottom - margin, position: { ...clamped, bottom: margin } },
   ]
   return edges.reduce((nearest, candidate) => (
     candidate.distance < nearest.distance ? candidate : nearest

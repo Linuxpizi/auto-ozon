@@ -119,6 +119,29 @@ export interface OzonboxSellerIdResponse {
   sellerId: string
 }
 
+export interface OzonboxSellerCookiesRequest {
+  type: 'OZONBOX_GET_SELLER_COOKIES'
+}
+
+/** Serializable subset returned by browser.cookies.getAll for seller.ozon.ru. */
+export interface OzonboxSellerCookie {
+  domain: string
+  expirationDate?: number
+  hostOnly: boolean
+  httpOnly: boolean
+  name: string
+  path: string
+  sameSite: string
+  secure: boolean
+  session: boolean
+  storeId: string
+  value: string
+}
+
+export interface OzonboxSellerCookiesResponse {
+  cookies: OzonboxSellerCookie[]
+}
+
 export interface OzonboxSellerAnalyticsRequest {
   type: 'OZONBOX_FETCH_SELLER_ANALYTICS'
   sku: string
@@ -178,6 +201,7 @@ export type OzonboxRuntimeMessage =
   | OzonboxCollectRequest
   | OzonboxCollectAndSaveRequest
   | OzonboxSellerIdRequest
+  | OzonboxSellerCookiesRequest
   | OzonboxSellerAnalyticsRequest
   | OzonboxPackageFactsRequest
   | OzonboxSellerVariantPackageRequest
@@ -186,6 +210,7 @@ export type OzonboxRuntimeResponse =
   | OzonboxCollectedProduct
   | OzonboxCollectAndSaveResult
   | OzonboxSellerIdResponse
+  | OzonboxSellerCookiesResponse
   | OzonboxSellerApiResponse
   | OzonboxRuntimeErrorResponse
 

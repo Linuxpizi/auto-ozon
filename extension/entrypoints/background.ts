@@ -7,6 +7,7 @@ import type {
   OzonboxSellerApiResponse,
 } from '@/lib/ozonbox/contract'
 import { isRecord } from '@/lib/ozonbox/contract'
+import { validatedErpBaseUrl } from '@/lib/ozonbox/erp-url'
 import type {
   PanelListingDraftInput,
   PanelPricingContext,
@@ -129,20 +130,6 @@ async function isAuthenticated(): Promise<boolean> {
 
 function authRequired() {
   return { success: false, error: '请先登录插件' } as const
-}
-
-function validatedErpBaseUrl(value: string): string {
-  const normalized = value.trim().replace(/\/+$/, '')
-  if (!normalized) throw new Error('请先配置 ERP Web 地址')
-  let url: URL
-  try {
-    url = new URL(normalized)
-  } catch {
-    throw new Error('ERP Web 地址格式无效')
-  }
-  if (url.protocol !== 'http:' && url.protocol !== 'https:') throw new Error('ERP Web 地址只支持 http/https')
-  if (url.username || url.password || url.search || url.hash) throw new Error('ERP Web 地址不能包含凭据、查询参数或锚点')
-  return url.toString().replace(/\/$/, '')
 }
 
 function realListingProduct(product: OzonboxCollectedProduct, input: PanelListingDraftInput) {
@@ -278,6 +265,29 @@ export default defineBackground(() => {
     if ((message as Partial<OzonboxRuntimeMessage>).type === 'OZONBOX_READ_SELLER_ID') {
       readOzonSellerId().then((sellerId) => {
         sendResponse({ sellerId })
+      }).catch((error: unknown) => {
+        sendResponse({ error: errorMessage(error) })
+      })
+      return true
+    }
+
+    if ((message as Partial<OzonboxRuntimeMessage>).type === 'OZONBOX_GET_SELLER_COOKIES') {
+      browser.cookies.getAll({ url: `${OZON_SELLER_ORIGIN}/` }).then((cookies) => {
+        sendResponse({
+          cookies: cookies.map(cookie => ({
+            domain: cookie.domain,
+            expirationDate: cookie.expirationDate,
+            hostOnly: cookie.hostOnly,
+            httpOnly: cookie.httpOnly,
+            name: cookie.name,
+            path: cookie.path,
+            sameSite: cookie.sameSite,
+            secure: cookie.secure,
+            session: cookie.session,
+            storeId: cookie.storeId,
+            value: cookie.value,
+          })),
+        })
       }).catch((error: unknown) => {
         sendResponse({ error: errorMessage(error) })
       })

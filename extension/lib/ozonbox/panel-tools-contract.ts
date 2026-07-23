@@ -8,11 +8,14 @@ export type PanelPricingRoute = 'calculate' | 'calculate2'
 /** Factual context passed to the extension-owned pricing iframe. */
 export interface PanelPricingContext {
   route: PanelPricingRoute
+  sku: string
+  productName: string
   sellPrice: number
   packageWeight: number
   packageLength: number
   packageWidth: number
   packageHeight: number
+  packageVolumeCm3: number
   rfbsRate: number[]
   categoryIds: number[]
 }
@@ -215,7 +218,7 @@ export type PanelToolRequest =
   | { type: 'PANEL_SETTINGS_GET' }
   | { type: 'PANEL_SETTINGS_UPDATE'; settings: PanelToolSettings }
   | { type: 'PANEL_PRICING_RUN'; input: PanelPricingInput }
-  | { type: 'PANEL_PRICING_CONTEXT'; route: PanelPricingRoute }
+  | { type: 'PANEL_PRICING_CONTEXT'; route: PanelPricingRoute; product?: OzonboxCollectedProduct }
   | { type: 'PANEL_SELECTION_LIST' }
   | { type: 'PANEL_SELECTION_CREATE'; input: PanelSelectionRuleInput }
   | { type: 'PANEL_SELECTION_UPDATE'; id: number; input: PanelSelectionRuleInput }
@@ -366,7 +369,8 @@ export function isPanelToolRequest(value: unknown): value is PanelToolRequest {
     case 'PANEL_PRICING_RUN':
       return isPricingInput(value.input)
     case 'PANEL_PRICING_CONTEXT':
-      return value.route === 'calculate' || value.route === 'calculate2'
+      return (value.route === 'calculate' || value.route === 'calculate2')
+        && hasValidOptionalCollectedProduct(value)
     case 'PANEL_SELECTION_CREATE':
       return isSelectionRuleInput(value.input)
     case 'PANEL_SELECTION_UPDATE':

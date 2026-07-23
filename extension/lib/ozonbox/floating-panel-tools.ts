@@ -114,7 +114,7 @@ const SELECTION_CONDITION_GROUPS: Array<{
 
 export interface FloatingPanelToolsController {
   openListing: (options?: FloatingPanelListingOptions) => void
-  openPricing: (route: PanelPricingRoute, source?: HTMLElement) => void
+  openPricing: (route: PanelPricingRoute, options?: FloatingPanelPricingOptions) => void
   openSelection: (source?: HTMLElement) => void
   openErp: (source?: HTMLElement) => void
   close: () => void
@@ -122,6 +122,11 @@ export interface FloatingPanelToolsController {
 }
 
 export interface FloatingPanelListingOptions {
+  source?: HTMLElement
+  product?: OzonboxCollectedProduct
+}
+
+export interface FloatingPanelPricingOptions {
   source?: HTMLElement
   product?: OzonboxCollectedProduct
 }
@@ -198,6 +203,23 @@ export function sanitizePanelRuleColor(value: unknown): string | undefined {
 
 export function panelRuleColorInputValue(value: unknown): string {
   return sanitizePanelRuleColor(value) ?? '#ffffff'
+}
+
+export function panelPricingFrameUrl(route: PanelPricingRoute, context: PanelPricingContext): string {
+  if (context.route !== route) throw new Error('定价页面与商品事实路由不一致')
+  const params = new URLSearchParams({
+    sku: context.sku,
+    product_name: context.productName,
+    sell_price: String(context.sellPrice),
+    package_weight: String(context.packageWeight),
+    package_length: String(context.packageLength),
+    package_width: String(context.packageWidth),
+    package_height: String(context.packageHeight),
+    package_volume: String(context.packageVolumeCm3),
+    rfbs_rate: JSON.stringify(context.rfbsRate),
+    category_ids: JSON.stringify(context.categoryIds),
+  })
+  return `${browser.runtime.getURL('/panel-pricing.html')}#/${route}?${params.toString()}`
 }
 
 function plusOutlinedIconHtml(): string {
@@ -418,31 +440,20 @@ export function createFloatingPanelTools(options: FloatingPanelToolsOptions): Fl
     }
   }
 
-  const pricingFrameUrl = (erpBaseUrl: string, route: PanelPricingRoute, context: PanelPricingContext): string => {
-    const params = new URLSearchParams({
-      sell_price: String(context.sellPrice),
-      package_weight: String(context.packageWeight),
-      package_length: String(context.packageLength),
-      package_width: String(context.packageWidth),
-      package_height: String(context.packageHeight),
-      rfbs_rate: JSON.stringify(context.rfbsRate),
-      category_ids: JSON.stringify(context.categoryIds),
-    })
-    return `${validatedErpBaseUrl(erpBaseUrl)}#/${route}?${params.toString()}`
-  }
-
-  const openPricing = (route: PanelPricingRoute, source?: HTMLElement): void => {
-    const token = open(source)
+  const openPricing = (route: PanelPricingRoute, options: FloatingPanelPricingOptions = {}): void => {
+    const token = open(options.source)
     setHeader('定价工具&利润计算器', '', true)
     showLoading('正在读取当前商品事实...')
+    const contextRequest: PanelToolRequest = options.product
+      ? { type: 'PANEL_PRICING_CONTEXT', route, product: options.product }
+      : { type: 'PANEL_PRICING_CONTEXT', route }
     void Promise.all([
-      requestPanelTool<PanelToolSettings>({ type: 'PANEL_SETTINGS_GET' }),
-      requestPanelTool<PanelPricingContext>({ type: 'PANEL_PRICING_CONTEXT', route }),
+      requestPanelTool<PanelPricingContext>(contextRequest),
       restoreDrawerWidth(token),
-    ]).then(([settingsResponse, contextResponse]) => {
+    ]).then(([contextResponse]) => {
       if (!isCurrent(token)) return
       updateModeBadge(contextResponse.mode)
-      const iframeUrl = pricingFrameUrl(settingsResponse.data.erpBaseUrl, route, contextResponse.data)
+      const iframeUrl = panelPricingFrameUrl(route, contextResponse.data)
       body.setAttribute('aria-busy', 'false')
       body.innerHTML = `<div class="jz-drawer-layout"><div class="jz-resize" data-resize role="separator" aria-label="调整抽屉宽度" aria-orientation="vertical"><div class="jz-resize-dots" aria-hidden="true"><span></span><span></span><span></span></div></div><div class="jz-drawer-content"><iframe class="jz-pricing-frame" src="${escapeHtml(iframeUrl)}" title="定价工具&利润计算器" frameborder="0" allow="fullscreen"></iframe></div></div>`
       required<HTMLIFrameElement>(body, '.jz-pricing-frame').focus()

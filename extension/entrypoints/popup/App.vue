@@ -14,11 +14,11 @@ import ScrapePanel from '@/components/popup/ScrapePanel.vue'
 import { validatedErpBaseUrl } from '@/lib/ozonbox/erp-url'
 import { isOzonProductUrl } from '@/lib/ozonbox/url'
 import { checkBackendHealth, getCurrentUser, login, register } from '@/lib/utils/api'
-import { clearAuthSession, getAuthSession, getSettings, saveAuthSession } from '@/lib/utils/storage'
+import { clearAuthSession, getAuthSession, getSettings, saveAuthSession, saveSettings } from '@/lib/utils/storage'
 import type { AuthSession } from '@/lib/utils/types'
 import packageJson from '@/package.json'
 
-type PopupView = 'home' | 'auth' | 'scrape' | 'records'
+type PopupView = 'home' | 'auth' | 'settings' | 'scrape' | 'records'
 
 const APP_NAME = '鲸智 AI'
 const view = ref<PopupView>('home')
@@ -36,6 +36,9 @@ const authLoading = ref(false)
 const logoutLoading = ref(false)
 const authError = ref('')
 const homeNotice = ref('')
+const erpBaseUrlDraft = ref('')
+const settingsError = ref('')
+const settingsSaving = ref(false)
 
 const themeOverrides: GlobalThemeOverrides = {
   common: {
@@ -85,8 +88,10 @@ async function loadSettings() {
   try {
     const settings = await getSettings()
     erpBaseUrl.value = settings.erpBaseUrl
+    erpBaseUrlDraft.value = settings.erpBaseUrl
   } catch {
     erpBaseUrl.value = ''
+    erpBaseUrlDraft.value = ''
   }
 }
 
@@ -178,11 +183,36 @@ function setAuthMode(mode: 'login' | 'register') {
   authError.value = ''
 }
 
+function openSettings() {
+  erpBaseUrlDraft.value = erpBaseUrl.value
+  settingsError.value = ''
+  homeNotice.value = ''
+  view.value = 'settings'
+}
+
+async function saveErpSettings() {
+  settingsError.value = ''
+  settingsSaving.value = true
+  try {
+    const normalizedUrl = validatedErpBaseUrl(erpBaseUrlDraft.value)
+    const currentSettings = await getSettings()
+    await saveSettings({ ...currentSettings, erpBaseUrl: normalizedUrl })
+    erpBaseUrl.value = normalizedUrl
+    erpBaseUrlDraft.value = normalizedUrl
+    homeNotice.value = 'ERP Web 地址已保存'
+    view.value = 'home'
+  } catch (error) {
+    settingsError.value = error instanceof Error ? error.message : '保存失败，请稍后重试'
+  } finally {
+    settingsSaving.value = false
+  }
+}
+
 function handleManagerClick(event: MouseEvent) {
   homeNotice.value = ''
   if (managerUrl.value) return
   event.preventDefault()
-  homeNotice.value = '请先在页面内鲸智 AI 工具设置中配置 ERP Web 地址'
+  openSettings()
 }
 
 function openWorkspace(target: 'scrape' | 'records') {
@@ -212,11 +242,11 @@ onMounted(() => {
           <section v-if="view === 'home'" class="home-view">
             <a
               class="brand-entry"
-              :class="{ disabled: !managerUrl }"
+              :class="{ unconfigured: !managerUrl }"
               :href="managerUrl || undefined"
               target="_blank"
               rel="noreferrer"
-              :aria-disabled="!managerUrl"
+              :aria-label="managerUrl ? '进入 ERP 管理中心' : '配置 ERP Web 地址'"
               @click="handleManagerClick"
             >
               <img class="brand-logo" src="/brand-logo.png" :alt="APP_NAME">
@@ -245,6 +275,9 @@ onMounted(() => {
                 <div class="login-hint">请点击插件的登录按钮登录</div>
                 <button class="link-button" type="button" @click="openAuth">登录插件</button>
               </template>
+              <button class="link-button settings-link" type="button" @click="openSettings">
+                {{ managerUrl ? '修改 ERP Web 地址' : '配置 ERP Web 地址' }}
+              </button>
               <p v-if="homeNotice" class="home-notice">{{ homeNotice }}</p>
             </div>
           </section>
@@ -275,6 +308,29 @@ onMounted(() => {
             </NButton>
           </section>
 
+          <section v-else-if="view === 'settings'" class="compact-view settings-view">
+            <header class="view-header">
+              <button class="back-button" type="button" @click="goHome">返回</button>
+              <strong>ERP Web 设置</strong>
+              <span aria-hidden="true"></span>
+            </header>
+            <p class="settings-description">配置鲸智 ERP Web 根地址，保存后即可从 popup 直接进入管理中心。</p>
+            <label class="field-label" for="erp-base-url">ERP Web 根地址</label>
+            <NInput
+              id="erp-base-url"
+              v-model:value="erpBaseUrlDraft"
+              type="text"
+              placeholder="请输入 http 或 https 地址"
+              clearable
+              @keyup.enter="saveErpSettings"
+            />
+            <p class="settings-hint">仅支持不含账号密码、查询参数和锚点的 http/https 地址。</p>
+            <p v-if="settingsError" class="auth-error" role="alert">{{ settingsError }}</p>
+            <NButton class="auth-submit" type="primary" block :loading="settingsSaving" @click="saveErpSettings">
+              保存 ERP Web 地址
+            </NButton>
+          </section>
+
           <section v-else class="workspace-view">
             <header class="view-header workspace-header">
               <button class="back-button" type="button" @click="goHome">返回</button>
@@ -299,12 +355,11 @@ onMounted(() => {
 .popup-shell { width: 320px; overflow: hidden; color: #262626; background: #fff; }
 .home-view { width: 320px; padding: 16px; }
 .brand-entry { display: flex; flex-direction: column; align-items: center; justify-content: center; color: inherit; text-decoration: none; transition: filter .2s ease; }
-.brand-entry:not(.disabled):hover { filter: drop-shadow(0 4px 8px rgba(22, 119, 255, .16)); }
-.brand-entry.disabled { cursor: default; }
+.brand-entry:hover { filter: drop-shadow(0 4px 8px rgba(22, 119, 255, .16)); }
 .brand-logo { width: 60px; height: 60px; margin-bottom: 20px; object-fit: contain; }
 .welcome { margin-bottom: 4px; color: #9ca3af; font-size: 14px; line-height: 20px; }
 .manager-link { padding: 4px 15px; color: #1677ff; font-size: 14px; line-height: 22px; }
-.brand-entry.disabled .manager-link { color: #8c8c8c; }
+.brand-entry.unconfigured .manager-link { color: #d97706; }
 .version { margin-top: 8px; color: #6b7280; font-size: 12px; line-height: 18px; }
 .login-section { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; margin-top: 20px; }
 .login-status { margin-bottom: 8px; color: #6b7280; font-size: 12px; line-height: 18px; }
@@ -318,6 +373,7 @@ onMounted(() => {
 .link-button:hover, .back-button:hover, .switch-button:hover { color: #4096ff; }
 .link-button:disabled { color: #bfbfbf; cursor: default; }
 .logout-link { margin-top: 2px; }
+.settings-link { margin-top: 2px; color: #6b7280; }
 .workspace-actions { display: grid; width: 100%; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 4px; }
 .workspace-actions button { padding: 7px 10px; border: 1px solid #d9d9d9; border-radius: 6px; color: #595959; background: #fff; cursor: pointer; font-size: 12px; }
 .workspace-actions button:hover { border-color: #4096ff; color: #1677ff; }
@@ -332,6 +388,8 @@ onMounted(() => {
 .field-label { display: block; margin: 10px 0 5px; color: #595959; font-size: 11px; }
 .auth-error { margin: 10px 0 0; color: #ef4444; font-size: 11px; line-height: 1.5; }
 .auth-submit { margin-top: 14px; }
+.settings-description, .settings-hint { margin: 0; color: #6b7280; font-size: 11px; line-height: 1.6; }
+.settings-hint { margin-top: 6px; color: #8c8c8c; }
 .workspace-view { width: 320px; max-height: 580px; overflow-y: auto; background: #f5f5f7; }
 .workspace-header { position: sticky; z-index: 3; top: 0; padding: 12px 14px; margin: 0; border-bottom: 1px solid #e8e8ec; background: rgba(255, 255, 255, .96); }
 .workspace-content { padding: 10px; }

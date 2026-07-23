@@ -11,6 +11,7 @@ export default defineConfig({
       'https://www.ozon.ru/*',
       'https://ozon.ru/*',
       'https://seller.ozon.ru/*',
+      'https://sso.ozon.ru/*',
       'https://www.wildberries.ru/*',
       'https://wildberries.ru/*',
       'https://detail.1688.com/*',

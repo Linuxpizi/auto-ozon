@@ -37,6 +37,8 @@ export interface OzonAnalyticsCardsOptions {
   initialState?: OzonPanelState
   persistCardVisibility?: (visibility: OzonCardVisibility) => Promise<void>
   onCardListing?: (context: OzonCardProductContext) => Promise<void>
+  onCardProfit?: (context: OzonCardProductContext) => Promise<void>
+  onCardPricing?: (context: OzonCardProductContext) => Promise<void>
 }
 
 export interface OzonCardProductContext {
@@ -227,34 +229,58 @@ export function startOzonAnalyticsCards(options: OzonAnalyticsCardsOptions = {})
     operation.dataset.ozonboxCardOperation = 'true'
     operation.dataset.sku = context.sku
     operation.dataset.sourceUrl = context.sourceUrl
-    operation.style.cssText = 'display:flex;align-items:center;gap:8px;margin:8px 0;padding:8px;border:1px solid #e5e7eb;border-radius:8px;background:#fff;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"PingFang SC","Microsoft YaHei",sans-serif;'
-    const button = document.createElement('button')
-    button.type = 'button'
-    button.textContent = '一键上架'
-    button.style.cssText = 'min-height:30px;padding:4px 14px;border:1px solid #1677ff;border-radius:9999px;background:#1677ff;color:#fff;font:500 13px/20px inherit;cursor:pointer;'
+    operation.setAttribute('aria-label', '鲸智 AI 商品操作')
+    operation.style.cssText = 'display:flex;align-items:center;flex-wrap:wrap;gap:6px;margin:8px 0;padding:7px 8px;border:1px solid #e5e7eb;border-radius:8px;background:#fff;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"PingFang SC","Microsoft YaHei",sans-serif;'
     const status = document.createElement('span')
     status.setAttribute('role', 'status')
-    status.style.cssText = 'min-width:0;color:#cf1322;font-size:12px;line-height:18px;word-break:break-word;'
-    operation.append(button, status)
-    card.append(operation)
+    status.setAttribute('aria-live', 'polite')
+    status.style.cssText = 'display:none;flex:1 0 100%;min-width:0;color:#cf1322;font-size:12px;line-height:18px;word-break:break-word;'
 
-    button.addEventListener('click', () => {
-      if (button.disabled) return
-      button.disabled = true
-      button.setAttribute('aria-busy', 'true')
-      button.textContent = '采集中...'
-      status.textContent = ''
-      void Promise.resolve(options.onCardListing?.(context))
-        .catch((error: unknown) => {
-          if (operation.isConnected) status.textContent = errorMessage(error)
-        })
-        .finally(() => {
-          if (!operation.isConnected) return
-          button.disabled = false
-          button.setAttribute('aria-busy', 'false')
-          button.textContent = '一键上架'
-        })
-    }, { signal: eventAbortController.signal })
+    const createCardAction = (
+      action: 'listing' | 'profit' | 'pricing',
+      idleText: string,
+      busyText: string,
+      color: string,
+      callback: ((context: OzonCardProductContext) => Promise<void>) | undefined,
+    ): HTMLButtonElement => {
+      const button = document.createElement('button')
+      button.type = 'button'
+      button.dataset.action = action
+      button.textContent = idleText
+      button.title = idleText
+      button.setAttribute('aria-label', idleText)
+      button.setAttribute('aria-busy', 'false')
+      button.style.cssText = `min-height:28px;padding:3px 10px;border:1px solid ${color};border-radius:9999px;background:${color};color:#fff;font:500 12px/20px inherit;white-space:nowrap;cursor:pointer;transition:filter .2s,opacity .2s;`
+      button.addEventListener('click', () => {
+        if (button.disabled) return
+        button.disabled = true
+        button.setAttribute('aria-busy', 'true')
+        button.textContent = busyText
+        button.style.opacity = '.68'
+        status.textContent = ''
+        status.style.display = 'none'
+        void Promise.resolve(callback?.(context))
+          .catch((error: unknown) => {
+            if (!operation.isConnected) return
+            status.textContent = errorMessage(error)
+            status.style.display = 'block'
+          })
+          .finally(() => {
+            if (!operation.isConnected) return
+            button.disabled = false
+            button.setAttribute('aria-busy', 'false')
+            button.textContent = idleText
+            button.style.opacity = '1'
+          })
+      }, { signal: eventAbortController.signal })
+      return button
+    }
+
+    const listingButton = createCardAction('listing', '一键上架', '采集中...', '#ff4d4f', options.onCardListing)
+    const profitButton = createCardAction('profit', '计算利润', '计算中...', '#1677ff', options.onCardProfit)
+    const pricingButton = createCardAction('pricing', '定价工具', '加载中...', '#d48806', options.onCardPricing)
+    operation.append(listingButton, profitButton, pricingButton, status)
+    card.append(operation)
   }
 
   const initializeIframe = (

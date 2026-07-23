@@ -1,13 +1,14 @@
 import { analyticsPageForUrl } from './analytics-card'
 import type {
   OzonboxCollectAndSaveResult,
+  OzonboxBindSellerCookiesResponse,
   OzonboxCollectedProduct,
   OzonboxSellerCookie,
   OzonboxSellerCookiesResponse,
 } from './contract'
 import { isRecord } from './contract'
 import { createFloatingPanelTools } from './floating-panel-tools'
-import { requirePanelToolData, type PanelToolRequest } from './panel-tools-contract'
+import { requirePanelToolData, type PanelPricingRoute, type PanelToolRequest } from './panel-tools-contract'
 import {
   clampOzonPanelPosition,
   DEFAULT_OZON_PANEL_STATE,
@@ -33,6 +34,7 @@ export const OZON_PANEL_DRAG_RELEASE_DELAY_MS = 100
 export interface OzonFloatingPanelController {
   reconcile: () => void
   openListingForProduct: (product: OzonboxCollectedProduct) => void
+  openPricingForProduct: (route: PanelPricingRoute, product: OzonboxCollectedProduct) => void
   stop: () => void
 }
 
@@ -115,6 +117,25 @@ export function parseSellerCookiesResponse(value: unknown): OzonboxSellerCookie[
     throw new Error('Cookie 服务返回了无效响应')
   }
   return (value as unknown as OzonboxSellerCookiesResponse).cookies
+}
+
+export function parseSellerCookieBindResponse(value: unknown): OzonboxBindSellerCookiesResponse {
+  if (isRecord(value) && typeof value.error === 'string' && value.error.trim()) {
+    throw new Error(value.error.trim())
+  }
+  if (!isRecord(value)
+    || value.success !== true
+    || typeof value.clientId !== 'string'
+    || !value.clientId.trim()
+    || !Number.isInteger(value.cookieCount)
+    || Number(value.cookieCount) < 0) {
+    throw new Error('Cookie 绑定服务返回了无效响应')
+  }
+  return {
+    success: true,
+    clientId: value.clientId.trim(),
+    cookieCount: Number(value.cookieCount),
+  }
 }
 
 export function buildOzonFloatingPanelShadow(logoUrl: string): string {
@@ -433,22 +454,19 @@ export function startOzonFloatingPanel(options: OzonFloatingPanelOptions = {}): 
     closeDialog(false)
     setBinding(true)
     try {
-      const cookies = parseSellerCookiesResponse(await browser.runtime.sendMessage({
-        type: 'OZONBOX_GET_SELLER_COOKIES',
+      const result = parseSellerCookieBindResponse(await browser.runtime.sendMessage({
+        type: 'OZONBOX_BIND_SELLER_COOKIES',
       }))
       if (stopped || sequence !== cookieRequestSequence) return
-      if (cookies.length === 0) {
-        showCookieFailure()
-        return
-      }
       showDialog({
-        title: '绑定Cookie失败',
-        content: `已获取 ${cookies.length} 个 Ozon Seller Cookie，但当前项目未提供 Cookie 绑定接口，未执行绑定。`,
+        title: 'Cookie 已绑定',
+        content: `店铺 ${result.clientId} 已安全绑定 ${result.cookieCount} 个 Cookie。`,
         confirmText: '确定',
       })
     } catch (error: unknown) {
       if (stopped || sequence !== cookieRequestSequence) return
-      showFailure('获取Cookie失败', error)
+      if (errorMessage(error) === OZON_COMPANY_ID_COOKIE_MISSING_MESSAGE) showCookieFailure()
+      else showFailure('绑定Cookie失败', error)
     } finally {
       if (!stopped && sequence === cookieRequestSequence) setBinding(false)
     }
@@ -605,8 +623,8 @@ export function startOzonFloatingPanel(options: OzonFloatingPanelOptions = {}): 
     void bindSellerCookies()
   }, { signal })
   listingButton.addEventListener('click', () => panelTools.openListing({ source: listingButton }), { signal })
-  profitButton.addEventListener('click', () => panelTools.openPricing('calculate2', profitButton), { signal })
-  pricingButton.addEventListener('click', () => panelTools.openPricing('calculate', pricingButton), { signal })
+  profitButton.addEventListener('click', () => panelTools.openPricing('calculate2', { source: profitButton }), { signal })
+  pricingButton.addEventListener('click', () => panelTools.openPricing('calculate', { source: pricingButton }), { signal })
   selectionButton.addEventListener('click', () => panelTools.openSelection(selectionButton), { signal })
   enterErpButton.addEventListener('click', () => {
     enterErpButton.disabled = true
@@ -657,6 +675,7 @@ export function startOzonFloatingPanel(options: OzonFloatingPanelOptions = {}): 
   const controller: OzonFloatingPanelController = {
     reconcile,
     openListingForProduct: (product) => panelTools.openListing({ product }),
+    openPricingForProduct: (route, product) => panelTools.openPricing(route, { product }),
     stop: () => {
       if (stopped) return
       stopped = true

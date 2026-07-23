@@ -142,6 +142,16 @@ export interface OzonboxSellerCookiesResponse {
   cookies: OzonboxSellerCookie[]
 }
 
+export interface OzonboxBindSellerCookiesRequest {
+  type: 'OZONBOX_BIND_SELLER_COOKIES'
+}
+
+export interface OzonboxBindSellerCookiesResponse {
+  success: true
+  clientId: string
+  cookieCount: number
+}
+
 export interface OzonboxSellerAnalyticsRequest {
   type: 'OZONBOX_FETCH_SELLER_ANALYTICS'
   sku: string
@@ -210,6 +220,7 @@ export type OzonboxRuntimeMessage =
   | OzonboxCollectAndSaveRequest
   | OzonboxSellerIdRequest
   | OzonboxSellerCookiesRequest
+  | OzonboxBindSellerCookiesRequest
   | OzonboxSellerAnalyticsRequest
   | OzonboxPackageFactsRequest
   | OzonboxSellerVariantPackageRequest
@@ -219,6 +230,7 @@ export type OzonboxRuntimeResponse =
   | OzonboxCollectAndSaveResult
   | OzonboxSellerIdResponse
   | OzonboxSellerCookiesResponse
+  | OzonboxBindSellerCookiesResponse
   | OzonboxSellerApiResponse
   | OzonboxRuntimeErrorResponse
 

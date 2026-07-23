@@ -45,6 +45,7 @@ import { extractOzonProductId, isOzonProductUrl, isOzonUrl } from '@/lib/ozonbox
 import { getAuthSession, getSettings, saveSettings } from '@/lib/utils/storage'
 import {
   syncProducts,
+  bindOzonSellerCookies,
   fetchBackendProducts,
   deleteBackendProduct,
   checkBackendHealth,
@@ -93,13 +94,44 @@ function factualPricingContext(
     .filter((value): value is number => typeof value === 'number' && Number.isInteger(value) && value > 0))]
   return {
     route,
+    sku: product.sku?.trim() || metrics?.sku?.trim() || product.productId,
+    productName: product.title.trim(),
     sellPrice: Number.isFinite(product.price) ? product.price : 0,
     packageWeight: metrics?.packageWeightG ?? 0,
     packageLength: metrics?.packageLengthMm ?? 0,
     packageWidth: metrics?.packageWidthMm ?? 0,
     packageHeight: metrics?.packageHeightMm ?? 0,
+    packageVolumeCm3: metrics?.volumeCm3 ?? 0,
     rfbsRate: metrics && Number.isFinite(metrics.rfbsCommission) ? [metrics.rfbsCommission] : [],
     categoryIds,
+  }
+}
+
+function serializeCookies(cookies: Array<{ name: string, value: string }>): string {
+  return cookies.map(cookie => `${cookie.name}=${cookie.value}`).join('; ')
+}
+
+async function bindSellerCookies(): Promise<{ success: true, clientId: string, cookieCount: number }> {
+  const companyCookie = await browser.cookies.get({
+    url: `${OZON_SELLER_ORIGIN}/`,
+    name: OZON_COMPANY_ID_COOKIE_NAME,
+  })
+  const clientId = companyIdFromSellerCookie(companyCookie)
+  const [ozonCookies, ssoCookies] = await Promise.all([
+    browser.cookies.getAll({ domain: 'ozon.ru' }),
+    browser.cookies.getAll({ domain: 'sso.ozon.ru' }),
+  ])
+  const ozonCookie = serializeCookies(ozonCookies)
+  if (!ozonCookie) throw new Error('未找到可绑定的 Ozon Cookie，请先登录 Ozon 卖家后台')
+  await bindOzonSellerCookies({
+    clientId,
+    ozonCookie,
+    ssoCookie: serializeCookies(ssoCookies),
+  })
+  return {
+    success: true,
+    clientId,
+    cookieCount: ozonCookies.length + ssoCookies.length,
   }
 }
 
@@ -201,7 +233,7 @@ async function collectExactCardProduct(request: OzonboxCollectCardProductRequest
   }
 }
 
-function listingProductForRequest(
+function collectedProductForRequest(
   product: OzonboxCollectedProduct | undefined,
   tabId?: number,
   options?: OzonCollectionOptions,
@@ -285,7 +317,7 @@ async function dispatchPanelTool(
   }
 
   if (request.type === 'PANEL_PRICING_CONTEXT') {
-    const product = await collectOzonProductInTab(tabId, mode === 'mock'
+    const product = await collectedProductForRequest(request.product, tabId, mode === 'mock'
       ? { requireAuthentication: false, enrichFromSeller: false }
       : undefined)
     return { success: true, mode, data: factualPricingContext(product, request.route) }
@@ -302,7 +334,7 @@ async function dispatchPanelTool(
       case 'PANEL_LISTING_PREVIEW': return {
         success: true,
         mode,
-        data: buildMockListingPreview(await listingProductForRequest(request.product, tabId, {
+        data: buildMockListingPreview(await collectedProductForRequest(request.product, tabId, {
           requireAuthentication: false,
           enrichFromSeller: false,
         })),
@@ -320,11 +352,12 @@ async function dispatchPanelTool(
     case 'PANEL_SELECTION_TOGGLE': return { success: true, mode, data: await togglePanelSelectionRule(request.id, request.enabled) }
     case 'PANEL_SELECTION_DELETE': return { success: true, mode, data: await deletePanelSelectionRule(request.id) }
     case 'PANEL_LISTING_PREVIEW': {
-      const [product, stores] = await Promise.all([listingProductForRequest(request.product, tabId), listOzonboxStores()])
+      const product = await collectedProductForRequest(request.product, tabId)
+      const stores = await listOzonboxStores()
       return { success: true, mode, data: buildPanelListingPreview(product, toPanelListingStores(stores), []) }
     }
     case 'PANEL_LISTING_PREPARE': {
-      const product = await listingProductForRequest(request.product, tabId)
+      const product = await collectedProductForRequest(request.product, tabId)
       return { success: true, mode, data: await preparePanelListingDraft(realListingProduct(product, request.input), request.input) }
     }
     case 'PANEL_LISTING_SUBMIT': return { success: true, mode, data: await submitPanelListingDraft(request.draftId) }
@@ -401,6 +434,13 @@ export default defineBackground(() => {
           })),
         })
       }).catch((error: unknown) => {
+        sendResponse({ error: errorMessage(error) })
+      })
+      return true
+    }
+
+    if ((message as Partial<OzonboxRuntimeMessage>).type === 'OZONBOX_BIND_SELLER_COOKIES') {
+      bindSellerCookies().then(sendResponse).catch((error: unknown) => {
         sendResponse({ error: errorMessage(error) })
       })
       return true

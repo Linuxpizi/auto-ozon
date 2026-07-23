@@ -14,6 +14,7 @@ import {
   OZON_PANEL_DRAG_THRESHOLD_PX,
   OZON_SELLER_RECHECK_DELAY_MS,
   parseCollectAndSaveResult,
+  parseSellerCookieBindResponse,
   parseSellerCookiesResponse,
   sellerInteractionErrorState,
 } from '../lib/ozonbox/floating-panel'
@@ -312,38 +313,108 @@ assert.throws(() => parseSellerCookiesResponse({ error: ' denied ' }), /denied/)
 assert.throws(() => parseSellerCookiesResponse(null), /无效响应/)
 assert.throws(() => parseSellerCookiesResponse({ cookies: [null] }), /无效响应/)
 
+assert.deepEqual(parseSellerCookieBindResponse({
+  success: true,
+  clientId: ' 123456 ',
+  cookieCount: 7,
+}), {
+  success: true,
+  clientId: '123456',
+  cookieCount: 7,
+})
+assert.throws(() => parseSellerCookieBindResponse({ error: ' upload denied ' }), /upload denied/)
+assert.throws(() => parseSellerCookieBindResponse({ success: true, clientId: '', cookieCount: 1 }), /无效响应/)
+assert.throws(() => parseSellerCookieBindResponse({ success: true, clientId: '123456', cookieCount: -1 }), /无效响应/)
+assert.throws(() => parseSellerCookieBindResponse(null), /无效响应/)
+
 const backgroundSource = readFileSync(new URL('../entrypoints/background.ts', import.meta.url), 'utf8')
 const contentSource = readFileSync(new URL('../entrypoints/ozon.content.ts', import.meta.url), 'utf8')
 const floatingPanelSource = readFileSync(new URL('../lib/ozonbox/floating-panel.ts', import.meta.url), 'utf8')
 const analyticsCardsSource = readFileSync(new URL('../lib/ozonbox/analytics-card.ts', import.meta.url), 'utf8')
+const apiSource = readFileSync(new URL('../lib/utils/api.ts', import.meta.url), 'utf8')
 assert.ok(backgroundSource.includes("type === 'OZONBOX_COLLECT_AND_SAVE_CURRENT_PRODUCT'"))
 assert.ok(backgroundSource.includes('collectAndSaveOzonProduct(request.tabId ?? sender.tab?.id)'))
 assert.ok(backgroundSource.includes('handleProductScraped(toSelectionProduct(collected))'))
+// Legacy GET remains available for compatibility, but the user action must use
+// the authenticated persistence flow below rather than treating a local read as binding.
 assert.ok(backgroundSource.includes("type === 'OZONBOX_GET_SELLER_COOKIES'"))
 assert.ok(backgroundSource.includes('browser.cookies.getAll({ url: `${OZON_SELLER_ORIGIN}/` })'))
+assert.ok(backgroundSource.includes("type === 'OZONBOX_BIND_SELLER_COOKIES'"))
+assert.ok(backgroundSource.includes('const companyCookie = await browser.cookies.get({'))
+assert.ok(backgroundSource.includes('name: OZON_COMPANY_ID_COOKIE_NAME'))
+assert.ok(backgroundSource.includes('const clientId = companyIdFromSellerCookie(companyCookie)'))
+assert.ok(backgroundSource.includes("browser.cookies.getAll({ domain: 'ozon.ru' })"))
+assert.ok(backgroundSource.includes("browser.cookies.getAll({ domain: 'sso.ozon.ru' })"))
+assert.ok(backgroundSource.includes('cookies.map(cookie => `${cookie.name}=${cookie.value}`).join(\'; \')'))
+assert.ok(backgroundSource.includes('await bindOzonSellerCookies({'))
+assert.ok(backgroundSource.includes('ssoCookie: serializeCookies(ssoCookies)'))
+assert.ok(backgroundSource.includes('cookieCount: ozonCookies.length + ssoCookies.length'))
+assert.ok(backgroundSource.includes('bindSellerCookies().then(sendResponse).catch((error: unknown) => {'))
 assert.ok(contentSource.includes("request.type !== 'COLLECT_PRODUCT'"))
 assert.ok(contentSource.includes('persistLauncherPosition: (launcherPosition) => persistState({ launcherPosition })'))
 assert.ok(contentSource.includes('persistCardVisibility: (visibility) => persistState(visibility)'))
 assert.ok(contentSource.includes("type: 'OZONBOX_COLLECT_CARD_PRODUCT'"))
 assert.ok(contentSource.includes('sku,'))
 assert.ok(contentSource.includes('sourceUrl,'))
-assert.ok(contentSource.includes('const product = assertOzonboxCollectedProduct(response.data)'))
-assert.ok(contentSource.includes('floatingPanel.openListingForProduct(product)'))
+assert.ok(contentSource.includes('const collectCardProduct = async ({ sku, sourceUrl }: OzonCardProductContext)'))
+assert.ok(contentSource.includes('return assertOzonboxCollectedProduct(response.data)'))
+assert.equal(contentSource.match(/type: 'OZONBOX_COLLECT_CARD_PRODUCT'/g)?.length, 1)
+assert.ok(contentSource.includes('const product = await collectCardProduct(context)'))
+assert.ok(contentSource.includes('requireFloatingPanel().openListingForProduct(product)'))
+assert.ok(contentSource.includes("requireFloatingPanel().openPricingForProduct('calculate2', product)"))
+assert.ok(contentSource.includes("requireFloatingPanel().openPricingForProduct('calculate', product)"))
 assert.ok(!floatingPanelSource.includes('browser.action.openPopup'))
-assert.ok(!floatingPanelSource.includes('Cookie 已绑定'))
-assert.ok(floatingPanelSource.includes("type: 'OZONBOX_GET_SELLER_COOKIES'"))
+assert.ok(floatingPanelSource.includes("type: 'OZONBOX_BIND_SELLER_COOKIES'"))
+assert.ok(!floatingPanelSource.includes("type: 'OZONBOX_GET_SELLER_COOKIES'"))
+assert.ok(floatingPanelSource.includes("title: 'Cookie 已绑定'"))
+assert.ok(floatingPanelSource.includes('已安全绑定 ${result.cookieCount} 个 Cookie'))
+const bindResponseStart = floatingPanelSource.indexOf('const result = parseSellerCookieBindResponse(await browser.runtime.sendMessage({')
+const bindSuccessDialogStart = floatingPanelSource.indexOf("title: 'Cookie 已绑定'", bindResponseStart)
+assert.ok(bindResponseStart >= 0 && bindSuccessDialogStart > bindResponseStart, '只有真实绑定 API 成功后才能显示成功提示')
 assert.ok(floatingPanelSource.includes("{ type: 'PANEL_ERP_OPEN', route: '/' }"))
 assert.ok(floatingPanelSource.includes('window.location.reload()'))
 assert.ok(floatingPanelSource.includes('panelTools.openListing({ source: listingButton })'))
+assert.ok(floatingPanelSource.includes("panelTools.openPricing('calculate2', { source: profitButton })"))
+assert.ok(floatingPanelSource.includes("panelTools.openPricing('calculate', { source: pricingButton })"))
 assert.ok(floatingPanelSource.includes('openListingForProduct: (product) => panelTools.openListing({ product })'))
+assert.ok(floatingPanelSource.includes('openPricingForProduct: (route, product) => panelTools.openPricing(route, { product })'))
+
+assert.ok(apiSource.includes("return settings.apiBaseUrl.replace(/\\/+$/, '').replace(/\\/api$/, '')"))
+assert.ok(apiSource.includes("normalized === 'localhost'"))
+assert.ok(apiSource.includes("normalized === '127.0.0.1'"))
+assert.ok(apiSource.includes("normalized === '::1'"))
+assert.ok(apiSource.includes("normalized === '[::1]'"))
+assert.ok(apiSource.includes('if (sensitiveLoopbackOnly) requireLoopbackApiBaseUrl(baseUrl)'))
+const loopbackGuardStart = apiSource.indexOf('if (sensitiveLoopbackOnly) requireLoopbackApiBaseUrl(baseUrl)')
+const authReadStart = apiSource.indexOf('const session = await getAuthSession()', loopbackGuardStart)
+const fetchStart = apiSource.indexOf('await fetch(`${baseUrl}/api${path}`', authReadStart)
+assert.ok(loopbackGuardStart >= 0 && authReadStart > loopbackGuardStart && fetchStart > authReadStart,
+  '敏感 Cookie 请求必须在读取认证信息和发起网络请求前验证 loopback API 地址')
+assert.ok(apiSource.includes("return request('/browser-sync/ozon-cookies', {"))
+assert.ok(apiSource.includes("method: 'PUT'"))
+assert.ok(apiSource.includes('client_id: input.clientId'))
+assert.ok(apiSource.includes('ozon_cookie: input.ozonCookie'))
+assert.ok(apiSource.includes('sso_cookie: input.ssoCookie'))
+assert.ok(apiSource.includes("source: 'browser-extension'"))
+assert.ok(apiSource.includes('}, true, true)'))
 
 for (const operationContract of [
   "operation.dataset.ozonboxCardOperation = 'true'",
-  "button.textContent = '一键上架'",
-  "button.textContent = '采集中...'",
+  'operation.dataset.sku = context.sku',
+  'operation.dataset.sourceUrl = context.sourceUrl',
+  "action: 'listing' | 'profit' | 'pricing'",
+  'button.dataset.action = action',
+  "createCardAction('listing', '一键上架', '采集中...', '#ff4d4f', options.onCardListing)",
+  "createCardAction('profit', '计算利润', '计算中...', '#1677ff', options.onCardProfit)",
+  "createCardAction('pricing', '定价工具', '加载中...', '#d48806', options.onCardPricing)",
+  'button.disabled = true',
   "button.setAttribute('aria-busy', 'true')",
-  'options.onCardListing?.(context)',
+  'void Promise.resolve(callback?.(context))',
+  'button.disabled = false',
+  "button.setAttribute('aria-busy', 'false')",
+  'button.textContent = idleText',
   'status.textContent = errorMessage(error)',
+  "status.style.display = 'none'",
   'const reconcileListCards = (analyticsVisible: boolean)',
   "else if (page.kind === 'list') reconcileListCards(!cardVisibility.listCardsHidden)",
   "const enabled = page.kind === 'list' || (page.kind === 'detail' && cardVisibility.detailCardsVisible)",

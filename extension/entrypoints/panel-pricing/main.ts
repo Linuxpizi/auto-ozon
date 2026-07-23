@@ -4,11 +4,14 @@ import './style.css'
 
 interface PricingPageContext {
   route: PanelPricingRoute
+  sku: string
+  productName: string
   sellPrice?: number
   packageWeight?: number
   packageLength?: number
   packageWidth?: number
   packageHeight?: number
+  packageVolume?: number
   rfbsRate: number[]
   categoryIds: number[]
 }
@@ -37,11 +40,14 @@ function readContext(): PricingPageContext {
   const params = new URLSearchParams(match?.[2] ?? '')
   return {
     route,
+    sku: params.get('sku')?.trim() ?? '',
+    productName: params.get('product_name')?.trim() ?? '',
     sellPrice: parseFinite(params.get('sell_price')),
     packageWeight: parseFinite(params.get('package_weight')),
     packageLength: parseFinite(params.get('package_length')),
     packageWidth: parseFinite(params.get('package_width')),
     packageHeight: parseFinite(params.get('package_height')),
+    packageVolume: parseFinite(params.get('package_volume')),
     rfbsRate: parseNumberArray(params.get('rfbs_rate')),
     categoryIds: parseNumberArray(params.get('category_ids')).filter(Number.isInteger),
   }
@@ -111,9 +117,12 @@ function render(context: PricingPageContext, mode: PanelToolMode): void {
     <section class="facts" aria-label="当前商品事实">
       <div class="section-heading"><div><h1>当前商品事实</h1><p>数据来自当前 Ozon 商品页；“未获取”表示没有可验证事实。</p></div><span>${context.route === 'calculate2' ? '计算利润' : '定价工具'}</span></div>
       <div class="fact-grid">
+        <div class="wide"><span>商品名称</span><strong>${escaped(context.productName || '未获取')}</strong></div>
+        <div class="wide"><span>SKU</span><strong>${escaped(context.sku || '未获取')}</strong></div>
         <div><span>当前售价</span><strong>${escaped(factual(context.sellPrice, ' RUB'))}</strong></div>
         <div><span>包装重量</span><strong>${escaped(factual(context.packageWeight, ' g'))}</strong></div>
-        <div><span>包装尺寸</span><strong>${context.packageLength && context.packageWidth && context.packageHeight ? `${context.packageLength} × ${context.packageWidth} × ${context.packageHeight} mm` : '未获取'}</strong></div>
+        <div><span>包装尺寸</span><strong>${escaped(context.packageLength && context.packageWidth && context.packageHeight ? `${context.packageLength} × ${context.packageWidth} × ${context.packageHeight} mm` : '未获取')}</strong></div>
+        <div><span>包装体积</span><strong>${escaped(factual(context.packageVolume, ' cm³'))}</strong></div>
         <div><span>rFBS 佣金率</span><strong>${escaped(rateText)}</strong></div>
         <div class="wide"><span>类目 ID</span><strong>${escaped(categoryText)}</strong></div>
       </div>

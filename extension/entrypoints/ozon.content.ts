@@ -1,8 +1,12 @@
-import { startOzonAnalyticsCards } from '@/lib/ozonbox/analytics-card'
+import {
+  startOzonAnalyticsCards,
+  type OzonCardProductContext,
+} from '@/lib/ozonbox/analytics-card'
 import { collectCurrentOzonProduct } from '@/lib/ozonbox/collector'
 import {
   assertOzonboxCollectedProduct,
   isRecord,
+  type OzonboxCollectedProduct,
   type OzonboxRuntimeMessage,
 } from '@/lib/ozonbox/contract'
 import { startOzonFloatingPanel } from '@/lib/ozonbox/floating-panel'
@@ -59,24 +63,40 @@ export default defineContentScript({
       return write
     }
 
+    const collectCardProduct = async ({ sku, sourceUrl }: OzonCardProductContext): Promise<OzonboxCollectedProduct> => {
+      const response: unknown = await browser.runtime.sendMessage({
+        type: 'OZONBOX_COLLECT_CARD_PRODUCT',
+        sku,
+        sourceUrl,
+      } satisfies OzonboxRuntimeMessage)
+      if (!isRecord(response) || response.success !== true) {
+        const message = isRecord(response) && typeof response.error === 'string' && response.error.trim()
+          ? response.error.trim()
+          : '所选商品采集服务返回了无效响应'
+        throw new Error(message)
+      }
+      return assertOzonboxCollectedProduct(response.data)
+    }
+
+    const requireFloatingPanel = (): NonNullable<typeof floatingPanel> => {
+      if (!floatingPanel) throw new Error('鲸智 AI 浮窗尚未就绪')
+      return floatingPanel
+    }
+
     analyticsCards = startOzonAnalyticsCards({
       initialState: panelState,
       persistCardVisibility: (visibility) => persistState(visibility),
-      onCardListing: async ({ sku, sourceUrl }) => {
-        const response: unknown = await browser.runtime.sendMessage({
-          type: 'OZONBOX_COLLECT_CARD_PRODUCT',
-          sku,
-          sourceUrl,
-        } satisfies OzonboxRuntimeMessage)
-        if (!isRecord(response) || response.success !== true) {
-          const message = isRecord(response) && typeof response.error === 'string' && response.error.trim()
-            ? response.error.trim()
-            : '所选商品采集服务返回了无效响应'
-          throw new Error(message)
-        }
-        const product = assertOzonboxCollectedProduct(response.data)
-        if (!floatingPanel) throw new Error('鲸智 AI 浮窗尚未就绪')
-        floatingPanel.openListingForProduct(product)
+      onCardListing: async (context) => {
+        const product = await collectCardProduct(context)
+        requireFloatingPanel().openListingForProduct(product)
+      },
+      onCardProfit: async (context) => {
+        const product = await collectCardProduct(context)
+        requireFloatingPanel().openPricingForProduct('calculate2', product)
+      },
+      onCardPricing: async (context) => {
+        const product = await collectCardProduct(context)
+        requireFloatingPanel().openPricingForProduct('calculate', product)
       },
     })
     floatingPanel = startOzonFloatingPanel({

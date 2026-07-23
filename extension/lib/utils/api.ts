@@ -26,8 +26,34 @@ async function getBaseUrl(): Promise<string> {
   return settings.apiBaseUrl.replace(/\/+$/, '').replace(/\/api$/, '')
 }
 
-async function request<T>(path: string, options: RequestInit = {}, authenticated = true): Promise<T> {
+function isLoopbackHostname(hostname: string): boolean {
+  const normalized = hostname.toLowerCase()
+  return normalized === 'localhost'
+    || normalized === '127.0.0.1'
+    || normalized === '::1'
+    || normalized === '[::1]'
+}
+
+function requireLoopbackApiBaseUrl(baseUrl: string): void {
+  let url: URL
+  try {
+    url = new URL(baseUrl)
+  } catch {
+    throw new Error('Cookie 绑定仅允许使用有效的本机 API 地址')
+  }
+  if ((url.protocol !== 'http:' && url.protocol !== 'https:') || !isLoopbackHostname(url.hostname)) {
+    throw new Error('为保护 Cookie 安全，绑定接口仅允许使用 localhost、127.0.0.1 或 ::1')
+  }
+}
+
+async function request<T>(
+  path: string,
+  options: RequestInit = {},
+  authenticated = true,
+  sensitiveLoopbackOnly = false,
+): Promise<T> {
   const baseUrl = await getBaseUrl()
+  if (sensitiveLoopbackOnly) requireLoopbackApiBaseUrl(baseUrl)
   const headers = new Headers(options.headers)
   if (authenticated) {
     const session = await getAuthSession()
@@ -44,6 +70,25 @@ async function request<T>(path: string, options: RequestInit = {}, authenticated
     throw new Error(detail?.detail || `请求失败: ${resp.status}`)
   }
   return resp.status === 204 ? undefined as T : await resp.json() as T
+}
+
+export interface OzonSellerCookieBindInput {
+  clientId: string
+  ozonCookie: string
+  ssoCookie: string
+}
+
+export async function bindOzonSellerCookies(input: OzonSellerCookieBindInput): Promise<unknown> {
+  return request('/browser-sync/ozon-cookies', {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      client_id: input.clientId,
+      ozon_cookie: input.ozonCookie,
+      sso_cookie: input.ssoCookie,
+      source: 'browser-extension',
+    }),
+  }, true, true)
 }
 
 async function ozonboxRequest<T>(path: string, options: RequestInit = {}): Promise<T> {

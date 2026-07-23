@@ -21,6 +21,17 @@ assert.match(appSource, /clearAuthSession/)
 assert.match(appSource, /settings\.erpBaseUrl/)
 assert.match(appSource, /validatedErpBaseUrl\(erpBaseUrl\.value\)/)
 
+// ERP configuration is reachable from the toolbar popup and preserves unrelated settings on save.
+assert.match(appSource, /type PopupView = 'home' \| 'auth' \| 'settings'/)
+assert.match(appSource, /function openSettings\(\)/)
+assert.match(appSource, /v-else-if="view === 'settings'"/)
+assert.match(appSource, /v-model:value="erpBaseUrlDraft"/)
+assert.match(appSource, /const normalizedUrl = validatedErpBaseUrl\(erpBaseUrlDraft\.value\)/)
+assert.match(appSource, /await saveSettings\(\{ \.\.\.currentSettings, erpBaseUrl: normalizedUrl \}\)/)
+assert.match(appSource, /event\.preventDefault\(\)\s+openSettings\(\)/)
+assert.match(appSource, /配置 ERP Web 地址/)
+assert.doesNotMatch(appSource, /请先在页面内鲸智 AI 工具设置中配置 ERP Web 地址/)
+
 // Existing business entrypoints stay reachable from the compact shell.
 assert.match(appSource, /<OzonboxPanel v-else-if="isOzonProductPage"/)
 assert.match(appSource, /<ScrapePanel v-else \/>/)

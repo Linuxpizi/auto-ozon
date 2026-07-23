@@ -2,11 +2,12 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import type { OzonboxCollectedProduct } from '../lib/ozonbox/contract'
 import { validatedErpBaseUrl } from '../lib/ozonbox/erp-url'
-import { panelRuleColorInputValue, sanitizePanelRuleColor } from '../lib/ozonbox/floating-panel-tools'
+import { panelPricingFrameUrl, panelRuleColorInputValue, sanitizePanelRuleColor } from '../lib/ozonbox/floating-panel-tools'
 import {
   isPanelToolRequest,
   requirePanelToolData,
   type PanelListingDraftInput,
+  type PanelPricingContext,
   type PanelPricingInput,
   type PanelSelectionRuleInput,
 } from '../lib/ozonbox/panel-tools-contract'
@@ -25,6 +26,9 @@ import {
 const storage = new Map<string, unknown>()
 Object.assign(globalThis, {
   browser: {
+    runtime: {
+      getURL: (path: string) => `chrome-extension://test-extension/${path.replace(/^\//, '')}`,
+    },
     storage: {
       local: {
         get: async (key: string) => ({ [key]: storage.get(key) }),
@@ -108,6 +112,54 @@ assert.throws(
 )
 assert.throws(() => validatedErpBaseUrl('https://erp.example.com?x=1'), /不能包含凭据、查询参数或锚点/)
 assert.throws(() => validatedErpBaseUrl('https://erp.example.com/#/x'), /不能包含凭据、查询参数或锚点/)
+
+const pricingContext: PanelPricingContext = {
+  route: 'calculate2',
+  sku: 'SKU-事实/01',
+  productName: '事实商品 & 专用款',
+  sellPrice: 1_999.5,
+  packageWeight: 850,
+  packageLength: 320,
+  packageWidth: 210,
+  packageHeight: 95,
+  packageVolumeCm3: 6_384,
+  rfbsRate: [15.5],
+  categoryIds: [17028922, 97078085],
+}
+
+function pricingUrlFacts(url: string): { route: string; params: URLSearchParams } {
+  const parsed = new URL(url)
+  assert.equal(parsed.protocol, 'chrome-extension:')
+  assert.equal(parsed.hostname, 'test-extension')
+  assert.equal(parsed.pathname, '/panel-pricing.html')
+  const match = parsed.hash.match(/^#\/(calculate2|calculate)\?(.*)$/)
+  assert.ok(match, `invalid pricing page hash: ${parsed.hash}`)
+  return { route: match[1]!, params: new URLSearchParams(match[2]!) }
+}
+
+const profitFrameUrl = panelPricingFrameUrl('calculate2', pricingContext)
+const profitFacts = pricingUrlFacts(profitFrameUrl)
+assert.equal(profitFacts.route, 'calculate2')
+assert.equal(profitFacts.params.get('sku'), pricingContext.sku)
+assert.equal(profitFacts.params.get('product_name'), pricingContext.productName)
+assert.equal(profitFacts.params.get('sell_price'), String(pricingContext.sellPrice))
+assert.equal(profitFacts.params.get('package_weight'), String(pricingContext.packageWeight))
+assert.equal(profitFacts.params.get('package_length'), String(pricingContext.packageLength))
+assert.equal(profitFacts.params.get('package_width'), String(pricingContext.packageWidth))
+assert.equal(profitFacts.params.get('package_height'), String(pricingContext.packageHeight))
+assert.equal(profitFacts.params.get('package_volume'), String(pricingContext.packageVolumeCm3))
+assert.deepEqual(JSON.parse(profitFacts.params.get('rfbs_rate') ?? '[]'), pricingContext.rfbsRate)
+assert.deepEqual(JSON.parse(profitFacts.params.get('category_ids') ?? '[]'), pricingContext.categoryIds)
+
+const suggestedPriceContext: PanelPricingContext = { ...pricingContext, route: 'calculate' }
+const pricingFrameUrl = panelPricingFrameUrl('calculate', suggestedPriceContext)
+const pricingFacts = pricingUrlFacts(pricingFrameUrl)
+assert.equal(pricingFacts.route, 'calculate')
+assert.notEqual(pricingFrameUrl, profitFrameUrl)
+assert.throws(
+  () => panelPricingFrameUrl('calculate', pricingContext),
+  /定价页面与商品事实路由不一致/,
+)
 
 const exactSelectionInput: PanelSelectionRuleInput = {
   name: '完整规则',
@@ -231,6 +283,14 @@ assert.ok(!isPanelToolRequest({
   input: draftInput,
   product: { ...product, variantsData: [] },
 }))
+assert.ok(isPanelToolRequest({ type: 'PANEL_PRICING_CONTEXT', route: 'calculate' }))
+assert.ok(isPanelToolRequest({ type: 'PANEL_PRICING_CONTEXT', route: 'calculate2', product }))
+assert.ok(!isPanelToolRequest({
+  type: 'PANEL_PRICING_CONTEXT',
+  route: 'calculate',
+  product: { ...product, productId: '0' },
+}))
+assert.ok(!isPanelToolRequest({ type: 'PANEL_PRICING_CONTEXT', route: 'calculate3', product }))
 const draft = prepareMockListingDraft(draftInput)
 assert.equal(draft.status, 'ready')
 assert.equal(draft.selectedVariantCount, 1)
@@ -252,6 +312,7 @@ assert.match(submitted.message, /未向 Ozon 发送任何请求/)
 const backgroundSource = readFileSync(new URL('../entrypoints/background.ts', import.meta.url), 'utf8')
 const panelToolsSource = readFileSync(new URL('../lib/ozonbox/floating-panel-tools.ts', import.meta.url), 'utf8')
 const floatingPanelSource = readFileSync(new URL('../lib/ozonbox/floating-panel.ts', import.meta.url), 'utf8')
+const pricingPageSource = readFileSync(new URL('../entrypoints/panel-pricing/main.ts', import.meta.url), 'utf8')
 assert.ok(backgroundSource.includes('requireAuthentication: false'))
 assert.ok(backgroundSource.includes('enrichFromSeller: false'))
 assert.ok(backgroundSource.includes("case 'PANEL_LISTING_PREPARE'"))
@@ -268,7 +329,7 @@ const currentTabFallbackIndex = backgroundSource.indexOf(
 )
 assert.ok(
   explicitProductIndex >= 0 && explicitProductIndex < currentTabFallbackIndex,
-  'an explicit listing product must be validated and returned before current-tab collection is considered',
+  'an explicit collected product must be validated and returned before current-tab collection is considered',
 )
 const exactCardCollectionFacts = [
   'const sourceUrl = requireExactCardProductUrl(request.sourceUrl, sku)',
@@ -285,28 +346,56 @@ const exactCardCollectionFacts = [
 for (const fact of exactCardCollectionFacts) {
   assert.ok(backgroundSource.includes(fact), `exact card collection is missing: ${fact}`)
 }
-assert.ok(backgroundSource.includes('listingProductForRequest(request.product, tabId, {'))
-assert.ok(backgroundSource.includes('listingProductForRequest(request.product, tabId), listOzonboxStores()'))
-assert.ok(backgroundSource.includes('const product = await listingProductForRequest(request.product, tabId)'))
+assert.ok(backgroundSource.includes('collectedProductForRequest(request.product, tabId, {'))
+assert.ok(backgroundSource.includes('const product = await collectedProductForRequest(request.product, tabId)'))
+assert.ok(backgroundSource.includes('const product = await collectedProductForRequest(request.product, tabId, mode === \'mock\''))
+assert.ok(backgroundSource.includes('factualPricingContext(product, request.route)'))
+assert.ok(!backgroundSource.includes('listingProductForRequest'))
 assert.ok(floatingPanelSource.includes("panelTools.openListing({ source: listingButton })"))
+assert.ok(floatingPanelSource.includes("panelTools.openPricing('calculate2', { source: profitButton })"))
+assert.ok(floatingPanelSource.includes("panelTools.openPricing('calculate', { source: pricingButton })"))
 assert.ok(floatingPanelSource.includes('openListingForProduct: (product) => panelTools.openListing({ product })'))
+assert.ok(floatingPanelSource.includes('openPricingForProduct: (route, product) => panelTools.openPricing(route, { product })'))
 assert.ok(panelToolsSource.includes("from './erp-url'"))
 assert.ok(panelToolsSource.includes("type: 'PANEL_SETTINGS_GET'"))
 assert.ok(panelToolsSource.includes("type: 'PANEL_PRICING_CONTEXT'"))
+assert.ok(panelToolsSource.includes("? { type: 'PANEL_PRICING_CONTEXT', route, product: options.product }"))
+assert.ok(panelToolsSource.includes(": { type: 'PANEL_PRICING_CONTEXT', route }"))
 for (const key of [
+  'sku',
+  'product_name',
   'sell_price',
   'package_weight',
   'package_length',
   'package_width',
   'package_height',
+  'package_volume',
   'rfbs_rate',
   'category_ids',
 ]) {
   assert.ok(panelToolsSource.includes(`${key}:`), `missing exact pricing query key: ${key}`)
 }
-assert.ok(panelToolsSource.includes('validatedErpBaseUrl(erpBaseUrl)'))
+const openPricingStart = panelToolsSource.indexOf('const openPricing =')
+const openPricingEnd = panelToolsSource.indexOf('const openSelectionEditor =', openPricingStart)
+assert.ok(openPricingStart >= 0 && openPricingEnd > openPricingStart)
+const openPricingSource = panelToolsSource.slice(openPricingStart, openPricingEnd)
+assert.ok(!openPricingSource.includes('PANEL_SETTINGS_GET'))
+assert.ok(!openPricingSource.includes('erpBaseUrl'))
+assert.ok(!openPricingSource.includes('validatedErpBaseUrl'))
+assert.ok(openPricingSource.includes('panelPricingFrameUrl(route, contextResponse.data)'))
+assert.ok(backgroundSource.includes('const baseUrl = validatedErpBaseUrl(current.erpBaseUrl)'), 'genuine ERP navigation must retain centralized URL validation')
 assert.ok(panelToolsSource.includes('#/${route}?${params.toString()}'))
-assert.ok(!panelToolsSource.includes('/panel-pricing.html'))
+assert.ok(panelToolsSource.includes("browser.runtime.getURL('/panel-pricing.html')"))
+for (const queryKey of ['sku', 'product_name', 'package_volume']) {
+  assert.ok(pricingPageSource.includes(`params.get('${queryKey}')`), `pricing page must read ${queryKey}`)
+}
+for (const label of ['商品名称', 'SKU', '包装体积']) {
+  assert.ok(pricingPageSource.includes(label), `pricing page must visibly render ${label}`)
+}
+assert.ok(pricingPageSource.includes('data-calculator="profit"'))
+assert.ok(pricingPageSource.includes('data-calculator="pricing"'))
+assert.ok(pricingPageSource.includes('<button type="submit">计算利润</button>'))
+assert.ok(pricingPageSource.includes('<button type="submit">计算建议售价</button>'))
 assert.ok(panelToolsSource.includes('frameborder="0"'))
 assert.ok(panelToolsSource.includes('allow="fullscreen"'))
 assert.ok(panelToolsSource.includes('z-index:2147483647'))
@@ -319,7 +408,7 @@ assert.ok(panelToolsSource.includes("[DRAWER_WIDTH_KEY]: String(Math.round(surfa
 assert.ok(panelToolsSource.includes("setHeader('一键上架到OZON', '', false, false, true)"))
 assert.ok(panelToolsSource.includes('type PanelListingDraftResult,'))
 assert.ok(panelToolsSource.includes('let listingDraft: PanelListingDraftResult | undefined'))
-assert.ok(panelToolsSource.indexOf('const token = open(source)') < panelToolsSource.indexOf('listingDraft = undefined'))
+assert.ok(panelToolsSource.indexOf('const token = open(options.source)') < panelToolsSource.indexOf('listingDraft = undefined'))
 assert.ok(panelToolsSource.indexOf('listingDraft = undefined') < panelToolsSource.indexOf("setHeader('一键上架到OZON', '', false, false, true)"))
 assert.ok(panelToolsSource.includes('.jz-surface.listing{width:70%;max-width:none;padding:20px 24px;border:0;border-radius:8px;'))
 assert.ok(panelToolsSource.includes('注意：请先选择上架货币，再批量设置价格，如果你选择了多个店铺，请确保所选的店铺货币一致，最终上架货币以店铺设置为准。表格左侧的勾选框只做批量删除变体用途。'))

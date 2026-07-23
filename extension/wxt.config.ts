@@ -6,7 +6,7 @@ export default defineConfig({
   manifest: {
     name: packageJson.displayName,
     description: packageJson.description,
-    permissions: ['storage', 'activeTab', 'tabs', 'scripting'],
+    permissions: ['storage', 'activeTab', 'tabs', 'scripting', 'cookies'],
     host_permissions: [
       'https://www.ozon.ru/*',
       'https://ozon.ru/*',
@@ -37,8 +37,8 @@ export default defineConfig({
       '128': 'icon-128.png',
     },
     web_accessible_resources: [{
-      resources: ['brand-logo.png'],
-      matches: ['https://www.ozon.ru/*', 'https://ozon.ru/*'],
+      resources: ['brand-logo.png', 'panel-pricing.html'],
+      matches: ['https://*.ozon.ru/*'],
     }],
   },
 })

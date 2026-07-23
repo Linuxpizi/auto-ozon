@@ -11,6 +11,8 @@
     "typecheck": "wxt prepare && vue-tsc --noEmit",
     "test:ozonbox-variants": "vite-node tests/ozonbox-collector-variants.test.ts",
     "test:ozonbox-runtime": "vite-node tests/ozonbox-analytics-runtime.test.ts",
+    "test:panel-tools": "vite-node tests/panel-tools.test.ts",
+    "test": "npm run test:ozonbox-variants && npm run test:ozonbox-runtime && npm run test:panel-tools",
     "prepare": "wxt prepare",
     "zip": "wxt zip",
     "zip:chrome": "wxt zip -b chrome"

@@ -1,22 +1,61 @@
 import type { ScrapedProduct } from '@/lib/utils/types'
 import type {
+  OzonboxCollectAndSaveRequest,
+  OzonboxCollectAndSaveResponse,
   OzonboxCollectedProduct,
   OzonboxRuntimeMessage,
   OzonboxSellerApiResponse,
 } from '@/lib/ozonbox/contract'
 import { isRecord } from '@/lib/ozonbox/contract'
+import type {
+  PanelListingDraftInput,
+  PanelPricingContext,
+  PanelPricingRoute,
+  PanelToolMode,
+  PanelToolRequest,
+  PanelToolResponse,
+} from '@/lib/ozonbox/panel-tools-contract'
+import { isPanelToolRequest } from '@/lib/ozonbox/panel-tools-contract'
+import { buildPanelListingPreview, toPanelListingStores } from '@/lib/ozonbox/panel-tools-listing'
+import {
+  buildMockListingPreview,
+  createMockRule,
+  deleteMockRule,
+  listMockRules,
+  prepareMockListingDraft,
+  runMockPricing,
+  submitMockListingDraft,
+  toggleMockRule,
+  updateMockRule,
+} from '@/lib/ozonbox/panel-tools-mock'
+import { toSelectionProduct } from '@/lib/ozonbox/selection-product'
 import {
   collectedProductAnalyticsSku,
   mergeExactSkuAnalyticsBrand,
 } from '@/lib/ozonbox/seller-analytics'
+import {
+  companyIdFromSellerCookie,
+  OZON_COMPANY_ID_COOKIE_NAME,
+  OZON_SELLER_ORIGIN,
+  requireOzonCompanyId,
+} from '@/lib/ozonbox/seller-session'
 import { isOzonProductUrl, isOzonUrl } from '@/lib/ozonbox/url'
-import { getAuthSession, getSettings } from '@/lib/utils/storage'
+import { getAuthSession, getSettings, saveSettings } from '@/lib/utils/storage'
 import {
   syncProducts,
   fetchBackendProducts,
   deleteBackendProduct,
   checkBackendHealth,
   queryOzonboxPackageFacts,
+  createPanelSelectionRule,
+  deletePanelSelectionRule,
+  listOzonboxStores,
+  listPanelSelectionRules,
+  preparePanelListingDraft,
+  runPanelPricing,
+  submitPanelListingDraft,
+  togglePanelSelectionRule,
+  updatePanelSelectionRule,
 } from '@/lib/utils/api'
 
 const OZON_CONTENT_SCRIPT = '/content-scripts/ozon.js'
@@ -40,6 +79,25 @@ function collectedOzonProduct(response: unknown): OzonboxCollectedProduct {
     throw new Error(response.error.trim())
   }
   return response as OzonboxCollectedProduct
+}
+
+function factualPricingContext(
+  product: OzonboxCollectedProduct,
+  route: PanelPricingRoute,
+): PanelPricingContext {
+  const metrics = product.ozonMetrics
+  const categoryIds = [...new Set([product.categoryId, product.descriptionCategoryId]
+    .filter((value): value is number => typeof value === 'number' && Number.isInteger(value) && value > 0))]
+  return {
+    route,
+    sellPrice: Number.isFinite(product.price) ? product.price : 0,
+    packageWeight: metrics?.packageWeightG ?? 0,
+    packageLength: metrics?.packageLengthMm ?? 0,
+    packageWidth: metrics?.packageWidthMm ?? 0,
+    packageHeight: metrics?.packageHeightMm ?? 0,
+    rfbsRate: metrics && Number.isFinite(metrics.rfbsCommission) ? [metrics.rfbsCommission] : [],
+    categoryIds,
+  }
 }
 
 function requirePositiveIntegerString(value: unknown, field: string): string {
@@ -70,7 +128,118 @@ async function isAuthenticated(): Promise<boolean> {
 }
 
 function authRequired() {
-  return { success: false, error: '请先登录插件' }
+  return { success: false, error: '请先登录插件' } as const
+}
+
+function validatedErpBaseUrl(value: string): string {
+  const normalized = value.trim().replace(/\/+$/, '')
+  if (!normalized) throw new Error('请先配置 ERP Web 地址')
+  let url: URL
+  try {
+    url = new URL(normalized)
+  } catch {
+    throw new Error('ERP Web 地址格式无效')
+  }
+  if (url.protocol !== 'http:' && url.protocol !== 'https:') throw new Error('ERP Web 地址只支持 http/https')
+  if (url.username || url.password || url.search || url.hash) throw new Error('ERP Web 地址不能包含凭据、查询参数或锚点')
+  return url.toString().replace(/\/$/, '')
+}
+
+function realListingProduct(product: OzonboxCollectedProduct, input: PanelListingDraftInput) {
+  if (input.watermarkEnabled || input.randomizeImages || input.modelImagesEnabled || input.floatingPriceEnabled) {
+    throw new Error('真实模式暂不支持水印、图片随机化、模特图或浮动定价；请关闭后再创建草稿')
+  }
+  const selected = new Map(input.variants.filter(variant => variant.selected).map(variant => [variant.sku, variant]))
+  if (!selected.size) throw new Error('至少选择一个真实变体')
+  const variantsData = product.variantsData
+    .filter(variant => selected.has(variant.sku || variant.offerId || variant.id || ''))
+    .map(variant => {
+      const edited = selected.get(variant.sku || variant.offerId || variant.id || '')!
+      return { ...variant, price: edited.priceRub, oldPrice: edited.oldPriceRub, images: edited.images }
+    })
+  if (!variantsData.length) throw new Error('所选变体无法与当前页面的真实变体匹配')
+  return {
+    ...product,
+    storeId: input.storeId,
+    title: input.title.trim(),
+    recordName: input.title.trim(),
+    brand: input.brand?.trim() || product.brand,
+    descriptionCategoryId: input.descriptionCategoryId,
+    categoryId: input.descriptionCategoryId,
+    typeId: input.typeId,
+    variantsData,
+  }
+}
+
+async function dispatchPanelTool(
+  request: PanelToolRequest,
+  tabId?: number,
+): Promise<PanelToolResponse<unknown>> {
+  const current = await getSettings()
+  if (request.type === 'PANEL_SETTINGS_GET') {
+    return { success: true, mode: current.panelToolMode, data: { mode: current.panelToolMode, erpBaseUrl: current.erpBaseUrl } }
+  }
+  if (request.type === 'PANEL_SETTINGS_UPDATE') {
+    const erpBaseUrl = request.settings.erpBaseUrl.trim()
+      ? validatedErpBaseUrl(request.settings.erpBaseUrl)
+      : ''
+    await saveSettings({ ...current, panelToolMode: request.settings.mode, erpBaseUrl })
+    return { success: true, mode: request.settings.mode, data: { mode: request.settings.mode, erpBaseUrl } }
+  }
+
+  const mode: PanelToolMode = current.panelToolMode
+  if (request.type === 'PANEL_ERP_OPEN') {
+    const baseUrl = validatedErpBaseUrl(current.erpBaseUrl)
+    const target = new URL(request.route.replace(/^\//, ''), `${baseUrl}/`).toString()
+    await browser.tabs.create({ url: target })
+    return { success: true, mode, data: { opened: true, url: target } }
+  }
+
+  if (request.type === 'PANEL_PRICING_CONTEXT') {
+    const product = await collectOzonProductInTab(tabId, mode === 'mock'
+      ? { requireAuthentication: false, enrichFromSeller: false }
+      : undefined)
+    return { success: true, mode, data: factualPricingContext(product, request.route) }
+  }
+
+  if (mode === 'mock') {
+    switch (request.type) {
+      case 'PANEL_PRICING_RUN': return { success: true, mode, data: runMockPricing(request.input) }
+      case 'PANEL_SELECTION_LIST': return { success: true, mode, data: await listMockRules() }
+      case 'PANEL_SELECTION_CREATE': return { success: true, mode, data: await createMockRule(request.input) }
+      case 'PANEL_SELECTION_UPDATE': return { success: true, mode, data: await updateMockRule(request.id, request.input) }
+      case 'PANEL_SELECTION_TOGGLE': return { success: true, mode, data: await toggleMockRule(request.id, request.enabled) }
+      case 'PANEL_SELECTION_DELETE': return { success: true, mode, data: await deleteMockRule(request.id) }
+      case 'PANEL_LISTING_PREVIEW': return {
+        success: true,
+        mode,
+        data: buildMockListingPreview(await collectOzonProductInTab(tabId, {
+          requireAuthentication: false,
+          enrichFromSeller: false,
+        })),
+      }
+      case 'PANEL_LISTING_PREPARE': return { success: true, mode, data: prepareMockListingDraft(request.input) }
+      case 'PANEL_LISTING_SUBMIT': return { success: true, mode, data: submitMockListingDraft(request.draftId) }
+    }
+  }
+
+  switch (request.type) {
+    case 'PANEL_PRICING_RUN': return { success: true, mode, data: await runPanelPricing(request.input) }
+    case 'PANEL_SELECTION_LIST': return { success: true, mode, data: await listPanelSelectionRules() }
+    case 'PANEL_SELECTION_CREATE': return { success: true, mode, data: await createPanelSelectionRule(request.input) }
+    case 'PANEL_SELECTION_UPDATE': return { success: true, mode, data: await updatePanelSelectionRule(request.id, request.input) }
+    case 'PANEL_SELECTION_TOGGLE': return { success: true, mode, data: await togglePanelSelectionRule(request.id, request.enabled) }
+    case 'PANEL_SELECTION_DELETE': return { success: true, mode, data: await deletePanelSelectionRule(request.id) }
+    case 'PANEL_LISTING_PREVIEW': {
+      const [product, stores] = await Promise.all([collectOzonProductInTab(tabId), listOzonboxStores()])
+      return { success: true, mode, data: buildPanelListingPreview(product, toPanelListingStores(stores), []) }
+    }
+    case 'PANEL_LISTING_PREPARE': {
+      const product = await collectOzonProductInTab(tabId)
+      return { success: true, mode, data: await preparePanelListingDraft(realListingProduct(product, request.input), request.input) }
+    }
+    case 'PANEL_LISTING_SUBMIT': return { success: true, mode, data: await submitPanelListingDraft(request.draftId) }
+  }
 }
 
 export default defineBackground(() => {
@@ -80,10 +249,27 @@ export default defineBackground(() => {
 
   // 监听来自 content script 和 popup 的消息
   browser.runtime.onMessage.addListener((message, sender, sendResponse) => {
+    if (isPanelToolRequest(message)) {
+      const requestedMode = message.type === 'PANEL_SETTINGS_UPDATE' ? message.settings.mode : undefined
+      dispatchPanelTool(message, sender.tab?.id).then(sendResponse).catch(async (error: unknown) => {
+        const mode = requestedMode ?? (await getSettings()).panelToolMode
+        sendResponse({ success: false, mode, error: errorMessage(error) })
+      })
+      return true
+    }
+
     if ((message as Partial<OzonboxRuntimeMessage>).type === 'COLLECT_PRODUCT') {
       collectOzonProductInTab((message as { tabId?: number }).tabId ?? sender.tab?.id).then((product) => {
         sendResponse({ success: true, data: product })
       }).catch((error: unknown) => {
+        sendResponse({ success: false, error: errorMessage(error) })
+      })
+      return true
+    }
+
+    if ((message as Partial<OzonboxRuntimeMessage>).type === 'OZONBOX_COLLECT_AND_SAVE_CURRENT_PRODUCT') {
+      const request = message as OzonboxCollectAndSaveRequest
+      collectAndSaveOzonProduct(request.tabId ?? sender.tab?.id).then(sendResponse).catch((error: unknown) => {
         sendResponse({ success: false, error: errorMessage(error) })
       })
       return true
@@ -230,7 +416,11 @@ export default defineBackground(() => {
   })
 })
 
-async function handleProductScraped(product: ScrapedProduct) {
+type ProductScrapedResult =
+  | { success: true; created: number; skipped: number }
+  | { success: false; error: string }
+
+async function handleProductScraped(product: ScrapedProduct): Promise<ProductScrapedResult> {
   try {
     if (!(await isAuthenticated())) return authRequired()
     const healthy = await checkBackendHealth()
@@ -243,6 +433,13 @@ async function handleProductScraped(product: ScrapedProduct) {
   } catch (e) {
     return { success: false, error: String(e) }
   }
+}
+
+async function collectAndSaveOzonProduct(tabId?: number): Promise<OzonboxCollectAndSaveResponse> {
+  const collected = await collectOzonProductInTab(tabId)
+  const result = await handleProductScraped(toSelectionProduct(collected))
+  if (!result.success) throw new Error(result.error)
+  return { success: true, created: result.created, skipped: result.skipped } as const
 }
 
 /** 根据 URL 判断平台并返回对应的 content script 文件 */
@@ -304,8 +501,17 @@ async function triggerScrapeInTab(tabId: number) {
   }
 }
 
-async function collectOzonProductInTab(tabId?: number): Promise<OzonboxCollectedProduct> {
-  if (!(await isAuthenticated())) throw new Error(authRequired().error)
+interface OzonCollectionOptions {
+  requireAuthentication?: boolean
+  enrichFromSeller?: boolean
+}
+
+async function collectOzonProductInTab(
+  tabId?: number,
+  options: OzonCollectionOptions = {},
+): Promise<OzonboxCollectedProduct> {
+  const { requireAuthentication = true, enrichFromSeller = true } = options
+  if (requireAuthentication && !(await isAuthenticated())) throw new Error(authRequired().error)
   if (!tabId) throw new Error('没有可采集的 Ozon 标签页')
 
   const tab = await browser.tabs.get(tabId)
@@ -327,6 +533,7 @@ async function collectOzonProductInTab(tabId?: number): Promise<OzonboxCollected
     }
   }
   const product = collectedOzonProduct(response)
+  if (!enrichFromSeller) return product
   if (typeof product.brand === 'string' && product.brand.trim()) return product
 
   const sku = collectedProductAnalyticsSku(product)
@@ -359,28 +566,14 @@ async function findSellerTab(explicitTabId?: number) {
 }
 
 async function readOzonSellerId(explicitTabId?: number): Promise<string> {
-  const tab = await findSellerTab(explicitTabId)
-  if (!tab.id) throw new Error('Ozon 卖家标签页缺少 ID')
-  const result = await browser.scripting.executeScript({
-    target: { tabId: tab.id },
-    func: () => {
-      const names = ['contentId', 'sc_company_id', 'company_id', 'companyId', 'seller_id', 'sellerId']
-      const values: string[] = []
-      for (const name of names) {
-        const meta = document.querySelector(`meta[name="${name}"], meta[property="${name}"]`)
-        if (meta?.getAttribute('content')) values.push(meta.getAttribute('content') as string)
-        const element = document.querySelector(`[data-${name.replace(/_/g, '-')}]`)
-        if (element?.getAttribute(`data-${name.replace(/_/g, '-')}`)) values.push(element.getAttribute(`data-${name.replace(/_/g, '-')}`) as string)
-        const localValue = localStorage.getItem(name)
-        if (localValue) values.push(localValue)
-        const cookie = document.cookie.split(';').map((item) => item.trim()).find((item) => item.startsWith(`${name}=`))
-        if (cookie) values.push(cookie.slice(name.length + 1))
-      }
-      return values.find((value) => /^[1-9]\d*$/.test(value.trim()))?.trim()
-    },
+  if (explicitTabId) {
+    await findSellerTab(explicitTabId)
+  }
+  const cookie = await browser.cookies.get({
+    url: `${OZON_SELLER_ORIGIN}/`,
+    name: OZON_COMPANY_ID_COOKIE_NAME,
   })
-  const sellerId = result[0]?.result
-  return requirePositiveIntegerString(sellerId, 'sellerId')
+  return companyIdFromSellerCookie(cookie)
 }
 
 async function fetchSellerApi(
@@ -395,7 +588,7 @@ async function fetchSellerApi(
   const tab = await findSellerTab(explicitTabId)
   if (!tab.id) throw new Error('Ozon 卖家标签页缺少 ID')
   requirePositiveIntegerString(String(sku), 'sku')
-  const companyId = requirePositiveIntegerString(String(shopId), 'shopId')
+  const companyId = requireOzonCompanyId(shopId)
   const headers = {
     'content-type': 'application/json',
     'x-o3-company-id': companyId,
@@ -445,7 +638,7 @@ function fetchSellerAnalytics(sku: string, shopId: string, tabId?: number) {
 }
 
 function fetchSellerVariantPackage(variantId: string, shopId: string, tabId?: number) {
-  const companyId = requirePositiveIntegerString(String(shopId), 'shopId')
+  const companyId = requireOzonCompanyId(shopId)
   const normalizedVariantId = requirePositiveIntegerString(String(variantId), 'variantId')
   return fetchSellerApi(
     normalizedVariantId,

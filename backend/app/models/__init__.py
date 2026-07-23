@@ -13,3 +13,4 @@ from app.models.feishu_config import FeishuConfig
 from app.models.upload_draft import UploadDraft  # NEW: unified upload pipeline
 from app.models.user import User
 from app.models.ozon_category import OzonCategory
+from app.models.panel_selection_rule import PanelSelectionRule

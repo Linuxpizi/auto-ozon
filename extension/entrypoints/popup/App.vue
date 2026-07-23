@@ -16,7 +16,6 @@ import {
   CloudDoneOutline,
   CloudOfflineOutline,
   CloudOutline,
-  CubeOutline,
   PulseOutline,
 } from '@vicons/ionicons5'
 import RecordsPanel from '@/components/popup/RecordsPanel.vue'
@@ -145,7 +144,7 @@ watch(activeTab, (tab) => tab === 'records' && session.value && refreshBackend()
       <NMessageProvider>
         <main class="popup-shell">
           <header class="app-header">
-            <div class="brand-mark" aria-hidden="true"><NIcon :component="CubeOutline" /></div>
+            <div class="brand-mark"><img src="/brand-logo.png" :alt="extensionName"></div>
             <div class="brand-copy">
               <div><strong>{{ extensionName }}</strong><span class="version">v{{ packageJson.version }}</span></div>
               <span>跨境商品采集工作台</span>
@@ -158,7 +157,7 @@ watch(activeTab, (tab) => tab === 'records' && session.value && refreshBackend()
 
           <div v-if="session" class="workspace-heading">
             <div>
-              <span class="eyebrow"><NIcon :component="PulseOutline" />Extension workspace</span>
+              <span class="eyebrow"><NIcon :component="PulseOutline" />采集工作台</span>
               <h1>商品采集控制台</h1>
             </div>
             <div class="account-summary">
@@ -170,7 +169,7 @@ watch(activeTab, (tab) => tab === 'records' && session.value && refreshBackend()
           <section v-if="!session" class="auth-card-wrap">
             <NCard class="auth-card" :bordered="false">
               <div class="auth-intro">
-                <span class="eyebrow"><NIcon :component="PulseOutline" />Account access</span>
+                <span class="eyebrow"><NIcon :component="PulseOutline" />账号访问</span>
                 <h1>{{ isRegister ? '创建工作台账号' : '登录采集工作台' }}</h1>
                 <p>登录后即可同步采集记录并使用跨平台采集能力。</p>
               </div>
@@ -214,7 +213,8 @@ watch(activeTab, (tab) => tab === 'records' && session.value && refreshBackend()
 .app-header::before, .app-header::after { content: ''; position: absolute; border-radius: 50%; background: rgba(255,255,255,.08); pointer-events: none; }
 .app-header::before { width: 150px; height: 150px; right: -58px; top: -100px; }
 .app-header::after { width: 82px; height: 82px; left: 190px; bottom: -68px; }
-.brand-mark { width: 42px; height: 42px; flex: none; display: grid; place-items: center; border: 1px solid rgba(255,255,255,.2); border-radius: 13px; background: rgba(255,255,255,.14); font-size: 22px; box-shadow: inset 0 1px 0 rgba(255,255,255,.2); }
+.brand-mark { width: 42px; height: 42px; flex: none; display: grid; place-items: center; overflow: hidden; border: 1px solid rgba(255,255,255,.22); border-radius: 13px; background: rgba(255,255,255,.96); box-shadow: 0 6px 18px rgba(19,20,70,.18), inset 0 1px 0 rgba(255,255,255,.8); }
+.brand-mark img { width: 34px; height: 34px; object-fit: contain; }
 .brand-copy { min-width: 0; display: flex; flex: 1; flex-direction: column; gap: 2px; line-height: 1.35; }
 .brand-copy > div { display: flex; align-items: center; gap: 7px; }
 .brand-copy strong { max-width: 155px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 15px; letter-spacing: .01em; }

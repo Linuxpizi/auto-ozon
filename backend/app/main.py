@@ -10,7 +10,7 @@ from app.api.routers import dashboard, order, store, monitor, listing, finance, 
 from app.api.routers import prompt_template, title_optimize, product_optimize, image_prompt, ai_text, ai_image
 from app.api.routers import exchange_rate
 from app.api.routers import return_order, feishu_config, powerpaint
-from app.api.routers import image_edit, image_version, auth, ozonbox
+from app.api.routers import image_edit, image_version, auth, ozonbox, panel_tools
 from app.api.dependencies import get_current_user
 from app.core.db import engine, Base
 import app.models  # noqa: F401 - register every model before create_all
@@ -233,6 +233,12 @@ def health():
 app.include_router(auth.router, prefix="/api/auth", tags=["auth"])
 AUTH_DEPENDENCIES = [Depends(get_current_user)]
 app.include_router(ozonbox.router, prefix="/api", tags=["ozonbox"])
+app.include_router(
+    panel_tools.router,
+    prefix="/api/panel-tools",
+    tags=["panel-tools"],
+    dependencies=AUTH_DEPENDENCIES,
+)
 
 app.include_router(store.router, prefix="/api/stores", tags=["stores"], dependencies=AUTH_DEPENDENCIES)
 app.include_router(order.router, prefix="/api/orders", tags=["orders"], dependencies=AUTH_DEPENDENCIES)

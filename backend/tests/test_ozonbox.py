@@ -5,8 +5,10 @@ from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
 from app.models.listing import Listing
+from app.models.panel_selection_rule import PanelSelectionRule
 from app.models.store import Store
 from app.models.upload_draft import UploadDraft
+from app.models.user import User
 from app.services.ozon_client import OzonAPIError, OzonClient
 
 
@@ -67,6 +69,32 @@ def product_record_payload(store_id: int, product_id: str = "123456") -> dict:
     }
 
 
+def selection_rule_payload() -> dict:
+    return {
+        "name": "完整规则",
+        "tag": "完整",
+        "autoFavorite": False,
+        "sort": 100,
+        "enabled": True,
+        "conditions": {
+            "brandOption": 2,
+            "soldCountMin": 1,
+            "soldCountMax": 2,
+            "daysWithTrafaretsMin": 3,
+            "daysWithTrafaretsMax": 4,
+            "qtyViewPdpMin": 5,
+            "convToCartPdpMax": 6,
+            "sessionCountSearchMin": 7,
+            "convToCartSearchMax": 8,
+            "convViewToOrderMin": 9,
+            "salesSchema": "FBO",
+            "cancelRateMax": 10,
+            "sellerCountMax": 11,
+            "minimumPriceFollowMin": 12.5,
+        },
+    }
+
+
 @pytest.mark.parametrize(
     ("method", "url", "body"),
     [
@@ -82,6 +110,48 @@ def test_ozonbox_routes_require_auth(
 ):
     response = test_app.request(method, url, json=body)
     assert response.status_code == 401
+
+
+def test_panel_selection_rules_use_exact_schema_and_sanitize_stale_json(
+    test_app: TestClient, test_db: Session
+):
+    headers = auth_headers(test_app)
+    user = test_db.query(User).filter(User.email == "ozonbox@example.com").one()
+    stale_rule = PanelSelectionRule(
+        user_id=user.id,
+        name="历史规则",
+        tag="历史",
+        color=None,
+        auto_favorite=False,
+        sort=1,
+        enabled=True,
+        conditions={
+            "brandOption": 1,
+            "priceMin": 100,
+            "avgOrdersOnAccDaysMin": 7,
+            "avgGmvOnAccDaysMax": 999,
+        },
+    )
+    test_db.add(stale_rule)
+    test_db.commit()
+
+    listed = test_app.get("/api/panel-tools/selection-rules", headers=headers)
+    assert listed.status_code == 200
+    assert listed.json()[0]["conditions"] == {"brandOption": 1, "priceMin": 100.0}
+
+    payload = selection_rule_payload()
+    created = test_app.post(
+        "/api/panel-tools/selection-rules", headers=headers, json=payload
+    )
+    assert created.status_code == 201
+    assert created.json()["conditions"] == payload["conditions"]
+
+    stale_request = deepcopy(payload)
+    stale_request["conditions"]["avgOrdersOnAccDaysMin"] = 1
+    rejected = test_app.post(
+        "/api/panel-tools/selection-rules", headers=headers, json=stale_request
+    )
+    assert rejected.status_code == 422
 
 
 def test_store_list_is_safe_and_marks_usable_stores(

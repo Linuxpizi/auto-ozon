@@ -8,6 +8,15 @@ import type {
   OzonboxStore,
 } from '@/lib/ozonbox/contract'
 import { assertOzonboxEnvelope, assertOzonboxProductRecord } from '@/lib/ozonbox/contract'
+import type {
+  PanelListingDraftInput,
+  PanelListingDraftResult,
+  PanelListingSubmitResult,
+  PanelPricingInput,
+  PanelPricingResult,
+  PanelSelectionRule,
+  PanelSelectionRuleInput,
+} from '@/lib/ozonbox/panel-tools-contract'
 import { assertCompleteProduct } from './product-data'
 import { clearAuthSession, getAuthSession, getSettings, saveAuthSession } from './storage'
 
@@ -110,6 +119,70 @@ export async function saveOzonboxProductRecord(
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(completeRecord),
   })
+}
+
+export async function runPanelPricing(input: PanelPricingInput): Promise<PanelPricingResult> {
+  return request<PanelPricingResult>('/panel-tools/pricing', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(input),
+  })
+}
+
+export async function listPanelSelectionRules(): Promise<PanelSelectionRule[]> {
+  return request<PanelSelectionRule[]>('/panel-tools/selection-rules')
+}
+
+export async function createPanelSelectionRule(input: PanelSelectionRuleInput): Promise<PanelSelectionRule> {
+  return request<PanelSelectionRule>('/panel-tools/selection-rules', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(input),
+  })
+}
+
+export async function updatePanelSelectionRule(id: number, input: PanelSelectionRuleInput): Promise<PanelSelectionRule> {
+  return request<PanelSelectionRule>(`/panel-tools/selection-rules/${id}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(input),
+  })
+}
+
+export async function togglePanelSelectionRule(id: number, enabled: boolean): Promise<PanelSelectionRule> {
+  return request<PanelSelectionRule>(`/panel-tools/selection-rules/${id}/enabled`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ enabled }),
+  })
+}
+
+export async function deletePanelSelectionRule(id: number): Promise<{ deleted: boolean }> {
+  return request<{ deleted: boolean }>(`/panel-tools/selection-rules/${id}`, { method: 'DELETE' })
+}
+
+export async function preparePanelListingDraft(
+  product: OzonboxProductRecord,
+  input: PanelListingDraftInput,
+): Promise<PanelListingDraftResult> {
+  return request<PanelListingDraftResult>('/panel-tools/listing/prepare', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ product: assertOzonboxProductRecord(product), input }),
+  })
+}
+
+export async function submitPanelListingDraft(draftId: number): Promise<PanelListingSubmitResult> {
+  const result = await request<{ success: true; task_id: string; message: string }>(`/upload/drafts/${draftId}/submit`, {
+    method: 'POST',
+  })
+  return {
+    draftId,
+    simulated: false,
+    externalSubmitted: true,
+    taskId: result.task_id,
+    message: result.message,
+  }
 }
 
 /** 批量同步采集商品到后端 */

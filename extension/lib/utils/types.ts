@@ -227,6 +227,10 @@ export interface PlatformScrapingConfig {
 export interface PluginSettings {
   /** 后端 API 地址 */
   apiBaseUrl: string
+  /** 右下角面板工具运行模式；真实模式绝不回退到 MOCK。 */
+  panelToolMode: 'mock' | 'real'
+  /** ERP Web 根地址，必须由用户明确配置。 */
+  erpBaseUrl: string
   /** 自动采集 */
   autoScrape: boolean
   /** Ozon 采集条件 */
@@ -279,6 +283,8 @@ const defaultPlatformConfig: PlatformScrapingConfig = {
 
 export const DEFAULT_SETTINGS: PluginSettings = {
   apiBaseUrl: 'http://localhost:9000',
+  panelToolMode: 'mock',
+  erpBaseUrl: '',
   autoScrape: true,
   ozon: { ...defaultPlatformConfig },
   wb: { ...defaultPlatformConfig },

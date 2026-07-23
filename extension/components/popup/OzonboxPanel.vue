@@ -82,7 +82,7 @@ onMounted(inspectPage)
         </div>
       </div>
 
-      <NButton type="primary" block size="large" :loading="saving" :disabled="!isOzonProductUrl(currentUrl)" class="save-button" @click="collectAndSave">
+      <NButton type="primary" block size="large" :loading="saving" :disabled="!isOzonProductUrl(currentUrl)" class="panel-primary-button" @click="collectAndSave">
         <template #icon><NIcon :component="SaveOutline" /></template>
         {{ saving ? '正在采集并保存' : '采集到选品中心' }}
       </NButton>
@@ -107,24 +107,5 @@ onMounted(inspectPage)
 </template>
 
 <style scoped>
-.card-title { display: flex; align-items: center; gap: 7px; color: #2b2d42; font-size: 13px; font-weight: 650; }
 .brand-logo { width: 20px; height: 20px; object-fit: contain; border-radius: 5px; }
-.card-title .n-icon { color: #6465e8; font-size: 17px; }
-.card-title.success .n-icon { color: #16a273; }
-.page-status { display: grid; grid-template-columns: 42px minmax(0, 1fr); gap: 11px; align-items: center; padding: 12px; border: 1px solid #ebebf1; border-radius: 12px; background: #f8f8fb; }
-.status-icon { width: 42px; height: 42px; display: grid; place-items: center; border-radius: 11px; color: #a0a2b2; background: #e9eaf0; font-size: 22px; }
-.status-icon.active { color: #16875f; background: #dff5ec; }
-.status-copy { min-width: 0; display: flex; flex-direction: column; gap: 3px; }
-.status-copy strong { color: #303247; font-size: 12px; }
-.status-copy span { color: #8b8e9f; font-size: 10px; }
-.save-button { height: 42px; margin-top: 14px; box-shadow: 0 6px 16px rgba(91, 92, 240, .18); }
-.panel-alert { margin-top: 10px; }
-.result { display: grid; grid-template-columns: 58px minmax(0,1fr); gap: 11px; align-items: center; }
-.result img, .result-placeholder { width: 58px; height: 58px; border-radius: 11px; background: #eef0f5; }
-.result img { object-fit: cover; }
-.result-placeholder { display: grid; place-items: center; color: #9a9dad; font-size: 24px; }
-.result > div:last-child { min-width: 0; }
-.result strong { display: block; color: #2d2f44; font-size: 12px; }
-.result p { margin: 5px 0 2px; color: #5b5cf0; font-size: 12px; font-weight: 700; }
-.result span { color: #8b8e9f; font-size: 10px; }
 </style>

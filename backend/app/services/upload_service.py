@@ -315,7 +315,7 @@ def submit_draft_to_ozon(
     draft_crud.update_draft(db, draft_id, {"status": "submitting", "error_message": ""})
 
     try:
-        client = OzonClient(store.api_key, store.client_id)
+        client = OzonClient(client_id=store.client_id, api_key=store.api_key)
         item = _build_ozon_item(draft)
 
         # Only submit if we have required fields
@@ -393,7 +393,7 @@ def submit_batch_to_ozon(
 
         # Batch submit
         try:
-            client = OzonClient(store.api_key, store.client_id)
+            client = OzonClient(client_id=store.client_id, api_key=store.api_key)
             # Ozon API limits: send in chunks of 100
             CHUNK_SIZE = 100
             task_id_map = {}  # offer_id → task_id
@@ -447,7 +447,7 @@ def check_draft_status(
         raise ValueError(f"店铺 {draft.store_id} 不存在")
 
     try:
-        client = OzonClient(store.api_key, store.client_id)
+        client = OzonClient(client_id=store.client_id, api_key=store.api_key)
         result = client.get_import_tasks_status(task_id=draft.ozon_task_id)
 
         items = result.get("result", [])

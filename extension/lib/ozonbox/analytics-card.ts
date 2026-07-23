@@ -1,5 +1,4 @@
 import {
-  bindAnalyticsActions,
   createAnalyticsIframe,
   renderAnalyticsItem,
   setAnalyticsStatus,
@@ -8,6 +7,11 @@ import { readOzonCategoryPath } from './collector'
 import { analyticsCategoryName, fetchOzonAnalyticsItem, readOzonSellerId } from './seller-analytics'
 import { SuccessfulRequestCache } from './successful-request-cache'
 import { extractOzonProductId, isOzonProductUrl } from './url'
+import {
+  DEFAULT_OZON_CARD_VISIBILITY,
+  type OzonCardVisibility,
+  type OzonPanelState,
+} from './panel-storage'
 
 const LIST_CARD_SELECTOR = '.tile-root'
 const DETAIL_PRICE_SELECTOR = 'div[data-widget="webSale"]'
@@ -22,7 +26,15 @@ export type OzonAnalyticsPage =
 
 export interface OzonAnalyticsCardsController {
   reconcile: () => void
+  getCardVisibility: () => OzonCardVisibility
+  setListCardsHidden: (hidden: boolean) => Promise<void>
+  setDetailCardsVisible: (visible: boolean) => Promise<void>
   stop: () => void
+}
+
+export interface OzonAnalyticsCardsOptions {
+  initialState?: OzonPanelState
+  persistCardVisibility?: (visibility: OzonCardVisibility) => Promise<void>
 }
 
 const sellerIdCache = new SuccessfulRequestCache<'seller-id', string>()
@@ -41,7 +53,9 @@ export function analyticsPageForUrl(value: string): OzonAnalyticsPage {
 
   try {
     const url = new URL(value)
-    if (url.pathname === '/search' || url.pathname === '/search/' || url.pathname.startsWith('/category/')) {
+    const pathname = url.pathname
+    const listPrefixes = ['/category', '/highlight', '/seller', '/search', '/brand', '/publisher']
+    if (pathname === '/' || pathname === '' || listPrefixes.some((prefix) => pathname.startsWith(prefix))) {
       return { kind: 'list' }
     }
   } catch {
@@ -120,13 +134,19 @@ function cardSku(card: HTMLElement): string | undefined {
 }
 
 /** Start one idempotent, mutation-driven Ozon analytics enhancement lifecycle. */
-export function startOzonAnalyticsCards(): OzonAnalyticsCardsController {
+export function startOzonAnalyticsCards(options: OzonAnalyticsCardsOptions = {}): OzonAnalyticsCardsController {
   activeController?.stop()
 
   let stopped = false
   let previousPage: OzonAnalyticsPage | undefined
   let reconcileTimer: number | undefined
   let frameSequence = 0
+  let cardVisibility: OzonCardVisibility = options.initialState
+    ? {
+        listCardsHidden: options.initialState.listCardsHidden,
+        detailCardsVisible: options.initialState.detailCardsVisible,
+      }
+    : { ...DEFAULT_OZON_CARD_VISIBILITY }
   const timers = new Set<number>()
   const insertionTimers = new Map<HTMLElement, number>()
   const eventAbortController = new AbortController()
@@ -162,6 +182,17 @@ export function startOzonAnalyticsCards(): OzonAnalyticsCardsController {
     }
   }
 
+  const removeFramesByType = (type: 'detail' | 'lite'): void => {
+    for (const iframe of document.querySelectorAll<HTMLIFrameElement>(GENERATED_IFRAME_SELECTOR)) {
+      if (iframe.dataset.type === type) iframe.remove()
+    }
+    if (type === 'lite') {
+      for (const card of document.querySelectorAll<HTMLElement>(LIST_CARD_SELECTOR)) {
+        card.classList.remove('has-analytics', 'loading-analytics')
+      }
+    }
+  }
+
   const initializeIframe = (
     iframe: HTMLIFrameElement,
     sku: string,
@@ -171,9 +202,6 @@ export function startOzonAnalyticsCards(): OzonAnalyticsCardsController {
     const initialize = (): void => {
       if (initialized || stopped || !iframe.isConnected) return
       initialized = true
-      bindAnalyticsActions(iframe, () => {
-        void updateAnalyticsIframe(iframe, sku, true, categoryFallback)
-      })
       void updateAnalyticsIframe(iframe, sku, false, categoryFallback)
     }
     iframe.addEventListener('load', initialize, { once: true, signal: eventAbortController.signal })
@@ -243,8 +271,8 @@ export function startOzonAnalyticsCards(): OzonAnalyticsCardsController {
       previousPage = page
     }
 
-    if (page.kind === 'detail') injectDetailAnalytics(page.sku)
-    else if (page.kind === 'list') injectListAnalytics()
+    if (page.kind === 'detail' && cardVisibility.detailCardsVisible) injectDetailAnalytics(page.sku)
+    else if (page.kind === 'list' && !cardVisibility.listCardsHidden) injectListAnalytics()
   }
 
   function scheduleReconcile(): void {
@@ -256,7 +284,9 @@ export function startOzonAnalyticsCards(): OzonAnalyticsCardsController {
   }
 
   const observer = new MutationObserver((records) => {
-    if (mutationsContainTarget(records, analyticsPageForUrl(window.location.href))) scheduleReconcile()
+    const page = analyticsPageForUrl(window.location.href)
+    const enabled = page.kind === 'detail' ? cardVisibility.detailCardsVisible : !cardVisibility.listCardsHidden
+    if (enabled && mutationsContainTarget(records, page)) scheduleReconcile()
   })
 
   let controller: OzonAnalyticsCardsController
@@ -275,7 +305,32 @@ export function startOzonAnalyticsCards(): OzonAnalyticsCardsController {
     if (activeController === controller) activeController = undefined
   }
 
-  controller = { reconcile: scheduleReconcile, stop }
+  const persistVisibility = async (): Promise<void> => {
+    await options.persistCardVisibility?.({ ...cardVisibility })
+  }
+
+  const setListCardsHidden = async (hidden: boolean): Promise<void> => {
+    cardVisibility = { ...cardVisibility, listCardsHidden: hidden }
+    clearInsertionTimers()
+    if (hidden) removeFramesByType('lite')
+    else reconcileNow()
+    await persistVisibility()
+  }
+
+  const setDetailCardsVisible = async (visible: boolean): Promise<void> => {
+    cardVisibility = { ...cardVisibility, detailCardsVisible: visible }
+    if (!visible) removeFramesByType('detail')
+    else reconcileNow()
+    await persistVisibility()
+  }
+
+  controller = {
+    reconcile: scheduleReconcile,
+    getCardVisibility: () => ({ ...cardVisibility }),
+    setListCardsHidden,
+    setDetailCardsVisible,
+    stop,
+  }
   activeController = controller
   observer.observe(document.documentElement, { childList: true, subtree: true })
   reconcileNow()

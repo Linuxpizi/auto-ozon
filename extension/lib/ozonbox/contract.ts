@@ -152,8 +152,31 @@ export interface OzonboxCollectRequest {
   tabId?: number
 }
 
+/** A separate end-to-end action; never alias this truthful save flow to listing. */
+export interface OzonboxCollectAndSaveRequest {
+  type: 'OZONBOX_COLLECT_AND_SAVE_CURRENT_PRODUCT'
+  /** Present only when a trusted extension page explicitly targets a tab. */
+  tabId?: number
+}
+
+export interface OzonboxCollectAndSaveResponse {
+  success: true
+  created: number
+  skipped: number
+}
+
+export interface OzonboxCollectAndSaveFailureResponse {
+  success: false
+  error: string
+}
+
+export type OzonboxCollectAndSaveResult =
+  | OzonboxCollectAndSaveResponse
+  | OzonboxCollectAndSaveFailureResponse
+
 export type OzonboxRuntimeMessage =
   | OzonboxCollectRequest
+  | OzonboxCollectAndSaveRequest
   | OzonboxSellerIdRequest
   | OzonboxSellerAnalyticsRequest
   | OzonboxPackageFactsRequest
@@ -161,6 +184,7 @@ export type OzonboxRuntimeMessage =
 
 export type OzonboxRuntimeResponse =
   | OzonboxCollectedProduct
+  | OzonboxCollectAndSaveResult
   | OzonboxSellerIdResponse
   | OzonboxSellerApiResponse
   | OzonboxRuntimeErrorResponse

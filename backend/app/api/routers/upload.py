@@ -160,7 +160,7 @@ def submit_draft(draft_id: int, db: Session = Depends(get_db)):
         if result["success"]:
             return {
                 "success": True,
-                "task_id": result["task_id"],
+                "task_id": str(result["task_id"]),
                 "message": f"已提交，Ozon task_id={result['task_id']}",
             }
         else:

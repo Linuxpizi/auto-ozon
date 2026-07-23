@@ -5,6 +5,7 @@ import {
   type OzonboxPackageShopFacts,
   type OzonboxSellerApiResponse,
 } from './contract'
+import { requireOzonCompanyId } from './seller-session'
 
 export type OzonboxAnalyticsItem = Record<string, unknown>
 
@@ -424,7 +425,7 @@ export async function readOzonSellerId(): Promise<string> {
   if (!isRecord(response)) throw new Error('读取 Ozon 卖家 ID 的响应格式无效')
   if (typeof response.error === 'string' && response.error.trim()) throw new Error(response.error.trim())
   if (typeof response.sellerId !== 'string') throw new Error('Ozon 卖家 ID 响应中缺少 sellerId')
-  return requirePositiveIntegerString(response.sellerId, 'sellerId')
+  return requireOzonCompanyId(response.sellerId)
 }
 
 export async function fetchOzonAnalyticsItem(
@@ -432,7 +433,7 @@ export async function fetchOzonAnalyticsItem(
   shopIdValue: string,
 ): Promise<OzonboxAnalyticsItem | null> {
   const sku = requirePositiveIntegerString(skuValue, 'sku')
-  const shopId = requirePositiveIntegerString(shopIdValue, 'shopId')
+  const shopId = requireOzonCompanyId(shopIdValue)
   const analyticsResponse = assertSellerApiResponse(await send({
     type: 'OZONBOX_FETCH_SELLER_ANALYTICS',
     sku,

@@ -54,6 +54,12 @@ export default defineContentScript({
         ? collectCurrentOzonProduct()
         : request.type === 'OZONBOX_FETCH_SELLER_OFFERS'
           ? fetchCurrentProductSellerOffers(request.sku)
+          : request.type === 'OZONBOX_LIST_CRAWL_START'
+            ? (() => { listCrawler?.start(); return Promise.resolve({ success: true }) })()
+          : request.type === 'OZONBOX_LIST_CRAWL_STOP'
+            ? (() => { listCrawler?.stop(); return Promise.resolve({ success: true }) })()
+          : request.type === 'OZONBOX_LIST_CRAWL_SNAPSHOT'
+            ? Promise.resolve(listCrawler?.snapshot() ?? { status: 'idle', target: 50, collected: 0, saved: 0, skipped: 0, pending: 0, failed: 0, message: '采集器未就绪' })
           : undefined
       if (!operation) return false
       operation

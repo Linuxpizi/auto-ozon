@@ -10,10 +10,11 @@ import {
   type GlobalThemeOverrides,
 } from 'naive-ui'
 import OzonboxPanel from '@/components/popup/OzonboxPanel.vue'
+import OzonListPanel from '@/components/popup/OzonListPanel.vue'
 import RecordsPanel from '@/components/popup/RecordsPanel.vue'
 import ScrapePanel from '@/components/popup/ScrapePanel.vue'
 import { validatedErpBaseUrl } from '@/lib/ozonbox/erp-url'
-import { isOzonProductUrl } from '@/lib/ozonbox/url'
+import { isOzonListPage, isOzonProductUrl } from '@/lib/ozonbox/url'
 import { checkBackendHealth, getCurrentUser, login, register } from '@/lib/utils/api'
 import { clearAuthSession, getAuthSession, getSettings, saveAuthSession, saveSettings } from '@/lib/utils/storage'
 import type { AuthSession } from '@/lib/utils/types'
@@ -28,6 +29,7 @@ const sessionLoading = ref(true)
 const backendOk = ref<boolean | null>(null)
 const erpBaseUrl = ref('')
 const isOzonProductPage = ref(false)
+const isOzonListPageFlag = ref(false)
 const authMode = ref<'login' | 'register'>('login')
 const email = ref('')
 const password = ref('')
@@ -81,11 +83,15 @@ const viewTitle = computed(() => view.value === 'records' ? '采集记录' : '�
 async function inspectActivePage() {
   try {
     const [tab] = await browser.tabs.query({ active: true, currentWindow: true })
-    isOzonProductPage.value = isOzonProductUrl(tab?.url || '')
+    const url = tab?.url || ''
+    isOzonProductPage.value = isOzonProductUrl(url)
+    isOzonListPageFlag.value = isOzonListPage(url)
   } catch {
     isOzonProductPage.value = false
+    isOzonListPageFlag.value = false
   }
 }
+
 
 async function loadSettings() {
   try {
@@ -258,15 +264,9 @@ onMounted(() => {
       <NMessageProvider>
         <main class="popup-shell">
           <section v-if="view === 'home'" class="home-view">
-            <a
-              class="brand-entry"
-              :class="{ unconfigured: !managerUrl }"
-              :href="managerUrl || undefined"
-              target="_blank"
-              rel="noreferrer"
-              :aria-label="managerUrl ? '进入 ERP 管理中心' : '配置 ERP Web 地址'"
-              @click="handleManagerClick"
-            >
+            <a class="brand-entry" :class="{ unconfigured: !managerUrl }" :href="managerUrl || undefined"
+              target="_blank" rel="noreferrer" :aria-label="managerUrl ? '进入 ERP 管理中心' : '配置 ERP Web 地址'"
+              @click="handleManagerClick">
               <img class="brand-logo" src="/brand-logo.png" :alt="APP_NAME">
               <div class="welcome">欢迎使用{{ APP_NAME }}</div>
               <span class="manager-link">点击进入 ERP 管理中心</span>
@@ -278,7 +278,8 @@ onMounted(() => {
                 {{ loginStatus.symbol }} {{ loginStatus.label }}
               </div>
               <div v-if="session && userLabel" class="user-label" :title="userLabel">{{ userLabel }}</div>
-              <div v-if="serviceLabel" class="service-status" :class="{ offline: backendOk === false }">{{ serviceLabel }}</div>
+              <div v-if="serviceLabel" class="service-status" :class="{ offline: backendOk === false }">{{ serviceLabel
+                }}</div>
 
               <template v-if="session">
                 <div class="workspace-actions" aria-label="插件业务入口">
@@ -315,10 +316,12 @@ onMounted(() => {
             <label class="field-label">邮箱</label>
             <NInput v-model:value="email" type="text" placeholder="name@example.com" @keyup.enter="submitAuth" />
             <label class="field-label">密码</label>
-            <NInput v-model:value="password" type="password" show-password-on="click" placeholder="至少 8 位字符" @keyup.enter="submitAuth" />
+            <NInput v-model:value="password" type="password" show-password-on="click" placeholder="至少 8 位字符"
+              @keyup.enter="submitAuth" />
             <template v-if="isRegister">
               <label class="field-label">确认密码</label>
-              <NInput v-model:value="confirmPassword" type="password" show-password-on="click" placeholder="再次输入密码" @keyup.enter="submitAuth" />
+              <NInput v-model:value="confirmPassword" type="password" show-password-on="click" placeholder="再次输入密码"
+                @keyup.enter="submitAuth" />
             </template>
             <p v-if="authError" class="auth-error">{{ authError }}</p>
             <NButton class="auth-submit" type="primary" block :loading="authLoading" @click="submitAuth">
@@ -334,24 +337,12 @@ onMounted(() => {
             </header>
             <p class="settings-description">配置 ERP Web 根地址与 Ozon 列表采集目标。目标仅统计命中选品规则且成功上报的商品。</p>
             <label class="field-label" for="erp-base-url">ERP Web 根地址</label>
-            <NInput
-              id="erp-base-url"
-              v-model:value="erpBaseUrlDraft"
-              type="text"
-              placeholder="请输入 http 或 https 地址"
-              clearable
-              @keyup.enter="saveErpSettings"
-            />
+            <NInput id="erp-base-url" v-model:value="erpBaseUrlDraft" type="text" placeholder="请输入 http 或 https 地址"
+              clearable @keyup.enter="saveErpSettings" />
             <p class="settings-hint">仅支持不含账号密码、查询参数和锚点的 http/https 地址。</p>
             <label class="field-label" for="ozon-list-target">Ozon 列表采集目标数量</label>
-            <NInputNumber
-              id="ozon-list-target"
-              v-model:value="ozonListTargetDraft"
-              :min="1"
-              :precision="0"
-              :step="1"
-              placeholder="请输入目标数量"
-            />
+            <NInputNumber id="ozon-list-target" v-model:value="ozonListTargetDraft" :min="1" :precision="0" :step="1"
+              placeholder="请输入目标数量" />
             <p class="settings-hint">未命中规则或处理失败的商品不计入目标，默认 50。</p>
             <p v-if="settingsError" class="auth-error" role="alert">{{ settingsError }}</p>
             <NButton class="auth-submit" type="primary" block :loading="settingsSaving" @click="saveErpSettings">
@@ -370,7 +361,9 @@ onMounted(() => {
             <div class="workspace-content">
               <RecordsPanel v-if="view === 'records'" />
               <OzonboxPanel v-else-if="isOzonProductPage" />
+              <OzonListPanel v-else-if="isOzonListPageFlag" />
               <ScrapePanel v-else />
+
             </div>
           </section>
         </main>
@@ -380,45 +373,272 @@ onMounted(() => {
 </template>
 
 <style scoped>
-.popup-shell { width: 320px; overflow: hidden; color: #262626; background: #fff; }
-.home-view { width: 320px; padding: 16px; }
-.brand-entry { display: flex; flex-direction: column; align-items: center; justify-content: center; color: inherit; text-decoration: none; transition: filter .2s ease; }
-.brand-entry:hover { filter: drop-shadow(0 4px 8px rgba(22, 119, 255, .16)); }
-.brand-logo { width: 60px; height: 60px; margin-bottom: 20px; object-fit: contain; }
-.welcome { margin-bottom: 4px; color: #9ca3af; font-size: 14px; line-height: 20px; }
-.manager-link { padding: 4px 15px; color: #1677ff; font-size: 14px; line-height: 22px; }
-.brand-entry.unconfigured .manager-link { color: #d97706; }
-.version { margin-top: 8px; color: #6b7280; font-size: 12px; line-height: 18px; }
-.login-section { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; margin-top: 20px; }
-.login-status { margin-bottom: 8px; color: #6b7280; font-size: 12px; line-height: 18px; }
-.login-status.logged-in { color: #16a34a; }
-.login-status.pending { color: #9ca3af; }
-.user-label { max-width: 246px; overflow: hidden; color: #595959; font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
-.service-status { color: #16a34a; font-size: 11px; }
-.service-status.offline { color: #ef4444; }
-.login-hint { color: #9ca3af; font-size: 12px; line-height: 18px; }
-.link-button, .back-button, .switch-button { padding: 0; border: 0; color: #1677ff; background: transparent; cursor: pointer; font-size: 12px; line-height: 20px; }
-.link-button:hover, .back-button:hover, .switch-button:hover { color: #4096ff; }
-.link-button:disabled { color: #bfbfbf; cursor: default; }
-.logout-link { margin-top: 2px; }
-.settings-link { margin-top: 2px; color: #6b7280; }
-.workspace-actions { display: grid; width: 100%; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 4px; }
-.workspace-actions button { padding: 7px 10px; border: 1px solid #d9d9d9; border-radius: 6px; color: #595959; background: #fff; cursor: pointer; font-size: 12px; }
-.workspace-actions button:hover { border-color: #4096ff; color: #1677ff; }
-.home-notice { margin: 2px 0 0; color: #d97706; font-size: 11px; line-height: 1.5; text-align: center; }
-.compact-view { width: 320px; padding: 16px; }
-.view-header { display: grid; grid-template-columns: 48px 1fr 48px; align-items: center; margin-bottom: 16px; }
-.view-header strong { color: #262626; font-size: 14px; text-align: center; }
-.view-header > :last-child { text-align: right; }
-.auth-switch { display: flex; gap: 4px; padding: 3px; margin-bottom: 14px; border-radius: 7px; background: #f5f5f5; }
-.auth-switch button { flex: 1; padding: 6px; border: 0; border-radius: 5px; color: #8c8c8c; background: transparent; cursor: pointer; font-size: 12px; }
-.auth-switch button.active { color: #1677ff; background: #fff; box-shadow: 0 1px 4px rgba(0, 0, 0, .08); }
-.field-label { display: block; margin: 10px 0 5px; color: #595959; font-size: 11px; }
-.auth-error { margin: 10px 0 0; color: #ef4444; font-size: 11px; line-height: 1.5; }
-.auth-submit { margin-top: 14px; }
-.settings-description, .settings-hint { margin: 0; color: #6b7280; font-size: 11px; line-height: 1.6; }
-.settings-hint { margin-top: 6px; color: #8c8c8c; }
-.workspace-view { width: 320px; max-height: 580px; overflow-y: auto; background: #f5f5f7; }
-.workspace-header { position: sticky; z-index: 3; top: 0; padding: 12px 14px; margin: 0; border-bottom: 1px solid #e8e8ec; background: rgba(255, 255, 255, .96); }
-.workspace-content { padding: 10px; }
+.popup-shell {
+  width: 320px;
+  overflow: hidden;
+  color: #262626;
+  background: #fff;
+}
+
+.home-view {
+  width: 320px;
+  padding: 16px;
+}
+
+.brand-entry {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  color: inherit;
+  text-decoration: none;
+  transition: filter .2s ease;
+}
+
+.brand-entry:hover {
+  filter: drop-shadow(0 4px 8px rgba(22, 119, 255, .16));
+}
+
+.brand-logo {
+  width: 60px;
+  height: 60px;
+  margin-bottom: 20px;
+  object-fit: contain;
+}
+
+.welcome {
+  margin-bottom: 4px;
+  color: #9ca3af;
+  font-size: 14px;
+  line-height: 20px;
+}
+
+.manager-link {
+  padding: 4px 15px;
+  color: #1677ff;
+  font-size: 14px;
+  line-height: 22px;
+}
+
+.brand-entry.unconfigured .manager-link {
+  color: #d97706;
+}
+
+.version {
+  margin-top: 8px;
+  color: #6b7280;
+  font-size: 12px;
+  line-height: 18px;
+}
+
+.login-section {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  margin-top: 20px;
+}
+
+.login-status {
+  margin-bottom: 8px;
+  color: #6b7280;
+  font-size: 12px;
+  line-height: 18px;
+}
+
+.login-status.logged-in {
+  color: #16a34a;
+}
+
+.login-status.pending {
+  color: #9ca3af;
+}
+
+.user-label {
+  max-width: 246px;
+  overflow: hidden;
+  color: #595959;
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.service-status {
+  color: #16a34a;
+  font-size: 11px;
+}
+
+.service-status.offline {
+  color: #ef4444;
+}
+
+.login-hint {
+  color: #9ca3af;
+  font-size: 12px;
+  line-height: 18px;
+}
+
+.link-button,
+.back-button,
+.switch-button {
+  padding: 0;
+  border: 0;
+  color: #1677ff;
+  background: transparent;
+  cursor: pointer;
+  font-size: 12px;
+  line-height: 20px;
+}
+
+.link-button:hover,
+.back-button:hover,
+.switch-button:hover {
+  color: #4096ff;
+}
+
+.link-button:disabled {
+  color: #bfbfbf;
+  cursor: default;
+}
+
+.logout-link {
+  margin-top: 2px;
+}
+
+.settings-link {
+  margin-top: 2px;
+  color: #6b7280;
+}
+
+.workspace-actions {
+  display: grid;
+  width: 100%;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  margin-top: 4px;
+}
+
+.workspace-actions button {
+  padding: 7px 10px;
+  border: 1px solid #d9d9d9;
+  border-radius: 6px;
+  color: #595959;
+  background: #fff;
+  cursor: pointer;
+  font-size: 12px;
+}
+
+.workspace-actions button:hover {
+  border-color: #4096ff;
+  color: #1677ff;
+}
+
+.home-notice {
+  margin: 2px 0 0;
+  color: #d97706;
+  font-size: 11px;
+  line-height: 1.5;
+  text-align: center;
+}
+
+.compact-view {
+  width: 320px;
+  padding: 16px;
+}
+
+.view-header {
+  display: grid;
+  grid-template-columns: 48px 1fr 48px;
+  align-items: center;
+  margin-bottom: 16px;
+}
+
+.view-header strong {
+  color: #262626;
+  font-size: 14px;
+  text-align: center;
+}
+
+.view-header> :last-child {
+  text-align: right;
+}
+
+.auth-switch {
+  display: flex;
+  gap: 4px;
+  padding: 3px;
+  margin-bottom: 14px;
+  border-radius: 7px;
+  background: #f5f5f5;
+}
+
+.auth-switch button {
+  flex: 1;
+  padding: 6px;
+  border: 0;
+  border-radius: 5px;
+  color: #8c8c8c;
+  background: transparent;
+  cursor: pointer;
+  font-size: 12px;
+}
+
+.auth-switch button.active {
+  color: #1677ff;
+  background: #fff;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, .08);
+}
+
+.field-label {
+  display: block;
+  margin: 10px 0 5px;
+  color: #595959;
+  font-size: 11px;
+}
+
+.auth-error {
+  margin: 10px 0 0;
+  color: #ef4444;
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+.auth-submit {
+  margin-top: 14px;
+}
+
+.settings-description,
+.settings-hint {
+  margin: 0;
+  color: #6b7280;
+  font-size: 11px;
+  line-height: 1.6;
+}
+
+.settings-hint {
+  margin-top: 6px;
+  color: #8c8c8c;
+}
+
+.workspace-view {
+  width: 320px;
+  max-height: 580px;
+  overflow-y: auto;
+  background: #f5f5f7;
+}
+
+.workspace-header {
+  position: sticky;
+  z-index: 3;
+  top: 0;
+  padding: 12px 14px;
+  margin: 0;
+  border-bottom: 1px solid #e8e8ec;
+  background: rgba(255, 255, 255, .96);
+}
+
+.workspace-content {
+  padding: 10px;
+}
 </style>

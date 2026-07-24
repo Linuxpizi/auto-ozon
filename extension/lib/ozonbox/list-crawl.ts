@@ -36,13 +36,16 @@ export function extractOzonListSku(href: string, baseUrl = currentBaseUrl()): st
     const url = new URL(href, baseUrl)
     const hostname = url.hostname.toLowerCase()
     if (url.protocol !== 'https:' || (hostname !== 'ozon.ru' && !hostname.endsWith('.ozon.ru'))) return ''
-    const pathname = url.pathname
-    const productPath = pathname.match(/\/product\/([^/]+)/i)?.[1] ?? ''
-    return productPath.match(/(?:^|-)([1-9]\d{4,})(?:-|$)/)?.[1] ?? ''
+    const pathPart = url.pathname.match(/\/product\/([^/?#]+)/i)
+    if (!pathPart) return ''
+    // Match all digit groups; the SKU is the last one (typically the longest/trailing)
+    const digits = pathPart[1].match(/\d+/g)
+    return digits?.pop() ?? ''
   } catch {
     return ''
   }
 }
+
 
 export function canonicalOzonProductUrl(href: string, baseUrl = currentBaseUrl()): string {
   const url = new URL(href, baseUrl)

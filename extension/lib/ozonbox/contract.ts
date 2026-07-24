@@ -215,6 +215,18 @@ export interface OzonboxProcessCardProductResponse {
   skipped: number
 }
 
+export interface OzonboxListCrawlStartRequest {
+  type: 'OZONBOX_LIST_CRAWL_START'
+}
+
+export interface OzonboxListCrawlStopRequest {
+  type: 'OZONBOX_LIST_CRAWL_STOP'
+}
+
+export interface OzonboxListCrawlSnapshotRequest {
+  type: 'OZONBOX_LIST_CRAWL_SNAPSHOT'
+}
+
 export interface OzonboxProcessCardProductFailureResponse {
   success: false
   error: string
@@ -295,6 +307,9 @@ export type OzonboxRuntimeMessage =
   | OzonboxSellerAnalyticsRequest
   | OzonboxPackageFactsRequest
   | OzonboxSellerVariantPackageRequest
+  | OzonboxListCrawlStartRequest
+  | OzonboxListCrawlStopRequest
+  | OzonboxListCrawlSnapshotRequest
 
 export type OzonboxRuntimeResponse =
   | OzonboxCollectedProduct

@@ -48,7 +48,7 @@ import {
   OZON_SELLER_ORIGIN,
   requireOzonCompanyId,
 } from '@/lib/ozonbox/seller-session'
-import { extractOzonProductId, isOzonProductUrl, isOzonUrl } from '@/lib/ozonbox/url'
+import { extractOzonProductId, isOzonListPage, isOzonProductUrl, isOzonUrl } from '@/lib/ozonbox/url'
 import { getAuthSession, getSettings, saveSettings } from '@/lib/utils/storage'
 import {
   syncProducts,
@@ -152,12 +152,16 @@ function requirePositiveIntegerString(value: unknown, field: string): string {
 
 function requireExactCardProductUrl(value: unknown, sku: string): string {
   if (typeof value !== 'string' || !value.trim()) throw new Error('商品卡片缺少真实的详情页地址')
-  const sourceUrl = new URL(value.trim())
-  if (sourceUrl.search || sourceUrl.hash || extractOzonProductId(sourceUrl.href) !== sku) {
-    throw new Error('商品卡片详情页地址与 SKU 不一致或不是规范 Ozon 商品地址')
-  }
-  return sourceUrl.href
+  const url = new URL(value.trim())
+  // Remove any query params or hash that might have been missed by canonicalOzonProductUrl
+  url.search = ''
+  url.hash = ''
+  const extractedSku = extractOzonProductId(url.href)
+  if (!extractedSku) throw new Error(`商品卡片地址 ${url.href} 中未提取到 SKU`)
+  if (extractedSku !== sku) throw new Error(`商品卡片 SKU 不匹配：期望 ${sku}，实际 ${extractedSku}`)
+  return url.href
 }
+
 
 function requireExactLoadedProductUrl(value: string | undefined, sku: string): string {
   if (!value || !isOzonProductUrl(value) || extractOzonProductId(value) !== sku) {
@@ -310,17 +314,6 @@ async function processExactCardProduct(
   if (!(await isAuthenticated())) throw new Error(authRequired().error)
 
   const enabledRules = (await listPanelSelectionRules()).filter(rule => rule.enabled)
-  if (!enabledRules.length) {
-    return {
-      success: true,
-      outcome: 'skipped',
-      reason: 'no-enabled-rules',
-      sku: identity.sku,
-      matchedRuleIds: [],
-      created: 0,
-      skipped: 0,
-    }
-  }
 
   const facts = await withExactCardProductTab(identity, async (tabId) => {
     const product = assertExactCollectedCardIdentity(
@@ -336,23 +329,15 @@ async function processExactCardProduct(
     return { product, analytics, rubToCny, sellerOffers }
   })
 
-  const candidate = buildOzonSelectionCandidate({
-    product: facts.product,
-    analytics: facts.analytics,
-    rubToCny: facts.rubToCny,
-    sellerOffers: facts.sellerOffers,
-  })
-  const matchedRules = matchSelectionRules(candidate, enabledRules)
-  if (!matchedRules.length) {
-    return {
-      success: true,
-      outcome: 'skipped',
-      reason: 'no-rule-match',
-      sku: identity.sku,
-      matchedRuleIds: [],
-      created: 0,
-      skipped: 0,
-    }
+  let matchedRules: Array<{ id: number }> = []
+  if (enabledRules.length) {
+    const candidate = buildOzonSelectionCandidate({
+      product: facts.product,
+      analytics: facts.analytics,
+      rubToCny: facts.rubToCny,
+      sellerOffers: facts.sellerOffers,
+    })
+    matchedRules = matchSelectionRules(candidate, enabledRules)
   }
 
   if (!(await checkBackendHealth())) throw new Error('后端不可用,请检查 backend 是否运行')
@@ -367,6 +352,7 @@ async function processExactCardProduct(
     skipped: saved.skipped,
   }
 }
+
 
 function collectedProductForRequest(
   product: OzonboxCollectedProduct | undefined,
@@ -690,6 +676,24 @@ export default defineBackground(() => {
     // 进度转发
     if (message.action === 'enrichProgress') {
       return false
+    }
+
+    // Ozon 列表采集控制：转发到 content script
+    if ((message as Partial<OzonboxRuntimeMessage>).type === 'OZONBOX_LIST_CRAWL_START'
+      || (message as Partial<OzonboxRuntimeMessage>).type === 'OZONBOX_LIST_CRAWL_STOP'
+      || (message as Partial<OzonboxRuntimeMessage>).type === 'OZONBOX_LIST_CRAWL_SNAPSHOT') {
+      browser.tabs.query({ active: true, currentWindow: true }).then(([tab]) => {
+        if (!tab?.id) {
+          sendResponse({ error: '无活动标签页' })
+          return
+        }
+        return browser.tabs.sendMessage(tab.id, message).then((result) => {
+          sendResponse(result)
+        })
+      }).catch((error: unknown) => {
+        sendResponse({ error: errorMessage(error) })
+      })
+      return true
     }
   })
 
@@ -1045,12 +1049,13 @@ async function checkCurrentPage() {
 
     if (isOzon) {
       const isProductPage = isOzonProductUrl(url)
+      const isListPage = isOzonListPage(url)
       return {
-        isSupported: isProductPage,
+        isSupported: isProductPage || isListPage,
         platform: 'ozon',
         isProductPage,
-        isListPage: false,
-        pageType: isProductPage ? 'product' : 'unknown',
+        isListPage,
+        pageType: isProductPage ? 'product' : isListPage ? 'list' : 'unknown',
         tabId: tab.id,
         url,
       }

@@ -45,6 +45,7 @@ export interface OzonFloatingPanelOptions {
   setDetailCardsVisible?: (visible: boolean) => Promise<void>
   persistLauncherPosition?: (position: OzonPanelPosition) => Promise<void>
   collectAndSaveCurrentProduct?: () => Promise<OzonboxCollectAndSaveResult>
+  onStartListCrawl?: () => void | Promise<void>
 }
 
 export interface SellerInteractionErrorState {
@@ -211,6 +212,7 @@ export function buildOzonFloatingPanelShadow(logoUrl: string): string {
       <button class="ant-btn ant-btn-default ant-btn-amber ant-btn-block ant-btn-round" id="ozon-pricing-tool" type="button">定价工具</button>
       <button class="ant-btn ant-btn-primary ant-btn-block ant-btn-round" id="ozon-bind-cookie" type="button" aria-busy="false">绑定Cookie</button>
       <button class="ant-btn ant-btn-default ant-btn-block ant-btn-round" id="ozon-selection-settings" type="button">设置选品</button>
+      <button class="ant-btn ant-btn-primary ant-btn-block ant-btn-round" id="ozon-start-list-crawl" type="button" data-page="list">启动爬取</button>
       <div class="switch-control" id="ozon-list-card-control" data-page="list"><button class="ant-switch" id="ozon-list-card-switch" type="button" role="switch" aria-label="隐藏列表分析卡片" aria-checked="false"><span class="ant-switch-handle"></span><span class="ant-switch-inner"><span class="ant-switch-inner-checked">隐藏卡片</span></span></button></div>
       <div class="switch-control" id="ozon-detail-card-control" data-page="detail"><button class="ant-switch" id="ozon-detail-card-switch" type="button" role="switch" aria-label="显示商品详情分析卡片" aria-checked="true"><span class="ant-switch-handle"></span><span class="ant-switch-inner"><span class="ant-switch-inner-checked">其它卡片</span></span></button></div>
       <button class="ant-btn ant-btn-link ant-btn-sm" id="ozon-enter-erp" type="button">进入ERP</button>
@@ -266,6 +268,7 @@ export function startOzonFloatingPanel(options: OzonFloatingPanelOptions = {}): 
   const pricingButton = requiredElement<HTMLButtonElement>(shadow, 'ozon-pricing-tool')
   const bindCookieButton = requiredElement<HTMLButtonElement>(shadow, 'ozon-bind-cookie')
   const selectionButton = requiredElement<HTMLButtonElement>(shadow, 'ozon-selection-settings')
+  const startListCrawlButton = requiredElement<HTMLButtonElement>(shadow, 'ozon-start-list-crawl')
   const listCardControl = requiredElement<HTMLElement>(shadow, 'ozon-list-card-control')
   const detailCardControl = requiredElement<HTMLElement>(shadow, 'ozon-detail-card-control')
   const listCardSwitch = requiredElement<HTMLButtonElement>(shadow, 'ozon-list-card-switch')
@@ -499,6 +502,7 @@ export function startOzonFloatingPanel(options: OzonFloatingPanelOptions = {}): 
     if (!pageSupported && !dialogBackdrop.hidden) closeDialog(false)
     listingButton.hidden = page.kind !== 'detail'
     detailCardControl.hidden = page.kind !== 'detail'
+    startListCrawlButton.hidden = page.kind !== 'list'
     listCardControl.hidden = page.kind !== 'list'
     syncCardSwitches()
   }
@@ -626,6 +630,7 @@ export function startOzonFloatingPanel(options: OzonFloatingPanelOptions = {}): 
   profitButton.addEventListener('click', () => panelTools.openPricing('calculate2', { source: profitButton }), { signal })
   pricingButton.addEventListener('click', () => panelTools.openPricing('calculate', { source: pricingButton }), { signal })
   selectionButton.addEventListener('click', () => panelTools.openSelection(selectionButton), { signal })
+  startListCrawlButton.addEventListener('click', () => { void options.onStartListCrawl?.() }, { signal })
   enterErpButton.addEventListener('click', () => {
     enterErpButton.disabled = true
     void openErpRoot().catch((error: unknown) => {

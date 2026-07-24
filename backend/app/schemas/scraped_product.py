@@ -2,7 +2,7 @@ from typing import Optional, List, Any
 from datetime import datetime, timezone
 import json
 import re
-from pydantic import BaseModel, ConfigDict, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 
 def _camel_to_snake(name: str) -> str:
@@ -185,3 +185,47 @@ class ScrapedProductRead(ScrapedProductBase):
 class SyncProductsRequest(BaseModel):
     """浏览器插件批量同步请求"""
     products: List[ScrapedProductCreate]
+
+
+class OzonListProductCreate(BaseModel):
+    """Ozon 列表卡片事实；有意不包含 PDP sku_list/variants。"""
+    sku: str = Field(min_length=1, max_length=80)
+    title: str = ""
+    image_url: str = ""
+    product_url: str = ""
+    price: str = ""
+    original_price: str = ""
+    discount: str = ""
+    promo_joined: str = ""
+    promo_name: str = ""
+    promo_stock: str = ""
+    rating: str = ""
+    review_count: str = ""
+    points_review: str = ""
+    brand_cert: str = ""
+    scraped_at: Optional[datetime] = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def convert_camel_case(cls, data):
+        if not isinstance(data, dict):
+            return data
+        return {_camel_to_snake(key): value for key, value in data.items()}
+
+    @field_validator("sku")
+    @classmethod
+    def normalize_sku(cls, value: str) -> str:
+        value = value.strip()
+        if not value.isdigit():
+            raise ValueError("Ozon SKU 必须为数字")
+        return value
+
+
+class OzonListProductsRequest(BaseModel):
+    products: List[OzonListProductCreate] = Field(min_length=1, max_length=200)
+
+
+class OzonListSyncResponse(BaseModel):
+    created: int
+    updated: int
+    skipped: int

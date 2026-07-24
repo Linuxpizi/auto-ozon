@@ -106,6 +106,7 @@ for (const expectedMarkup of [
   'class="ant-btn ant-btn-default ant-btn-amber ant-btn-block ant-btn-round" id="ozon-pricing-tool" type="button">定价工具',
   'class="ant-btn ant-btn-primary ant-btn-block ant-btn-round" id="ozon-bind-cookie" type="button" aria-busy="false">绑定Cookie',
   'class="ant-btn ant-btn-default ant-btn-block ant-btn-round" id="ozon-selection-settings" type="button">设置选品',
+  'class="ant-btn ant-btn-primary ant-btn-block ant-btn-round" id="ozon-start-list-crawl" type="button" data-page="list">启动爬取',
   'id="ozon-list-card-switch" type="button" role="switch" aria-label="隐藏列表分析卡片" aria-checked="false"><span class="ant-switch-handle"></span><span class="ant-switch-inner"><span class="ant-switch-inner-checked">隐藏卡片</span>',
   'id="ozon-detail-card-switch" type="button" role="switch" aria-label="显示商品详情分析卡片" aria-checked="true"><span class="ant-switch-handle"></span><span class="ant-switch-inner"><span class="ant-switch-inner-checked">其它卡片</span>',
   'class="ant-btn ant-btn-link ant-btn-sm" id="ozon-enter-erp" type="button">进入ERP',
@@ -136,6 +137,7 @@ const orderedControlIds = [
   'ozon-pricing-tool',
   'ozon-bind-cookie',
   'ozon-selection-settings',
+  'ozon-start-list-crawl',
   'ozon-list-card-control',
   'ozon-detail-card-control',
   'ozon-enter-erp',
@@ -369,7 +371,8 @@ assert.ok(backgroundSource.includes('await bindOzonSellerCookies({'))
 assert.ok(backgroundSource.includes('ssoCookie: serializeCookies(ssoCookies)'))
 assert.ok(backgroundSource.includes('cookieCount: ozonCookies.length + ssoCookies.length'))
 assert.ok(backgroundSource.includes('bindSellerCookies().then(sendResponse).catch((error: unknown) => {'))
-assert.ok(contentSource.includes("request.type !== 'COLLECT_PRODUCT'"))
+assert.ok(backgroundSource.includes("type === 'OZONBOX_PROCESS_CARD_PRODUCT'"))
+assert.ok(backgroundSource.includes('processExactCardProduct(request).then(sendResponse)'))
 assert.ok(contentSource.includes('persistLauncherPosition: (launcherPosition) => persistState({ launcherPosition })'))
 assert.ok(contentSource.includes('persistCardVisibility: (visibility) => persistState(visibility)'))
 assert.ok(contentSource.includes("type: 'OZONBOX_COLLECT_CARD_PRODUCT'"))
@@ -382,6 +385,13 @@ assert.ok(contentSource.includes('const product = await collectCardProduct(conte
 assert.ok(contentSource.includes('requireFloatingPanel().openListingForProduct(product)'))
 assert.ok(contentSource.includes("requireFloatingPanel().openPricingForProduct('calculate2', product)"))
 assert.ok(contentSource.includes("requireFloatingPanel().openPricingForProduct('calculate', product)"))
+assert.ok(contentSource.includes("import { startOzonListCrawlController } from '@/lib/ozonbox/list-crawl'"))
+assert.ok(contentSource.includes("type: 'OZONBOX_PROCESS_CARD_PRODUCT'"))
+assert.ok(contentSource.includes('return assertOzonboxProcessCardProductResponse(response, sku)'))
+assert.ok(contentSource.includes('listCrawler = startOzonListCrawlController({ processCardProduct: processListCardProduct })'))
+assert.ok(contentSource.includes('onStartListCrawl: () => listCrawler?.start()'))
+assert.ok(contentSource.includes('listCrawler?.stop()'))
+assert.ok(contentSource.includes('listCrawler?.reconcile()'))
 assert.ok(!floatingPanelSource.includes('browser.action.openPopup'))
 assert.ok(floatingPanelSource.includes("type: 'OZONBOX_BIND_SELLER_COOKIES'"))
 assert.ok(!floatingPanelSource.includes("type: 'OZONBOX_GET_SELLER_COOKIES'"))
@@ -395,6 +405,8 @@ assert.ok(floatingPanelSource.includes('window.location.reload()'))
 assert.ok(floatingPanelSource.includes('panelTools.openListing({ source: listingButton })'))
 assert.ok(floatingPanelSource.includes("panelTools.openPricing('calculate2', { source: profitButton })"))
 assert.ok(floatingPanelSource.includes("panelTools.openPricing('calculate', { source: pricingButton })"))
+assert.ok(floatingPanelSource.includes("startListCrawlButton.hidden = page.kind !== 'list'"))
+assert.ok(floatingPanelSource.includes('void options.onStartListCrawl?.()'))
 assert.ok(floatingPanelSource.includes('openListingForProduct: (product) => panelTools.openListing({ product })'))
 assert.ok(floatingPanelSource.includes('openPricingForProduct: (route, product) => panelTools.openPricing(route, { product })'))
 

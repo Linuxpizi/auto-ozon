@@ -192,6 +192,75 @@ export interface OzonboxCollectCardProductRequest {
   sourceUrl: string
 }
 
+/** Ask the exact Ozon PDP content tab for its same-origin seller-offer API response. */
+export interface OzonboxSellerOffersRequest {
+  type: 'OZONBOX_FETCH_SELLER_OFFERS'
+  sku: string
+}
+
+/** Process one exact list-card identity through the complete PDP selection flow. */
+export interface OzonboxProcessCardProductRequest {
+  type: 'OZONBOX_PROCESS_CARD_PRODUCT'
+  sku: string
+  sourceUrl: string
+}
+
+export interface OzonboxProcessCardProductResponse {
+  success: true
+  outcome: 'saved' | 'skipped'
+  reason?: 'no-enabled-rules' | 'no-rule-match'
+  sku: string
+  matchedRuleIds: number[]
+  created: number
+  skipped: number
+}
+
+export interface OzonboxProcessCardProductFailureResponse {
+  success: false
+  error: string
+}
+
+export type OzonboxProcessCardProductResult =
+  | OzonboxProcessCardProductResponse
+  | OzonboxProcessCardProductFailureResponse
+
+export function assertOzonboxProcessCardProductResponse(
+  value: unknown,
+  expectedSku?: string,
+): OzonboxProcessCardProductResponse {
+  if (!isRecord(value)) throw new Error('列表商品处理服务返回了无效响应')
+  if (value.success !== true) {
+    const message = typeof value.error === 'string' && value.error.trim()
+      ? value.error.trim()
+      : '列表商品处理失败且未返回原因'
+    throw new Error(message)
+  }
+  if (value.outcome !== 'saved' && value.outcome !== 'skipped') {
+    throw new Error('列表商品处理服务返回了无效结果')
+  }
+  if (typeof value.sku !== 'string' || !/^[1-9]\d*$/.test(value.sku)) {
+    throw new Error('列表商品处理服务返回了无效 SKU')
+  }
+  if (expectedSku !== undefined && value.sku !== expectedSku) {
+    throw new Error('列表商品处理结果与请求 SKU 不一致')
+  }
+  if (!Array.isArray(value.matchedRuleIds)
+    || value.matchedRuleIds.some(id => typeof id !== 'number' || !Number.isInteger(id) || id <= 0)) {
+    throw new Error('列表商品处理服务返回了无效规则 ID')
+  }
+  for (const field of ['created', 'skipped'] as const) {
+    if (typeof value[field] !== 'number' || !Number.isInteger(value[field]) || value[field] < 0) {
+      throw new Error(`列表商品处理服务返回了无效 ${field} 数量`)
+    }
+  }
+  if (value.outcome === 'skipped'
+    && value.reason !== 'no-enabled-rules'
+    && value.reason !== 'no-rule-match') {
+    throw new Error('列表商品跳过结果缺少有效原因')
+  }
+  return value as unknown as OzonboxProcessCardProductResponse
+}
+
 /** A separate end-to-end action; never alias this truthful save flow to listing. */
 export interface OzonboxCollectAndSaveRequest {
   type: 'OZONBOX_COLLECT_AND_SAVE_CURRENT_PRODUCT'
@@ -217,6 +286,8 @@ export type OzonboxCollectAndSaveResult =
 export type OzonboxRuntimeMessage =
   | OzonboxCollectRequest
   | OzonboxCollectCardProductRequest
+  | OzonboxSellerOffersRequest
+  | OzonboxProcessCardProductRequest
   | OzonboxCollectAndSaveRequest
   | OzonboxSellerIdRequest
   | OzonboxSellerCookiesRequest
@@ -228,6 +299,7 @@ export type OzonboxRuntimeMessage =
 export type OzonboxRuntimeResponse =
   | OzonboxCollectedProduct
   | OzonboxCollectAndSaveResult
+  | OzonboxProcessCardProductResult
   | OzonboxSellerIdResponse
   | OzonboxSellerCookiesResponse
   | OzonboxBindSellerCookiesResponse

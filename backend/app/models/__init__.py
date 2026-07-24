@@ -14,3 +14,4 @@ from app.models.upload_draft import UploadDraft  # NEW: unified upload pipeline
 from app.models.user import User
 from app.models.ozon_category import OzonCategory
 from app.models.panel_selection_rule import PanelSelectionRule
+from app.models.ozon_cookie_snapshot import OzonCookieSnapshot

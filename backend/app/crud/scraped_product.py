@@ -1,9 +1,10 @@
 import json
+import re
 from typing import Any, List, Optional
 from sqlalchemy.orm import Session
 from sqlalchemy import func
 from app.models.scraped_product import ScrapedProductRecord
-from app.schemas.scraped_product import ScrapedProductCreate
+from app.schemas.scraped_product import OzonListProductCreate, ScrapedProductCreate
 
 
 def get_scraped_product(db: Session, record_id: int):
@@ -196,6 +197,189 @@ def _merge_variant_values(old_value: Any, new_value: Any) -> list[dict]:
         seen.add(key)
         merged.append({"name": name, "value": value})
     return merged
+
+
+def _parse_ozon_list_number(value: str) -> Optional[float]:
+    """Parse a factual number from Ozon card text without guessing a missing value."""
+    match = re.search(r"[-+]?\d(?:[\d\s\u00a0\u202f.,]*\d)?", value or "")
+    if match is None:
+        return None
+    normalized = re.sub(r"[\s\u00a0\u202f]", "", match.group(0))
+    separators = [index for index, char in enumerate(normalized) if char in ".,"]
+    if separators:
+        last_separator = separators[-1]
+        decimal_length = len(normalized) - last_separator - 1
+        # Ozon's Russian cards use comma for decimals; a lone three-digit group
+        # such as ``1.299 ₽`` is a thousands separator, not a fractional price.
+        grouped_integer = decimal_length == 3 and len(separators) == 1
+        if grouped_integer:
+            normalized = normalized.replace(".", "").replace(",", "")
+        else:
+            integer = normalized[:last_separator].replace(".", "").replace(",", "")
+            decimal = normalized[last_separator + 1 :]
+            normalized = f"{integer}.{decimal}"
+    try:
+        return float(normalized)
+    except ValueError:
+        return None
+
+
+def _parse_ozon_list_count(value: str) -> Optional[int]:
+    parsed = _parse_ozon_list_number(value)
+    if parsed is None:
+        return None
+    normalized = (value or "").strip().casefold()
+    multiplier = 1_000_000 if re.search(r"[mм]\b", normalized) else 1_000 if re.search(r"[kк]\b", normalized) else 1
+    return max(0, int(parsed * multiplier))
+
+
+def _ozon_list_facts(product: OzonListProductCreate) -> list[dict]:
+    source_path = "Ozon list card"
+    values = (
+        ("促销参与状态", product.promo_joined),
+        ("促销名称", product.promo_name),
+        ("促销库存文本", product.promo_stock),
+        ("积分评价", product.points_review),
+        ("品牌认证", product.brand_cert),
+    )
+    return [
+        {"name": name, "value": value.strip(), "sourcePath": source_path}
+        for name, value in values
+        if value and value.strip()
+    ]
+
+
+def _dedupe_ozon_list_products(
+    products: List[OzonListProductCreate],
+) -> tuple[list[OzonListProductCreate], int]:
+    """Merge repeated SKUs while retaining the latest non-empty card facts."""
+    by_sku: dict[str, OzonListProductCreate] = {}
+    duplicate_count = 0
+    fields = tuple(OzonListProductCreate.model_fields)
+    for product in products:
+        previous = by_sku.get(product.sku)
+        if previous is None:
+            by_sku[product.sku] = product
+            continue
+        duplicate_count += 1
+        updates = {}
+        for field in fields:
+            if field == "sku":
+                continue
+            value = getattr(product, field)
+            if value is not None and (not isinstance(value, str) or value.strip()):
+                updates[field] = value
+        by_sku[product.sku] = previous.model_copy(update=updates)
+    return list(by_sku.values()), duplicate_count
+
+
+def upsert_ozon_list_products(
+    db: Session,
+    products: List[OzonListProductCreate],
+) -> tuple[int, int, int]:
+    """Upsert sparse Ozon list-card facts without invoking PDP completeness rules.
+
+    The catalog is globally shared. Legacy duplicate rows may exist, so the oldest
+    matching row is selected deterministically; this operation does not claim or
+    introduce database-level uniqueness.
+    """
+    unique_products, skipped = _dedupe_ozon_list_products(products)
+    requested_skus = [product.sku for product in unique_products]
+    existing_rows = (
+        db.query(ScrapedProductRecord)
+        .filter(
+            ScrapedProductRecord.platform == "ozon",
+            ScrapedProductRecord.source_id.in_(requested_skus),
+        )
+        .order_by(ScrapedProductRecord.id.asc())
+        .all()
+    )
+    existing_by_sku: dict[str, ScrapedProductRecord] = {}
+    for row in existing_rows:
+        existing_by_sku.setdefault(row.source_id, row)
+
+    created = 0
+    updated = 0
+    for product in unique_products:
+        record = existing_by_sku.get(product.sku)
+        price = _parse_ozon_list_number(product.price)
+        old_price = _parse_ozon_list_number(product.original_price)
+        rating = _parse_ozon_list_number(product.rating)
+        review_count = _parse_ozon_list_count(product.review_count)
+        incoming_facts = _ozon_list_facts(product)
+
+        if record is None:
+            record = ScrapedProductRecord(
+                platform="ozon",
+                source_id=product.sku,
+                title=product.title.strip(),
+                price=price or 0.0,
+                old_price=old_price or 0.0,
+                currency="RUB",
+                images=[product.image_url.strip()] if product.image_url.strip() else [],
+                rating=rating or 0.0,
+                review_count=review_count or 0,
+                discount=product.discount.strip(),
+                source_url=product.product_url.strip(),
+                scraped_at=product.scraped_at,
+                facts=incoming_facts,
+                synced=True,
+            )
+            db.add(record)
+            existing_by_sku[product.sku] = record
+            created += 1
+            continue
+
+        changed = False
+        title = product.title.strip()
+        if title and (not record.title or len(title) > len(record.title)):
+            record.title = title
+            changed = True
+
+        image_url = product.image_url.strip()
+        if image_url and not _as_list(record.images):
+            record.images = [image_url]
+            changed = True
+
+        for field, value in (
+            ("price", price),
+            ("old_price", old_price),
+            ("rating", rating),
+        ):
+            if value is not None and value > 0 and value != getattr(record, field):
+                setattr(record, field, value)
+                changed = True
+
+        if review_count is not None and review_count > (record.review_count or 0):
+            record.review_count = review_count
+            changed = True
+
+        discount = product.discount.strip()
+        if discount and discount != record.discount:
+            record.discount = discount
+            changed = True
+
+        source_url = product.product_url.strip()
+        if source_url and source_url != record.source_url:
+            record.source_url = source_url
+            changed = True
+
+        if product.scraped_at and product.scraped_at != record.scraped_at:
+            record.scraped_at = product.scraped_at
+            changed = True
+
+        merged_facts = _merge_facts(record.facts, incoming_facts)
+        if merged_facts != _as_list(record.facts):
+            record.facts = merged_facts
+            changed = True
+
+        if changed:
+            updated += 1
+        else:
+            skipped += 1
+
+    db.commit()
+    return created, updated, skipped
 
 
 def bulk_create_scraped_products(

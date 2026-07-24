@@ -18,6 +18,7 @@ import type {
   PanelSelectionRuleInput,
 } from '@/lib/ozonbox/panel-tools-contract'
 import { assertCompleteProduct } from './product-data'
+import { rubToCnyFromExchangeRates } from '@/lib/ozonbox/exchange-rate'
 import { clearAuthSession, getAuthSession, getSettings, saveAuthSession } from './storage'
 
 /** 获取后端 API 基础地址 */
@@ -176,6 +177,20 @@ export async function runPanelPricing(input: PanelPricingInput): Promise<PanelPr
 
 export async function listPanelSelectionRules(): Promise<PanelSelectionRule[]> {
   return request<PanelSelectionRule[]>('/panel-tools/selection-rules')
+}
+
+export interface OzonboxExchangeRatesResponse {
+  rates: Record<string, unknown>
+  [key: string]: unknown
+}
+
+export async function getExchangeRates(): Promise<OzonboxExchangeRatesResponse> {
+  return request<OzonboxExchangeRatesResponse>('/v1/exchange-rates')
+}
+
+export async function getRubToCnyExchangeRate(): Promise<number | undefined> {
+  const response = await getExchangeRates()
+  return rubToCnyFromExchangeRates(response.rates)
 }
 
 export async function createPanelSelectionRule(input: PanelSelectionRuleInput): Promise<PanelSelectionRule> {

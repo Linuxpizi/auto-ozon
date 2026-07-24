@@ -5,16 +5,41 @@ import {
 import { collectCurrentOzonProduct } from '@/lib/ozonbox/collector'
 import {
   assertOzonboxCollectedProduct,
+  assertOzonboxProcessCardProductResponse,
   isRecord,
   type OzonboxCollectedProduct,
+  type OzonboxProcessCardProductResponse,
   type OzonboxRuntimeMessage,
 } from '@/lib/ozonbox/contract'
 import { startOzonFloatingPanel } from '@/lib/ozonbox/floating-panel'
+import { startOzonListCrawlController } from '@/lib/ozonbox/list-crawl'
+import type { OzonListCardIdentity } from '@/lib/ozonbox/list-crawl-contract'
+import { extractOzonProductId } from '@/lib/ozonbox/url'
 import {
   readOzonPanelState,
   saveOzonPanelState,
   type OzonPanelState,
 } from '@/lib/ozonbox/panel-storage'
+
+function requireCurrentProductSku(value: unknown): string {
+  if (typeof value !== 'string' || !/^[1-9]\d*$/.test(value)) {
+    throw new Error('卖家报价请求缺少有效 SKU')
+  }
+  if (extractOzonProductId(location.href) !== value) {
+    throw new Error('当前 Ozon 商品详情页与卖家报价 SKU 不一致')
+  }
+  return value
+}
+
+async function fetchCurrentProductSellerOffers(skuValue: unknown): Promise<unknown> {
+  const sku = requireCurrentProductSku(skuValue)
+  const response = await fetch(
+    `/api/entrypoint-api.bx/page/json/v2?url=/modal/otherOffersFromSellers?product_id=${sku}`,
+    { credentials: 'include' },
+  )
+  if (!response.ok) throw new Error(`Ozon 卖家报价请求失败 (${response.status})`)
+  return response.json() as Promise<unknown>
+}
 
 export default defineContentScript({
   matches: ['https://*.ozon.ru/*'],
@@ -22,13 +47,19 @@ export default defineContentScript({
     let invalidated = false
     let analyticsCards: ReturnType<typeof startOzonAnalyticsCards> | undefined
     let floatingPanel: ReturnType<typeof startOzonFloatingPanel> | undefined
+    let listCrawler: ReturnType<typeof startOzonListCrawlController> | undefined
     const onMessage: Parameters<typeof browser.runtime.onMessage.addListener>[0] = (message, _sender, sendResponse) => {
       const request = message as Partial<OzonboxRuntimeMessage>
-      if (request.type !== 'COLLECT_PRODUCT') return false
-      collectCurrentOzonProduct()
+      const operation = request.type === 'COLLECT_PRODUCT'
+        ? collectCurrentOzonProduct()
+        : request.type === 'OZONBOX_FETCH_SELLER_OFFERS'
+          ? fetchCurrentProductSellerOffers(request.sku)
+          : undefined
+      if (!operation) return false
+      operation
         .then((product) => sendResponse(product))
         .catch((error: unknown) => sendResponse({
-          error: error instanceof Error ? error.message : 'Ozon 商品采集失败',
+          error: error instanceof Error ? error.message : 'Ozon 页面请求失败',
         }))
       return true
     }
@@ -38,6 +69,7 @@ export default defineContentScript({
       browser.runtime.onMessage.removeListener(onMessage)
       floatingPanel?.stop()
       analyticsCards?.stop()
+      listCrawler?.stop()
     })
 
     let panelState = await readOzonPanelState()
@@ -78,6 +110,17 @@ export default defineContentScript({
       return assertOzonboxCollectedProduct(response.data)
     }
 
+    const processListCardProduct = async (
+      { sku, sourceUrl }: OzonListCardIdentity,
+    ): Promise<OzonboxProcessCardProductResponse> => {
+      const response: unknown = await browser.runtime.sendMessage({
+        type: 'OZONBOX_PROCESS_CARD_PRODUCT',
+        sku,
+        sourceUrl,
+      } satisfies OzonboxRuntimeMessage)
+      return assertOzonboxProcessCardProductResponse(response, sku)
+    }
+
     const requireFloatingPanel = (): NonNullable<typeof floatingPanel> => {
       if (!floatingPanel) throw new Error('鲸智 AI 浮窗尚未就绪')
       return floatingPanel
@@ -99,17 +142,20 @@ export default defineContentScript({
         requireFloatingPanel().openPricingForProduct('calculate', product)
       },
     })
+    listCrawler = startOzonListCrawlController({ processCardProduct: processListCardProduct })
     floatingPanel = startOzonFloatingPanel({
       initialState: panelState,
       getCardVisibility: analyticsCards.getCardVisibility,
       setListCardsHidden: analyticsCards.setListCardsHidden,
       setDetailCardsVisible: analyticsCards.setDetailCardsVisible,
       persistLauncherPosition: (launcherPosition) => persistState({ launcherPosition }),
+      onStartListCrawl: () => listCrawler?.start(),
     })
 
     ctx.addEventListener(window, 'wxt:locationchange', () => {
       analyticsCards?.reconcile()
       floatingPanel?.reconcile()
+      listCrawler?.reconcile()
     })
   },
 })

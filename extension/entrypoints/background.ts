@@ -4,6 +4,8 @@ import type {
   OzonboxCollectAndSaveResponse,
   OzonboxCollectCardProductRequest,
   OzonboxCollectedProduct,
+  OzonboxProcessCardProductRequest,
+  OzonboxProcessCardProductResponse,
   OzonboxRuntimeMessage,
   OzonboxSellerApiResponse,
 } from '@/lib/ozonbox/contract'
@@ -31,10 +33,15 @@ import {
   updateMockRule,
 } from '@/lib/ozonbox/panel-tools-mock'
 import { toSelectionProduct } from '@/lib/ozonbox/selection-product'
+import { buildOzonSelectionCandidate, matchSelectionRules } from '@/lib/ozonbox/selection-matcher'
 import {
+  analyticsItemForExactSku,
   collectedProductAnalyticsSku,
   mergeExactSkuAnalyticsBrand,
+  normalizeAnalyticsItem,
 } from '@/lib/ozonbox/seller-analytics'
+import type { OzonboxAnalyticsItem } from '@/lib/ozonbox/seller-analytics'
+import { parseOzonSellerOffersResponse } from '@/lib/ozonbox/seller-offers'
 import {
   companyIdFromSellerCookie,
   OZON_COMPANY_ID_COOKIE_NAME,
@@ -47,6 +54,7 @@ import {
   syncProducts,
   bindOzonSellerCookies,
   fetchBackendProducts,
+  getRubToCnyExchangeRate,
   deleteBackendProduct,
   checkBackendHealth,
   queryOzonboxPackageFacts,
@@ -207,21 +215,35 @@ function assertExactCollectedCardIdentity(product: OzonboxCollectedProduct, sku:
   return product
 }
 
-async function collectExactCardProduct(request: OzonboxCollectCardProductRequest): Promise<OzonboxCollectedProduct> {
-  const sku = requirePositiveIntegerString(request.sku, 'sku')
-  const sourceUrl = requireExactCardProductUrl(request.sourceUrl, sku)
-  if (!(await isAuthenticated())) throw new Error(authRequired().error)
+interface ExactCardProductIdentity {
+  sku: string
+  sourceUrl: string
+}
 
+function exactCardProductIdentity(
+  request: Pick<OzonboxCollectCardProductRequest, 'sku' | 'sourceUrl'>,
+): ExactCardProductIdentity {
+  const sku = requirePositiveIntegerString(request.sku, 'sku')
+  return {
+    sku,
+    sourceUrl: requireExactCardProductUrl(request.sourceUrl, sku),
+  }
+}
+
+async function withExactCardProductTab<T>(
+  identity: ExactCardProductIdentity,
+  collect: (tabId: number) => Promise<T>,
+): Promise<T> {
   let temporaryTabId: number | undefined
   try {
-    const temporaryTab = await browser.tabs.create({ url: sourceUrl, active: false })
+    const temporaryTab = await browser.tabs.create({ url: identity.sourceUrl, active: false })
     temporaryTabId = temporaryTab.id
     if (!temporaryTabId) throw new Error('无法创建所选商品的临时标签页')
-    await waitForExactOzonProductTab(temporaryTabId, sku)
-    const product = await collectOzonProductInTab(temporaryTabId)
+    await waitForExactOzonProductTab(temporaryTabId, identity.sku)
+    const result = await collect(temporaryTabId)
     const finalTab = await browser.tabs.get(temporaryTabId)
-    requireExactLoadedProductUrl(finalTab.url, sku)
-    return assertExactCollectedCardIdentity(product, sku)
+    requireExactLoadedProductUrl(finalTab.url, identity.sku)
+    return result
   } finally {
     if (temporaryTabId) {
       try {
@@ -230,6 +252,119 @@ async function collectExactCardProduct(request: OzonboxCollectCardProductRequest
         // The user/browser may already have removed the temporary tab.
       }
     }
+  }
+}
+
+async function collectExactCardProduct(request: OzonboxCollectCardProductRequest): Promise<OzonboxCollectedProduct> {
+  const identity = exactCardProductIdentity(request)
+  if (!(await isAuthenticated())) throw new Error(authRequired().error)
+  return withExactCardProductTab(identity, async (tabId) => {
+    const product = await collectOzonProductInTab(tabId)
+    return assertExactCollectedCardIdentity(product, identity.sku)
+  })
+}
+
+async function fetchExactSellerAnalyticsItem(sku: string): Promise<OzonboxAnalyticsItem | null> {
+  try {
+    const sellerId = await readOzonSellerId()
+    const response = await fetchSellerAnalytics(sku, sellerId)
+    if (!response.ok) {
+      console.warn(`Ozon seller analytics 不可用（HTTP ${response.status}），按缺失事实处理`)
+      return null
+    }
+    const item = analyticsItemForExactSku(response.data, sku)
+    return item ? normalizeAnalyticsItem(item) : null
+  } catch (error: unknown) {
+    console.warn('Ozon seller analytics 不可用，按缺失事实处理', error)
+    return null
+  }
+}
+
+async function fetchSellerOffersInProductTab(tabId: number, sku: string) {
+  try {
+    const request: OzonboxRuntimeMessage = { type: 'OZONBOX_FETCH_SELLER_OFFERS', sku }
+    const response: unknown = await browser.tabs.sendMessage(tabId, request)
+    if (isRecord(response) && typeof response.error === 'string' && response.error.trim()) {
+      throw new Error(response.error.trim())
+    }
+    return parseOzonSellerOffersResponse(response)
+  } catch (error: unknown) {
+    console.warn('Ozon PDP 卖家报价不可用，按缺失事实处理', error)
+    return undefined
+  }
+}
+
+async function readOptionalRubToCnyRate(): Promise<number | undefined> {
+  try {
+    return await getRubToCnyExchangeRate()
+  } catch (error: unknown) {
+    console.warn('RUB→CNY 汇率不可用，CNY 事实按缺失处理', error)
+    return undefined
+  }
+}
+
+async function processExactCardProduct(
+  request: OzonboxProcessCardProductRequest,
+): Promise<OzonboxProcessCardProductResponse> {
+  const identity = exactCardProductIdentity(request)
+  if (!(await isAuthenticated())) throw new Error(authRequired().error)
+
+  const enabledRules = (await listPanelSelectionRules()).filter(rule => rule.enabled)
+  if (!enabledRules.length) {
+    return {
+      success: true,
+      outcome: 'skipped',
+      reason: 'no-enabled-rules',
+      sku: identity.sku,
+      matchedRuleIds: [],
+      created: 0,
+      skipped: 0,
+    }
+  }
+
+  const facts = await withExactCardProductTab(identity, async (tabId) => {
+    const product = assertExactCollectedCardIdentity(
+      await collectOzonProductInTab(tabId, { enrichFromSeller: false }),
+      identity.sku,
+    )
+    const analyticsSku = collectedProductAnalyticsSku(product) ?? identity.sku
+    const [analytics, rubToCny, sellerOffers] = await Promise.all([
+      fetchExactSellerAnalyticsItem(analyticsSku),
+      readOptionalRubToCnyRate(),
+      fetchSellerOffersInProductTab(tabId, identity.sku),
+    ])
+    return { product, analytics, rubToCny, sellerOffers }
+  })
+
+  const candidate = buildOzonSelectionCandidate({
+    product: facts.product,
+    analytics: facts.analytics,
+    rubToCny: facts.rubToCny,
+    sellerOffers: facts.sellerOffers,
+  })
+  const matchedRules = matchSelectionRules(candidate, enabledRules)
+  if (!matchedRules.length) {
+    return {
+      success: true,
+      outcome: 'skipped',
+      reason: 'no-rule-match',
+      sku: identity.sku,
+      matchedRuleIds: [],
+      created: 0,
+      skipped: 0,
+    }
+  }
+
+  if (!(await checkBackendHealth())) throw new Error('后端不可用,请检查 backend 是否运行')
+  const saved = await syncProducts([toSelectionProduct(facts.product)])
+  await updateBadge()
+  return {
+    success: true,
+    outcome: 'saved',
+    sku: identity.sku,
+    matchedRuleIds: matchedRules.map(rule => rule.id),
+    created: saved.created,
+    skipped: saved.skipped,
   }
 }
 
@@ -394,6 +529,14 @@ export default defineBackground(() => {
       collectExactCardProduct(request).then((product) => {
         sendResponse({ success: true, data: product })
       }).catch((error: unknown) => {
+        sendResponse({ success: false, error: errorMessage(error) })
+      })
+      return true
+    }
+
+    if ((message as Partial<OzonboxRuntimeMessage>).type === 'OZONBOX_PROCESS_CARD_PRODUCT') {
+      const request = message as OzonboxProcessCardProductRequest
+      processExactCardProduct(request).then(sendResponse).catch((error: unknown) => {
         sendResponse({ success: false, error: errorMessage(error) })
       })
       return true
@@ -823,8 +966,8 @@ async function handleBatchSync(products: ScrapedProduct[]) {
     const result = await syncProducts(products)
     await updateBadge()
     return { success: true, created: result.created, skipped: result.skipped }
-  } catch (e) {
-    return { success: false, error: String(e) }
+  } catch (error) {
+    return { success: false, error: errorMessage(error) }
   }
 }
 

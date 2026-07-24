@@ -1,6 +1,6 @@
 {
   "name": "auto-ozon-extension",
-  "displayName": "Auto Ozon Collector",
+  "displayName": "鲸智 AI",
   "version": "0.1.0",
   "description": "Ozon、Wildberries、1688 与拼多多商品数据采集扩展",
   "type": "module",

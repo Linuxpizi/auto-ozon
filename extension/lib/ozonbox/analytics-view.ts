@@ -13,6 +13,18 @@ interface AnalyticsField {
 }
 
 export function buildAnalyticsDoc(type: OzonboxAnalyticsCardType, logoUrl: string): string {
+  if (type === 'lite') {
+    return `<!DOCTYPE html><html><head><meta charset="utf-8"><style>
+      *{box-sizing:border-box}html,body{margin:0;padding:0;background:transparent}body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"PingFang SC","Microsoft YaHei",sans-serif;color:#1f2937}
+      .card.mz-widget-cate{position:relative;padding:10px;border-radius:20px;background:linear-gradient(to bottom,#fff5f5 0%,#fff 70%,#fff 100%);box-shadow:0 20px 12px -16px rgba(0,30,85,.1),0 8px 24px 18px rgba(0,30,85,.05);overflow:hidden}
+      .header{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:8px;flex-wrap:wrap}.brand{display:flex;align-items:center;gap:8px;min-width:0}.logo{height:20px;max-width:96px;object-fit:contain}.title{font-size:13px;line-height:20px;color:#4242a8;font-weight:700;white-space:nowrap}
+      .status-bar{display:flex;align-items:center;gap:8px;padding:0 8px 8px}.status{flex:1;min-width:0;color:#666;font-size:12px;line-height:18px;word-break:break-word}
+      .list{display:flex;flex-direction:column;gap:6px;padding:8px;min-height:100px}.item{display:flex;align-items:baseline;justify-content:flex-start;gap:4px;font-size:13px;line-height:1.35}.label{display:inline-block;color:#666;white-space:nowrap}.value{display:inline-block;flex:1;color:#1f2937;font-weight:700;vertical-align:top;word-break:break-all}.metric-sales .value{color:#ff6b00}.metric-ads .value{color:#16a34a}
+    </style></head><body><div class="card mz-widget-cate"><div class="header"><div class="brand"><img class="logo" src="${logoUrl}" alt="鲸智 AI"><div class="title">鲸智 AI</div></div></div>
+    <div class="status-bar"><div class="status" id="status">等待数据...</div></div>
+    <div class="list" id="metrics" style="display:none"></div></div></body></html>`
+  }
+
   return `<!DOCTYPE html><html><head><meta charset="utf-8"><style>
     body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"PingFang SC","Microsoft YaHei",sans-serif;background:#fff}
     .card{border:1px solid #e6eef7;border-radius:12px;box-shadow:0 6px 18px rgba(0,0,0,.12);overflow:hidden}
@@ -21,7 +33,7 @@ export function buildAnalyticsDoc(type: OzonboxAnalyticsCardType, logoUrl: strin
     .list{display:flex;flex-direction:column;gap:3px;padding:0 10px 10px}.item{display:flex;align-items:baseline;justify-content:flex-start;gap:6px;font-size:13px;line-height:1.3}
     .label{color:#666;white-space:nowrap;min-width:86px}.value{color:#1a73e8;font-weight:600;word-break:break-word;text-align:left;flex:1}.metric-sales .value{color:#ff6b00}.metric-ads .value{color:#16a34a}
   </style></head><body><div class="card"><div class="header"><img class="logo" src="${logoUrl}" alt="鲸智 AI"><div class="title">鲸智 AI</div></div>
-  <div class="status-bar"><div class="status" id="status">${type === 'detail' ? '加载中...' : '等待数据...'}</div></div>
+  <div class="status-bar"><div class="status" id="status">加载中...</div></div>
   <div class="list" id="metrics" style="display:none"></div></div></body></html>`
 }
 
@@ -166,12 +178,14 @@ export function createAnalyticsIframe(
   id: string,
   type: OzonboxAnalyticsCardType,
   sku: string,
+  sourceUrl?: string,
 ): HTMLIFrameElement {
   const iframe = document.createElement('iframe')
   iframe.id = id
   iframe.width = '100%'
   iframe.height = type === 'detail' ? '140' : '120'
   iframe.dataset.sku = sku
+  if (sourceUrl) iframe.dataset.sourceUrl = sourceUrl
   iframe.dataset.type = type
   iframe.dataset.ozonboxAnalytics = 'true'
   iframe.style.border = '0'

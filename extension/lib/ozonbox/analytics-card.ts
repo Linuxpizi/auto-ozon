@@ -18,7 +18,8 @@ const DETAIL_PRICE_SELECTOR = 'div[data-widget="webSale"]'
 const GENERATED_IFRAME_SELECTOR = 'iframe[data-ozonbox-analytics="true"], iframe[id^="ozon-analytics-"]'
 const CARD_OPERATION_SELECTOR = '[data-ozonbox-card-operation="true"]'
 const RECONCILE_DELAY_MS = 80
-const LIST_INSERT_DELAY_MS = 900
+const LIST_BATCH_SIZE = 4
+const LIST_BATCH_DELAY_MS = 300
 
 export type OzonAnalyticsPage =
   | { kind: 'detail'; sku: string }
@@ -54,6 +55,11 @@ const analyticsItemCache = new SuccessfulRequestCache<
 const iframeRequests = new WeakMap<HTMLIFrameElement, Promise<void>>()
 let activeController: OzonAnalyticsCardsController | undefined
 
+interface PendingListInsertion {
+  timer: number
+  context: OzonCardProductContext
+}
+
 export function analyticsPageForUrl(value: string): OzonAnalyticsPage {
   if (isOzonProductUrl(value)) {
     const sku = extractOzonProductId(value)
@@ -86,6 +92,23 @@ function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : 'Ozon analytics 加载失败'
 }
 
+function sameCardProductContext(
+  left: OzonCardProductContext | undefined,
+  right: OzonCardProductContext | undefined,
+): boolean {
+  return Boolean(left && right && left.sku === right.sku && left.sourceUrl === right.sourceUrl)
+}
+
+function iframeHasCurrentIdentity(iframe: HTMLIFrameElement, sku: string): boolean {
+  if (!iframe.isConnected || iframe.dataset.sku !== sku) return false
+  if (iframe.dataset.type !== 'lite') return true
+  const card = iframe.closest<HTMLElement>(LIST_CARD_SELECTOR)
+  const frameContext = iframe.dataset.sourceUrl
+    ? { sku: iframe.dataset.sku, sourceUrl: iframe.dataset.sourceUrl }
+    : undefined
+  return Boolean(card && sameCardProductContext(frameContext, cardProductContext(card)))
+}
+
 function updateAnalyticsIframe(
   iframe: HTMLIFrameElement,
   sku: string,
@@ -103,7 +126,7 @@ function updateAnalyticsIframe(
         () => fetchOzonAnalyticsItem(sku, shopId),
         forceRefresh,
       )
-      if (!iframe.isConnected) return
+      if (!iframeHasCurrentIdentity(iframe, sku)) return
       if (!item) {
         setAnalyticsStatus(iframe, `暂无数据（店铺ID: ${shopId}）`)
         return
@@ -113,7 +136,7 @@ function updateAnalyticsIframe(
       renderAnalyticsItem(iframe, categoryName ? { ...item, categoryName } : item)
     })
     .catch((error: unknown) => {
-      if (iframe.isConnected) setAnalyticsStatus(iframe, errorMessage(error))
+      if (iframeHasCurrentIdentity(iframe, sku)) setAnalyticsStatus(iframe, errorMessage(error))
     })
     .finally(() => {
       iframeRequests.delete(iframe)
@@ -126,15 +149,34 @@ function nodeContainsSelector(node: Node, selector: string): boolean {
   return node instanceof Element && (node.matches(selector) || Boolean(node.querySelector(selector)))
 }
 
+function generatedExtensionNode(node: Node): boolean {
+  if (!(node instanceof Element)) return false
+  return node.matches(`${GENERATED_IFRAME_SELECTOR}, ${CARD_OPERATION_SELECTOR}`)
+    || Boolean(node.closest(`${GENERATED_IFRAME_SELECTOR}, ${CARD_OPERATION_SELECTOR}`))
+}
+
 function mutationsContainTarget(records: MutationRecord[], page: OzonAnalyticsPage): boolean {
-  const selector = page.kind === 'list'
-    ? LIST_CARD_SELECTOR
-    : page.kind === 'detail'
-      ? DETAIL_PRICE_SELECTOR
-      : undefined
-  return Boolean(selector && records.some((record) => (
-    Array.from(record.addedNodes).some((node) => nodeContainsSelector(node, selector))
-  )))
+  if (page.kind === 'detail') {
+    return records.some((record) => (
+      Array.from(record.addedNodes).some((node) => nodeContainsSelector(node, DETAIL_PRICE_SELECTOR))
+    ))
+  }
+  if (page.kind !== 'list') return false
+
+  return records.some((record) => {
+    if (record.type === 'attributes') {
+      return record.attributeName === 'href'
+        && record.target instanceof Element
+        && record.target.matches('a[href]')
+        && Boolean(record.target.closest(LIST_CARD_SELECTOR))
+        && !generatedExtensionNode(record.target)
+    }
+    if (generatedExtensionNode(record.target)) return false
+    const changedNodes = [...record.addedNodes, ...record.removedNodes]
+    if (changedNodes.some((node) => nodeContainsSelector(node, LIST_CARD_SELECTOR))) return true
+    if (!(record.target instanceof Element) || !record.target.closest(LIST_CARD_SELECTOR)) return false
+    return changedNodes.some((node) => !generatedExtensionNode(node))
+  })
 }
 
 /** Read one exact, canonical Ozon PDP identity from a list card. */
@@ -174,7 +216,7 @@ export function startOzonAnalyticsCards(options: OzonAnalyticsCardsOptions = {})
       }
     : { ...DEFAULT_OZON_CARD_VISIBILITY }
   const timers = new Set<number>()
-  const insertionTimers = new Map<HTMLElement, number>()
+  const insertionTimers = new Map<HTMLElement, PendingListInsertion>()
   const eventAbortController = new AbortController()
 
   const schedule = (callback: () => void, delay: number): number => {
@@ -192,11 +234,32 @@ export function startOzonAnalyticsCards(options: OzonAnalyticsCardsOptions = {})
   }
 
   const clearInsertionTimers = (): void => {
-    for (const [card, timer] of insertionTimers) {
-      cancelTimer(timer)
+    for (const [card, pending] of insertionTimers) {
+      cancelTimer(pending.timer)
       card.classList.remove('loading-analytics')
     }
     insertionTimers.clear()
+  }
+
+  const cancelListInsertion = (card: HTMLElement): void => {
+    const pending = insertionTimers.get(card)
+    if (!pending) return
+    cancelTimer(pending.timer)
+    insertionTimers.delete(card)
+    card.classList.remove('loading-analytics')
+  }
+
+  const listFrames = (card: HTMLElement): HTMLIFrameElement[] => (
+    Array.from(card.querySelectorAll<HTMLIFrameElement>(GENERATED_IFRAME_SELECTOR))
+  )
+
+  const clearListCard = (card: HTMLElement, removeOperation: boolean): void => {
+    cancelListInsertion(card)
+    for (const iframe of listFrames(card)) iframe.remove()
+    if (removeOperation) {
+      for (const operation of card.querySelectorAll(CARD_OPERATION_SELECTOR)) operation.remove()
+    }
+    card.classList.remove('has-analytics', 'loading-analytics')
   }
 
   const removeGeneratedFrames = (): void => {
@@ -205,7 +268,7 @@ export function startOzonAnalyticsCards(options: OzonAnalyticsCardsOptions = {})
     }
     for (const card of document.querySelectorAll<HTMLElement>(LIST_CARD_SELECTOR)) {
       card.classList.remove('has-analytics', 'loading-analytics')
-      card.querySelector(CARD_OPERATION_SELECTOR)?.remove()
+      for (const operation of card.querySelectorAll(CARD_OPERATION_SELECTOR)) operation.remove()
     }
   }
 
@@ -221,9 +284,14 @@ export function startOzonAnalyticsCards(options: OzonAnalyticsCardsOptions = {})
   }
 
   const injectCardOperation = (card: HTMLElement, context: OzonCardProductContext): void => {
-    const existing = card.querySelector<HTMLElement>(CARD_OPERATION_SELECTOR)
-    if (existing?.dataset.sku === context.sku && existing.dataset.sourceUrl === context.sourceUrl) return
-    existing?.remove()
+    const operations = Array.from(card.querySelectorAll<HTMLElement>(CARD_OPERATION_SELECTOR))
+    const existing = operations.find((operation) => (
+      operation.dataset.sku === context.sku && operation.dataset.sourceUrl === context.sourceUrl
+    ))
+    for (const operation of operations) {
+      if (operation !== existing) operation.remove()
+    }
+    if (existing) return
 
     const operation = document.createElement('div')
     operation.dataset.ozonboxCardOperation = 'true'
@@ -311,32 +379,46 @@ export function startOzonAnalyticsCards(options: OzonAnalyticsCardsOptions = {})
   }
 
   const reconcileListCards = (analyticsVisible: boolean): void => {
+    for (const card of insertionTimers.keys()) {
+      if (!card.isConnected) cancelListInsertion(card)
+    }
     let insertionIndex = insertionTimers.size
     for (const card of document.querySelectorAll<HTMLElement>(LIST_CARD_SELECTOR)) {
       const context = cardProductContext(card)
       if (!context) {
-        card.querySelector(CARD_OPERATION_SELECTOR)?.remove()
+        clearListCard(card, true)
         continue
       }
       const { sku } = context
       injectCardOperation(card, context)
 
-      const existing = card.querySelector<HTMLIFrameElement>(GENERATED_IFRAME_SELECTOR)
+      const frames = listFrames(card)
       if (!analyticsVisible) {
-        existing?.remove()
-        card.classList.remove('has-analytics', 'loading-analytics')
+        clearListCard(card, false)
         continue
       }
-      if (existing?.dataset.sku === sku) {
+      const existing = frames.find((iframe) => (
+        iframe.dataset.type === 'lite'
+        && iframe.dataset.sku === sku
+        && iframe.dataset.sourceUrl === context.sourceUrl
+      ))
+      for (const iframe of frames) {
+        if (iframe !== existing) iframe.remove()
+      }
+      if (existing) {
+        cancelListInsertion(card)
         card.classList.add('has-analytics')
         card.classList.remove('loading-analytics')
         continue
       }
-      if (existing) {
-        existing.remove()
-        card.classList.remove('has-analytics', 'loading-analytics')
+      card.classList.remove('has-analytics')
+
+      const pending = insertionTimers.get(card)
+      if (pending && sameCardProductContext(pending.context, context)) continue
+      if (pending) {
+        cancelListInsertion(card)
+        insertionIndex = insertionTimers.size
       }
-      if (insertionTimers.has(card)) continue
 
       card.classList.add('loading-analytics')
       const timer = schedule(() => {
@@ -357,13 +439,18 @@ export function startOzonAnalyticsCards(options: OzonAnalyticsCardsOptions = {})
           return
         }
 
-        const iframe = createAnalyticsIframe(`ozon-analytics-lite-${sku}-${++frameSequence}`, 'lite', sku)
+        const iframe = createAnalyticsIframe(
+          `ozon-analytics-lite-${sku}-${++frameSequence}`,
+          'lite',
+          sku,
+          context.sourceUrl,
+        )
         card.append(iframe)
         card.classList.add('has-analytics')
         card.classList.remove('loading-analytics')
         initializeIframe(iframe, sku)
-      }, insertionIndex * LIST_INSERT_DELAY_MS)
-      insertionTimers.set(card, timer)
+      }, Math.floor(insertionIndex / LIST_BATCH_SIZE) * LIST_BATCH_DELAY_MS)
+      insertionTimers.set(card, { timer, context })
       insertionIndex += 1
     }
   }
@@ -438,7 +525,12 @@ export function startOzonAnalyticsCards(options: OzonAnalyticsCardsOptions = {})
     stop,
   }
   activeController = controller
-  observer.observe(document.documentElement, { childList: true, subtree: true })
+  observer.observe(document.documentElement, {
+    childList: true,
+    subtree: true,
+    attributes: true,
+    attributeFilter: ['href'],
+  })
   reconcileNow()
   return controller
 }

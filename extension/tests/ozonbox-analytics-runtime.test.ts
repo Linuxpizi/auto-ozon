@@ -147,11 +147,29 @@ for (let index = 1; index < orderedControlIds.length; index += 1) {
     `浮窗控件顺序错误：${orderedControlIds[index - 1]} 应位于 ${orderedControlIds[index]} 之前`,
   )
 }
-const analyticsDoc = buildAnalyticsDoc('detail', 'chrome-extension://fixture/brand-logo.png')
-assert.ok(!analyticsDoc.includes('打开OZON后台'))
-assert.ok(!analyticsDoc.includes('绑定Cookie'))
-assert.ok(!analyticsDoc.includes('登录卖家'))
-assert.ok(!analyticsDoc.includes('刷新状态'))
+const analyticsLogoUrl = 'chrome-extension://fixture/brand-logo.png'
+const detailAnalyticsDoc = buildAnalyticsDoc('detail', analyticsLogoUrl)
+const liteAnalyticsDoc = buildAnalyticsDoc('lite', analyticsLogoUrl)
+for (const controlText of ['打开OZON后台', '绑定Cookie', '登录卖家', '刷新状态']) {
+  assert.ok(!detailAnalyticsDoc.includes(controlText))
+  assert.ok(!liteAnalyticsDoc.includes(controlText))
+}
+for (const listVisualContract of [
+  'class="card mz-widget-cate"',
+  'padding:10px',
+  'border-radius:20px',
+  'background:linear-gradient(to bottom,#fff5f5 0%,#fff 70%,#fff 100%)',
+  'box-shadow:0 20px 12px -16px rgba(0,30,85,.1),0 8px 24px 18px rgba(0,30,85,.05)',
+  '.list{display:flex;flex-direction:column;gap:6px;padding:8px;min-height:100px}',
+  'font-size:13px;line-height:1.35',
+  `src="${analyticsLogoUrl}"`,
+]) {
+  assert.ok(liteAnalyticsDoc.includes(listVisualContract), `列表指标卡缺少源项目视觉契约：${listVisualContract}`)
+}
+assert.ok(!detailAnalyticsDoc.includes('mz-widget-cate'))
+assert.ok(!detailAnalyticsDoc.includes('linear-gradient(to bottom,#fff5f5 0%,#fff 70%,#fff 100%)'))
+assert.ok(detailAnalyticsDoc.includes('.card{border:1px solid #e6eef7;border-radius:12px;'))
+assert.ok(detailAnalyticsDoc.includes('background:#fff'))
 
 const cache = new SuccessfulRequestCache<string, number | null>()
 let loadCount = 0
@@ -331,6 +349,7 @@ const backgroundSource = readFileSync(new URL('../entrypoints/background.ts', im
 const contentSource = readFileSync(new URL('../entrypoints/ozon.content.ts', import.meta.url), 'utf8')
 const floatingPanelSource = readFileSync(new URL('../lib/ozonbox/floating-panel.ts', import.meta.url), 'utf8')
 const analyticsCardsSource = readFileSync(new URL('../lib/ozonbox/analytics-card.ts', import.meta.url), 'utf8')
+const analyticsViewSource = readFileSync(new URL('../lib/ozonbox/analytics-view.ts', import.meta.url), 'utf8')
 const apiSource = readFileSync(new URL('../lib/utils/api.ts', import.meta.url), 'utf8')
 assert.ok(backgroundSource.includes("type === 'OZONBOX_COLLECT_AND_SAVE_CURRENT_PRODUCT'"))
 assert.ok(backgroundSource.includes('collectAndSaveOzonProduct(request.tabId ?? sender.tab?.id)'))
@@ -421,6 +440,25 @@ for (const operationContract of [
 ]) {
   assert.ok(analyticsCardsSource.includes(operationContract), `卡片操作契约缺失：${operationContract}`)
 }
+for (const listLifecycleContract of [
+  'const LIST_BATCH_SIZE = 4',
+  'const LIST_BATCH_DELAY_MS = 300',
+  'const insertionTimers = new Map<HTMLElement, PendingListInsertion>()',
+  'if (!iframeHasCurrentIdentity(iframe, sku)) return',
+  'if (iframeHasCurrentIdentity(iframe, sku)) setAnalyticsStatus(iframe, errorMessage(error))',
+  'clearListCard(card, true)',
+  'iframe.dataset.sourceUrl === context.sourceUrl',
+  'if (iframe !== existing) iframe.remove()',
+  'if (pending && sameCardProductContext(pending.context, context)) continue',
+  'currentContext.sourceUrl !== context.sourceUrl',
+  'Math.floor(insertionIndex / LIST_BATCH_SIZE) * LIST_BATCH_DELAY_MS',
+  "attributeFilter: ['href']",
+  'if (generatedExtensionNode(record.target)) return false',
+]) {
+  assert.ok(analyticsCardsSource.includes(listLifecycleContract), `列表指标卡生命周期契约缺失：${listLifecycleContract}`)
+}
+assert.ok(analyticsViewSource.includes('if (sourceUrl) iframe.dataset.sourceUrl = sourceUrl'))
+assert.ok(analyticsCardsSource.includes('for (const operation of card.querySelectorAll(CARD_OPERATION_SELECTOR)) operation.remove()'))
 const removeLiteStart = analyticsCardsSource.indexOf("const removeFramesByType = (type: 'detail' | 'lite')")
 const injectOperationStart = analyticsCardsSource.indexOf('const injectCardOperation', removeLiteStart)
 assert.ok(removeLiteStart >= 0 && injectOperationStart > removeLiteStart)

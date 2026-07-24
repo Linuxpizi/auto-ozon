@@ -5,6 +5,7 @@ import {
   NConfigProvider,
   NDialogProvider,
   NInput,
+  NInputNumber,
   NMessageProvider,
   type GlobalThemeOverrides,
 } from 'naive-ui'
@@ -37,6 +38,8 @@ const logoutLoading = ref(false)
 const authError = ref('')
 const homeNotice = ref('')
 const erpBaseUrlDraft = ref('')
+const ozonListTarget = ref(50)
+const ozonListTargetDraft = ref<number | null>(50)
 const settingsError = ref('')
 const settingsSaving = ref(false)
 
@@ -89,9 +92,13 @@ async function loadSettings() {
     const settings = await getSettings()
     erpBaseUrl.value = settings.erpBaseUrl
     erpBaseUrlDraft.value = settings.erpBaseUrl
+    ozonListTarget.value = settings.ozon.maxItems
+    ozonListTargetDraft.value = settings.ozon.maxItems
   } catch {
     erpBaseUrl.value = ''
     erpBaseUrlDraft.value = ''
+    ozonListTarget.value = 50
+    ozonListTargetDraft.value = 50
   }
 }
 
@@ -185,6 +192,7 @@ function setAuthMode(mode: 'login' | 'register') {
 
 function openSettings() {
   erpBaseUrlDraft.value = erpBaseUrl.value
+  ozonListTargetDraft.value = ozonListTarget.value
   settingsError.value = ''
   homeNotice.value = ''
   view.value = 'settings'
@@ -195,11 +203,21 @@ async function saveErpSettings() {
   settingsSaving.value = true
   try {
     const normalizedUrl = validatedErpBaseUrl(erpBaseUrlDraft.value)
+    const normalizedTarget = ozonListTargetDraft.value
+    if (!Number.isSafeInteger(normalizedTarget) || (normalizedTarget ?? 0) < 1) {
+      throw new Error('Ozon 目标数量必须是大于 0 的整数')
+    }
     const currentSettings = await getSettings()
-    await saveSettings({ ...currentSettings, erpBaseUrl: normalizedUrl })
+    await saveSettings({
+      ...currentSettings,
+      erpBaseUrl: normalizedUrl,
+      ozon: { ...currentSettings.ozon, maxItems: normalizedTarget as number },
+    })
     erpBaseUrl.value = normalizedUrl
     erpBaseUrlDraft.value = normalizedUrl
-    homeNotice.value = 'ERP Web 地址已保存'
+    ozonListTarget.value = normalizedTarget as number
+    ozonListTargetDraft.value = normalizedTarget
+    homeNotice.value = '插件设置已保存'
     view.value = 'home'
   } catch (error) {
     settingsError.value = error instanceof Error ? error.message : '保存失败，请稍后重试'
@@ -276,7 +294,7 @@ onMounted(() => {
                 <button class="link-button" type="button" @click="openAuth">登录插件</button>
               </template>
               <button class="link-button settings-link" type="button" @click="openSettings">
-                {{ managerUrl ? '修改 ERP Web 地址' : '配置 ERP Web 地址' }}
+                {{ managerUrl ? '修改插件设置' : '配置插件设置' }}
               </button>
               <p v-if="homeNotice" class="home-notice">{{ homeNotice }}</p>
             </div>
@@ -311,10 +329,10 @@ onMounted(() => {
           <section v-else-if="view === 'settings'" class="compact-view settings-view">
             <header class="view-header">
               <button class="back-button" type="button" @click="goHome">返回</button>
-              <strong>ERP Web 设置</strong>
+              <strong>插件设置</strong>
               <span aria-hidden="true"></span>
             </header>
-            <p class="settings-description">配置鲸智 ERP Web 根地址，保存后即可从 popup 直接进入管理中心。</p>
+            <p class="settings-description">配置 ERP Web 根地址与 Ozon 列表采集目标。目标仅统计命中选品规则且成功上报的商品。</p>
             <label class="field-label" for="erp-base-url">ERP Web 根地址</label>
             <NInput
               id="erp-base-url"
@@ -325,9 +343,19 @@ onMounted(() => {
               @keyup.enter="saveErpSettings"
             />
             <p class="settings-hint">仅支持不含账号密码、查询参数和锚点的 http/https 地址。</p>
+            <label class="field-label" for="ozon-list-target">Ozon 列表采集目标数量</label>
+            <NInputNumber
+              id="ozon-list-target"
+              v-model:value="ozonListTargetDraft"
+              :min="1"
+              :precision="0"
+              :step="1"
+              placeholder="请输入目标数量"
+            />
+            <p class="settings-hint">未命中规则或处理失败的商品不计入目标，默认 50。</p>
             <p v-if="settingsError" class="auth-error" role="alert">{{ settingsError }}</p>
             <NButton class="auth-submit" type="primary" block :loading="settingsSaving" @click="saveErpSettings">
-              保存 ERP Web 地址
+              保存插件设置
             </NButton>
           </section>
 

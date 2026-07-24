@@ -1,7 +1,7 @@
 export const OZON_SELLER_ORIGIN = 'https://seller.ozon.ru'
 export const OZON_SELLER_DASHBOARD_URL = `${OZON_SELLER_ORIGIN}/app/dashboard/main`
 export const OZON_COMPANY_ID_COOKIE_NAME = 'sc_company_id'
-export const OZON_COMPANY_ID_COOKIE_MISSING_MESSAGE = `未找到 ${OZON_COMPANY_ID_COOKIE_NAME} Cookie，请先登录 Ozon 卖家后台`
+export const OZON_COMPANY_ID_COOKIE_MISSING_MESSAGE = '请先登录 Ozon 卖家后台'
 
 export interface SellerCompanyCookie {
   value: string

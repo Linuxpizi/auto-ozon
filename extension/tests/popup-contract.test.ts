@@ -21,15 +21,20 @@ assert.match(appSource, /clearAuthSession/)
 assert.match(appSource, /settings\.erpBaseUrl/)
 assert.match(appSource, /validatedErpBaseUrl\(erpBaseUrl\.value\)/)
 
-// ERP configuration is reachable from the toolbar popup and preserves unrelated settings on save.
+// ERP and Ozon target configuration are reachable from the toolbar popup and preserve unrelated settings on save.
 assert.match(appSource, /type PopupView = 'home' \| 'auth' \| 'settings'/)
 assert.match(appSource, /function openSettings\(\)/)
 assert.match(appSource, /v-else-if="view === 'settings'"/)
 assert.match(appSource, /v-model:value="erpBaseUrlDraft"/)
 assert.match(appSource, /const normalizedUrl = validatedErpBaseUrl\(erpBaseUrlDraft\.value\)/)
-assert.match(appSource, /await saveSettings\(\{ \.\.\.currentSettings, erpBaseUrl: normalizedUrl \}\)/)
+assert.match(appSource, /NInputNumber/)
+assert.match(appSource, /settings\.ozon\.maxItems/)
+assert.match(appSource, /v-model:value="ozonListTargetDraft"/)
+assert.match(appSource, /Ozon 目标数量必须是大于 0 的整数/)
+assert.match(appSource, /ozon: \{ \.\.\.currentSettings\.ozon, maxItems: normalizedTarget as number \}/)
 assert.match(appSource, /event\.preventDefault\(\)\s+openSettings\(\)/)
-assert.match(appSource, /配置 ERP Web 地址/)
+assert.match(appSource, /配置插件设置/)
+assert.match(appSource, /目标仅统计命中选品规则且成功上报的商品/)
 assert.doesNotMatch(appSource, /请先在页面内鲸智 AI 工具设置中配置 ERP Web 地址/)
 
 // Existing business entrypoints stay reachable from the compact shell.

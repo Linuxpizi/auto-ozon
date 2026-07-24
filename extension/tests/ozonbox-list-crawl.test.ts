@@ -4,6 +4,8 @@ import { assertOzonboxProcessCardProductResponse } from '../lib/ozonbox/contract
 import {
   canonicalOzonProductUrl,
   extractOzonListSku,
+  hasReachedOzonListTarget,
+  normalizeOzonListTarget,
   ozonListCardIdentityFromHref,
 } from '../lib/ozonbox/list-crawl'
 
@@ -29,6 +31,14 @@ assert.deepEqual(ozonListCardIdentityFromHref(
   sourceUrl: 'https://www.ozon.ru/product/usb-cable-2957860286/',
 })
 assert.equal(ozonListCardIdentityFromHref('https://example.com/product/external-12345/', baseUrl), null)
+
+assert.equal(normalizeOzonListTarget(undefined), 50)
+assert.equal(normalizeOzonListTarget(0), 50)
+assert.equal(normalizeOzonListTarget(3.9), 3)
+assert.equal(normalizeOzonListTarget('12'), 12)
+assert.equal(hasReachedOzonListTarget(4, 5), false)
+assert.equal(hasReachedOzonListTarget(5, 5), true)
+assert.equal(hasReachedOzonListTarget(6, 5), true)
 
 const savedResult = {
   success: true,
@@ -71,11 +81,23 @@ for (const contract of [
   'skipped.add(key)',
   'pending.delete(key)\n        failed.add(key)',
   'failed.add(key)',
-  'while (!disposed && pending.size > 0)',
-  'await processOnce()',
-  'if (pending.size > 0) await processOnce()',
+  'const target = normalizeOzonListTarget(config.maxItems)',
+  'const added = scan()',
+  'if (pending.size > 0) await processOnce(target)',
+  'while (!disposed && pending.size > 0 && !hasReachedOzonListTarget(saved.size, target))',
+  'if (hasReachedOzonListTarget(saved.size, target)) clearSurplusPending()',
+  '目标进度 ${state.saved}/${state.target}',
+  '已到达列表底部，成功上报 ${saved.size}/${target}',
+  'for (const key of failed) pending.add(key)',
 ]) {
   assert.ok(crawlerSource.includes(contract), `列表采集队列契约缺失：${contract}`)
+}
+for (const rejectedDiscoveryLimit of [
+  'scan(config.maxItems)',
+  'products.size >= maxItems',
+  'products.size >= config.maxItems',
+]) {
+  assert.ok(!crawlerSource.includes(rejectedDiscoveryLimit), `发现数量仍错误占用成功目标：${rejectedDiscoveryLimit}`)
 }
 for (const rejectedSparseContract of [
   'OzonListProductRecord',
@@ -87,4 +109,4 @@ for (const rejectedSparseContract of [
   assert.ok(!crawlerSource.includes(rejectedSparseContract), `列表爬虫仍包含稀疏上报契约：${rejectedSparseContract}`)
 }
 
-console.log('Ozon list crawl fixtures passed: exact identities, process results and retry queue contracts')
+console.log('Ozon list crawl fixtures passed: exact identities, successful-report target semantics and retry queue contracts')

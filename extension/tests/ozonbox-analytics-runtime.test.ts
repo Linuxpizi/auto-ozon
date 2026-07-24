@@ -6,13 +6,11 @@ import {
   buildAnalyticsDoc,
 } from '../lib/ozonbox/analytics-view'
 import {
-  buildOzonFloatingPanelShadow,
   OZON_AUTH_POLL_INTERVAL_MS,
   OZON_AUTH_POLL_TIMEOUT_MS,
   OZON_FLOATING_PANEL_HOST_ID,
   OZON_PANEL_DRAG_RELEASE_DELAY_MS,
   OZON_PANEL_DRAG_THRESHOLD_PX,
-  OZON_SELLER_RECHECK_DELAY_MS,
   parseCollectAndSaveResult,
   parseSellerCookieBindResponse,
   parseSellerCookiesResponse,
@@ -41,8 +39,8 @@ import { SuccessfulRequestCache } from '../lib/ozonbox/successful-request-cache'
 assert.equal(OZON_SELLER_ORIGIN, 'https://seller.ozon.ru')
 assert.equal(OZON_SELLER_DASHBOARD_URL, 'https://seller.ozon.ru/app/dashboard/main')
 assert.equal(OZON_COMPANY_ID_COOKIE_NAME, 'sc_company_id')
+assert.equal(OZON_COMPANY_ID_COOKIE_MISSING_MESSAGE, '请先登录 Ozon 卖家后台')
 assert.equal(OZON_FLOATING_PANEL_HOST_ID, 'jingzhi-ai-ozon-floating-panel')
-assert.equal(OZON_SELLER_RECHECK_DELAY_MS, 5_000)
 assert.equal(OZON_AUTH_POLL_INTERVAL_MS, 2_000)
 assert.equal(OZON_AUTH_POLL_TIMEOUT_MS, 30_000)
 assert.equal(OZON_PANEL_DRAG_THRESHOLD_PX, 5)
@@ -52,7 +50,7 @@ assert.equal(OZON_PANEL_LAUNCHER_SIZE_PX, 64)
 assert.equal(OZON_PANEL_VIEWPORT_MARGIN_PX, 10)
 assert.equal(companyIdFromSellerCookie({ value: ' 123456 ' }), '123456')
 assert.equal(requireOzonCompanyId('987654'), '987654')
-assert.throws(() => companyIdFromSellerCookie(null), /未找到 sc_company_id Cookie/)
+assert.throws(() => companyIdFromSellerCookie(null), /请先登录 Ozon 卖家后台/)
 assert.throws(() => companyIdFromSellerCookie({ value: '0' }), /company ID 必须是真实的正整数/)
 assert.throws(() => companyIdFromSellerCookie({ value: 'seller-123' }), /company ID 必须是真实的正整数/)
 assert.equal(
@@ -68,7 +66,24 @@ assert.deepEqual(sellerInteractionErrorState(new Error('未找到已打开的 Oz
   showCookieFailure: false,
 })
 
-const floatingPanel = buildOzonFloatingPanelShadow('chrome-extension://fixture/brand-logo.png')
+const floatingPanelComponent = readFileSync(
+  new URL('../components/ozonbox/OzonFloatingPanel.vue', import.meta.url),
+  'utf8',
+)
+const floatingPanelStyles = readFileSync(
+  new URL('../components/ozonbox/ozon-floating-panel.css', import.meta.url),
+  'utf8',
+)
+const floatingPanel = `${floatingPanelStyles}\n${floatingPanelComponent}`
+for (const componentContract of [
+  '<script setup lang="ts">',
+  'defineProps<{',
+  'logoUrl: string',
+  ':src="logoUrl"',
+  '<template>',
+]) {
+  assert.ok(floatingPanelComponent.includes(componentContract), `Vue 浮窗组件契约缺失：${componentContract}`)
+}
 for (const expectedMarkup of [
   '.sidebar{position:fixed;right:20px;bottom:20px;z-index:2147483647;display:flex;width:144px;flex-direction:column;align-items:stretch;padding-bottom:8px;border-radius:12px;background:#fff;box-shadow:0 0 0 1px oklch(96.7% .003 264.542),0 0 16px 4px rgba(238,19,27,.2)',
   '.sidebar-header{display:flex;align-items:center;justify-content:space-between;padding:8px 12px 0}',
@@ -98,25 +113,38 @@ for (const expectedMarkup of [
   'class="sidebar fixed bottom-5 right-5 bg-white rounded-xl z-[2147483647] flex flex-col items-stretch shadow-[0_0_16px_4px_rgba(238,19,27,0.2)] ring ring-gray-100 w-36 transition-all duration-300 pb-2"',
   'class="brand-name text-sm">鲸智 AI',
   'id="ozon-panel-collapse"',
-  '<span class="collapse-icon" aria-hidden="true"><svg viewBox="64 64 896 896" focusable="false"><path fill="currentColor" d="M872 474H152c-4.4 0-8 3.6-8 8v60c0 4.4 3.6 8 8 8h720c4.4 0 8-3.6 8-8v-60c0-4.4-3.6-8-8-8z"></path></svg></span>',
-  'class="authenticated-actions px-5 pt-2 flex flex-col items-center justify-center gap-2" id="ozon-panel-actions" hidden',
-  'class="ant-btn ant-btn-link ant-btn-block ant-btn-round" id="ozon-open-seller" type="button">打开OZON后台',
-  'class="ant-btn ant-btn-primary ant-btn-dangerous ant-btn-block ant-btn-round" id="ozon-one-click-listing" type="button" data-page="detail">一键上架',
-  'class="ant-btn ant-btn-primary ant-btn-block ant-btn-round" id="ozon-profit-calculator" type="button">计算利润',
-  'class="ant-btn ant-btn-default ant-btn-amber ant-btn-block ant-btn-round" id="ozon-pricing-tool" type="button">定价工具',
-  'class="ant-btn ant-btn-primary ant-btn-block ant-btn-round" id="ozon-bind-cookie" type="button" aria-busy="false">绑定Cookie',
-  'class="ant-btn ant-btn-default ant-btn-block ant-btn-round" id="ozon-selection-settings" type="button">设置选品',
-  'class="ant-btn ant-btn-primary ant-btn-block ant-btn-round" id="ozon-start-list-crawl" type="button" data-page="list">启动爬取',
-  'id="ozon-list-card-switch" type="button" role="switch" aria-label="隐藏列表分析卡片" aria-checked="false"><span class="ant-switch-handle"></span><span class="ant-switch-inner"><span class="ant-switch-inner-checked">隐藏卡片</span>',
-  'id="ozon-detail-card-switch" type="button" role="switch" aria-label="显示商品详情分析卡片" aria-checked="true"><span class="ant-switch-handle"></span><span class="ant-switch-inner"><span class="ant-switch-inner-checked">其它卡片</span>',
-  'class="ant-btn ant-btn-link ant-btn-sm" id="ozon-enter-erp" type="button">进入ERP',
-  'class="login-actions p-5" id="ozon-panel-login-actions" hidden',
-  'class="ant-btn ant-btn-primary ant-btn-block ant-btn-round" id="ozon-panel-login" type="button">请登录',
-  'class="ant-btn ant-btn-link ant-btn-block ant-btn-round" id="ozon-panel-login-help" type="button" aria-describedby="ozon-panel-login-tooltip">登录有问题？',
-  'role="tooltip">1.关闭浏览器重新打开<br>2.卸载插件重新安装<br>3.仍然无法登录请联系客服',
-  'class="launcher fixed bg-white rounded-full shadow-[0_0_16px_4px_rgba(238,19,27,0.6)] z-[9999] p-3 flex items-center justify-center transition-all duration-300 cursor-move" id="ozon-panel-launcher"',
+  'd="M872 474H152c-4.4 0-8 3.6-8 8v60c0 4.4 3.6 8 8 8h720c4.4 0 8-3.6 8-8v-60c0-4.4-3.6-8-8-8z"',
+  'id="ozon-panel-actions"',
+  'id="ozon-one-click-listing"',
+  '>一键上架</button>',
+  'id="ozon-profit-calculator"',
+  '>计算利润</button>',
+  'id="ozon-pricing-tool"',
+  '>定价工具</button>',
+  'id="ozon-bind-cookie"',
+  '>绑定Cookie</button>',
+  'id="ozon-selection-settings"',
+  '>设置选品</button>',
+  'id="ozon-start-list-crawl"',
+  '>启动爬取</button>',
+  'id="ozon-list-card-switch"',
+  'aria-label="隐藏列表分析卡片"',
+  '<span class="ant-switch-inner-checked">隐藏卡片</span>',
+  'id="ozon-detail-card-switch"',
+  'aria-label="显示商品详情分析卡片"',
+  '<span class="ant-switch-inner-checked">其它卡片</span>',
+  'id="ozon-enter-erp"',
+  '>进入ERP</button>',
+  'id="ozon-panel-login-actions"',
+  'id="ozon-panel-login"',
+  '>请登录</button>',
+  'id="ozon-panel-login-help"',
+  '>登录有问题？</button>',
+  '1.关闭浏览器重新打开<br>2.卸载插件重新安装<br>3.仍然无法登录请联系客服',
+  'id="ozon-panel-launcher"',
+  'class="launcher fixed bg-white rounded-full shadow-[0_0_16px_4px_rgba(238,19,27,0.6)] z-[9999] p-3 flex items-center justify-center transition-all duration-300 cursor-move"',
   'class="ant-modal-wrap" role="dialog" aria-modal="true" aria-labelledby="ozon-tool-dialog-title" aria-describedby="ozon-tool-dialog-content"',
-  'width="40px" draggable="false" alt="鲸智 AI" style="pointer-events:none;user-select:none"',
+  'width="40" draggable="false" alt="鲸智 AI"',
 ]) {
   assert.ok(floatingPanel.includes(expectedMarkup), `浮窗缺少复刻标记：${expectedMarkup}`)
 }
@@ -127,11 +155,12 @@ for (const rejectedMarkup of [
   'width:72px;height:22px',
   '<span class="switch-label">',
   '<span aria-hidden="true">−</span>',
+  'ozon-open-seller',
+  '打开OZON后台',
 ]) {
   assert.ok(!floatingPanel.includes(rejectedMarkup), `浮窗仍包含旧自创标记：${rejectedMarkup}`)
 }
 const orderedControlIds = [
-  'ozon-open-seller',
   'ozon-one-click-listing',
   'ozon-profit-calculator',
   'ozon-pricing-tool',
@@ -392,6 +421,37 @@ assert.ok(contentSource.includes('listCrawler = startOzonListCrawlController({ p
 assert.ok(contentSource.includes('onStartListCrawl: () => listCrawler?.start()'))
 assert.ok(contentSource.includes('listCrawler?.stop()'))
 assert.ok(contentSource.includes('listCrawler?.reconcile()'))
+for (const vueMountContract of [
+  "import { createApp } from 'vue'",
+  'OzonFloatingPanel.vue',
+  'ozon-floating-panel.css?inline',
+  "const shadow = host.attachShadow({ mode: 'open' })",
+  'shadow.append(style, mountElement)',
+  'const app = createApp(OzonFloatingPanel, {',
+  'app.mount(mountElement)',
+  'createFloatingPanelTools({ shadow, signal, setStatus })',
+  'app.unmount()',
+]) {
+  assert.ok(floatingPanelSource.includes(vueMountContract), `Vue 浮窗挂载契约缺失：${vueMountContract}`)
+}
+for (const legacyPanelContract of [
+  'buildOzonFloatingPanelShadow',
+  'shadow.innerHTML',
+  'readOzonSellerId',
+  'checkSeller',
+  'OZON_SELLER_RECHECK_DELAY_MS',
+  'ozon-open-seller',
+]) {
+  assert.ok(!floatingPanelSource.includes(legacyPanelContract), `浮窗仍包含旧实现：${legacyPanelContract}`)
+}
+const vueMountStart = floatingPanelSource.indexOf('app.mount(mountElement)')
+const panelToolsStart = floatingPanelSource.indexOf('createFloatingPanelTools({ shadow, signal, setStatus })')
+const vueUnmountStart = floatingPanelSource.indexOf('app.unmount()')
+const hostRemovalStart = floatingPanelSource.indexOf('host.remove()', vueUnmountStart)
+assert.ok(vueMountStart >= 0 && panelToolsStart > vueMountStart,
+  'Vue 面板必须先挂载，工具节点再作为同一 ShadowRoot 的兄弟节点接入')
+assert.ok(vueUnmountStart >= 0 && hostRemovalStart > vueUnmountStart,
+  '停止浮窗时必须先卸载 Vue 应用，再移除宿主节点')
 assert.ok(!floatingPanelSource.includes('browser.action.openPopup'))
 assert.ok(floatingPanelSource.includes("type: 'OZONBOX_BIND_SELLER_COOKIES'"))
 assert.ok(!floatingPanelSource.includes("type: 'OZONBOX_GET_SELLER_COOKIES'"))

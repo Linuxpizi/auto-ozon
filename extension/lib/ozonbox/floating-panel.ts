@@ -1,3 +1,6 @@
+import { createApp } from 'vue'
+import OzonFloatingPanel from '../../components/ozonbox/OzonFloatingPanel.vue'
+import floatingPanelStyles from '../../components/ozonbox/ozon-floating-panel.css?inline'
 import { analyticsPageForUrl } from './analytics-card'
 import type {
   OzonboxCollectAndSaveResult,
@@ -17,7 +20,6 @@ import {
   type OzonPanelPosition,
   type OzonPanelState,
 } from './panel-storage'
-import { readOzonSellerId } from './seller-analytics'
 import {
   OZON_COMPANY_ID_COOKIE_MISSING_MESSAGE,
   OZON_SELLER_DASHBOARD_URL,
@@ -25,7 +27,6 @@ import {
 import { getAuthSession } from '../utils/storage'
 
 export const OZON_FLOATING_PANEL_HOST_ID = 'jingzhi-ai-ozon-floating-panel'
-export const OZON_SELLER_RECHECK_DELAY_MS = 5_000
 export const OZON_AUTH_POLL_INTERVAL_MS = 2_000
 export const OZON_AUTH_POLL_TIMEOUT_MS = 30_000
 export const OZON_PANEL_DRAG_THRESHOLD_PX = 5
@@ -139,105 +140,6 @@ export function parseSellerCookieBindResponse(value: unknown): OzonboxBindSeller
   }
 }
 
-export function buildOzonFloatingPanelShadow(logoUrl: string): string {
-  return `<style>
-    :host{all:initial}
-    *,*::before,*::after{box-sizing:border-box}
-    [hidden]{display:none!important}
-    button{font:inherit}
-    .sidebar,.launcher,.ant-modal-root,.ant-tooltip{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"PingFang SC","Microsoft YaHei",sans-serif}
-    .sidebar{position:fixed;right:20px;bottom:20px;z-index:2147483647;display:flex;width:144px;flex-direction:column;align-items:stretch;padding-bottom:8px;border-radius:12px;background:#fff;box-shadow:0 0 0 1px oklch(96.7% .003 264.542),0 0 16px 4px rgba(238,19,27,.2);color:#000000e0;pointer-events:auto;transition:all .3s}
-    .sidebar-header{display:flex;align-items:center;justify-content:space-between;padding:8px 12px 0}
-    .sidebar-brand{display:flex;align-items:center;flex-wrap:nowrap}
-    .brand-logo{display:block;width:20px;height:20px;margin-right:8px;object-fit:contain}
-    .brand-name{font-size:14px;line-height:20px;white-space:nowrap}
-    .collapse{display:flex;align-items:center;justify-content:center;width:14px;height:14px;padding:0;border:1px solid #eab308;border-radius:9999px;background:#eab308;color:#facc15;cursor:pointer;box-shadow:0 1px 2px 0 #0000000d;transition-property:color,background-color,border-color,outline-color,text-decoration-color,fill,stroke,--tw-gradient-from,--tw-gradient-via,--tw-gradient-to;transition-timing-function:cubic-bezier(.4,0,.2,1);transition-duration:.15s}
-    .collapse:hover{background:#facc15}
-    .collapse-icon{display:inline-flex;font-size:7px;line-height:0}
-    .collapse-icon svg{display:inline-block;width:1em;height:1em;fill:currentColor}
-    .authenticated-actions{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px;padding:8px 20px 0}
-    .ant-btn{outline:none;position:relative;display:inline-block;font-weight:400;white-space:nowrap;text-align:center;background-image:none;background-color:transparent;border:1px solid transparent;cursor:pointer;transition:all .2s cubic-bezier(.645,.045,.355,1);user-select:none;touch-action:manipulation;line-height:1.5714285714285714;color:#000000e0;font-size:14px;height:32px;padding:4px 15px;border-radius:6px}
-    .ant-btn.ant-btn-round{border-radius:32px;padding-inline-start:16px;padding-inline-end:16px}
-    .ant-btn.ant-btn-block{width:100%}
-    .ant-btn-default{background:#fff;border-color:#d9d9d9;box-shadow:0 2px #00000005}
-    .ant-btn-default:not(:disabled):hover{color:#4096ff;border-color:#4096ff}
-    .ant-btn-primary{color:#fff;background:#1677ff;box-shadow:0 2px #0591ff1a}
-    .ant-btn-primary:not(:disabled):hover{color:#fff;background:#4096ff}
-    .ant-btn-primary:not(:disabled):active{color:#fff;background:#0958d9}
-    .ant-btn-primary.ant-btn-dangerous{background:#ff4d4f;box-shadow:0 2px #ff4d4f17}
-    .ant-btn-primary.ant-btn-dangerous:not(:disabled):hover{background:#ff7875}
-    .ant-btn-primary.ant-btn-dangerous:not(:disabled):active{background:#d9363e}
-    .ant-btn-link{color:#1677ff;background:transparent;box-shadow:none}
-    .ant-btn-link:not(:disabled):hover{color:#69b1ff}
-    .ant-btn-link:not(:disabled):active{color:#0958d9}
-    .ant-btn-sm{height:24px;padding:0 7px;border-radius:4px;font-size:14px}
-    .ant-btn-amber{color:#fff!important;background:#f59e0b!important;border-color:#f59e0b!important;box-shadow:none!important}
-    .ant-btn-amber:not(:disabled):hover{color:#fff!important;background:#fbbf24!important;border-color:#fbbf24!important}
-    .ant-btn-amber:not(:disabled):active{background:#d97706!important;border-color:#d97706!important}
-    .ant-btn:disabled{cursor:not-allowed;color:#00000040;border-color:#d9d9d9;background:#0000000a;box-shadow:none}
-    .switch-control{display:flex;align-items:center;justify-content:center}
-    .ant-switch{position:relative;display:inline-block;box-sizing:border-box;min-width:44px;height:22px;padding:0;overflow:hidden;color:#fff;font-size:14px;line-height:22px;vertical-align:middle;background:#00000040;border:0;border-radius:100px;cursor:pointer;transition:all .2s}
-    .ant-switch-handle{position:absolute;top:2px;inset-inline-start:2px;width:18px;height:18px;transition:all .2s ease-in-out}
-    .ant-switch-handle::before{position:absolute;inset:0;background:#fff;border-radius:9px;box-shadow:0 2px 4px #00230b33;content:""}
-    .ant-switch-inner{display:block;overflow:hidden;border-radius:100px;height:100%;padding-inline-start:24px;padding-inline-end:9px;transition:padding-inline-start .2s ease-in-out,padding-inline-end .2s ease-in-out}
-    .ant-switch-inner-checked,.ant-switch-inner-unchecked{display:block;color:#fff;font-size:12px;transition:margin-inline-start .2s ease-in-out,margin-inline-end .2s ease-in-out}
-    .ant-switch[aria-checked="true"]{background:#1677ff}
-    .ant-switch[aria-checked="true"] .ant-switch-handle{inset-inline-start:calc(100% - 20px)}
-    .ant-switch[aria-checked="true"] .ant-switch-inner{padding-inline-start:9px;padding-inline-end:24px}
-    .ant-switch:disabled{cursor:not-allowed;opacity:.65}
-    .login-actions{padding:20px}
-    .login-help{position:relative;margin-top:8px}
-    .ant-tooltip{position:absolute;right:calc(100% + 8px);top:50%;z-index:999999;width:max-content;max-width:250px;padding:6px 8px;border-radius:6px;background:#000000d9;color:#fff;font-size:14px;line-height:1.5714285714285714;opacity:0;pointer-events:none;transform:translateY(-50%);transition:opacity .2s}
-    .login-help:hover .ant-tooltip,.login-help:focus-within .ant-tooltip{opacity:1}
-    .launcher{position:fixed;z-index:9999;width:64px;height:64px;padding:12px;border:0;border-radius:9999px;background:#fff;box-shadow:0 0 16px 4px rgba(238,19,27,.6);pointer-events:auto;cursor:move;transition:all .3s;touch-action:none}
-    .launcher img{display:block;width:40px;height:40px;object-fit:contain;pointer-events:none;user-select:none}
-    .ant-modal-root{position:fixed;inset:0;z-index:2147483647;pointer-events:auto}
-    .ant-modal-mask{position:absolute;inset:0;background:#00000073}
-    .ant-modal-wrap{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;overflow:auto;outline:0}
-    .ant-modal{position:relative;width:416px;max-width:calc(100vw - 32px);padding-bottom:0;color:#000000e0;font-size:14px;line-height:1.5714285714285714}
-    .ant-modal-content{position:relative;padding:20px 24px;border-radius:8px;background:#fff;box-shadow:0 6px 16px 0 #00000014,0 3px 6px -4px #0000001f,0 9px 28px 8px #0000000d}
-    .ant-modal-confirm-title{display:block;overflow:hidden;color:#000000e0;font-size:16px;line-height:1.5}
-    .ant-modal-confirm-content{margin-top:8px;color:#000000e0;font-size:14px;line-height:1.5714285714285714;white-space:pre-line}
-    .ant-modal-confirm-btns{display:flex;flex-direction:row-reverse;gap:8px;margin-top:24px}
-  </style>
-  <section class="sidebar fixed bottom-5 right-5 bg-white rounded-xl z-[2147483647] flex flex-col items-stretch shadow-[0_0_16px_4px_rgba(238,19,27,0.2)] ring ring-gray-100 w-36 transition-all duration-300 pb-2" id="ozon-floating-panel" aria-label="鲸智 AI Ozon 工具">
-    <header class="sidebar-header flex items-center justify-between px-3 pt-2">
-      <div class="sidebar-brand flex items-center flex-nowrap"><img class="brand-logo w-5 h-5 mr-2" src="${logoUrl}" width="20" height="20" alt=""><span class="brand-name text-sm">鲸智 AI</span></div>
-      <button class="collapse" id="ozon-panel-collapse" type="button" aria-label="收起鲸智 AI 浮窗"><span class="collapse-icon" aria-hidden="true"><svg viewBox="64 64 896 896" focusable="false"><path fill="currentColor" d="M872 474H152c-4.4 0-8 3.6-8 8v60c0 4.4 3.6 8 8 8h720c4.4 0 8-3.6 8-8v-60c0-4.4-3.6-8-8-8z"></path></svg></span></button>
-    </header>
-    <div class="authenticated-actions px-5 pt-2 flex flex-col items-center justify-center gap-2" id="ozon-panel-actions" hidden>
-      <button class="ant-btn ant-btn-link ant-btn-block ant-btn-round" id="ozon-open-seller" type="button">打开OZON后台</button>
-      <button class="ant-btn ant-btn-primary ant-btn-dangerous ant-btn-block ant-btn-round" id="ozon-one-click-listing" type="button" data-page="detail">一键上架</button>
-      <button class="ant-btn ant-btn-primary ant-btn-block ant-btn-round" id="ozon-profit-calculator" type="button">计算利润</button>
-      <button class="ant-btn ant-btn-default ant-btn-amber ant-btn-block ant-btn-round" id="ozon-pricing-tool" type="button">定价工具</button>
-      <button class="ant-btn ant-btn-primary ant-btn-block ant-btn-round" id="ozon-bind-cookie" type="button" aria-busy="false">绑定Cookie</button>
-      <button class="ant-btn ant-btn-default ant-btn-block ant-btn-round" id="ozon-selection-settings" type="button">设置选品</button>
-      <button class="ant-btn ant-btn-primary ant-btn-block ant-btn-round" id="ozon-start-list-crawl" type="button" data-page="list">启动爬取</button>
-      <div class="switch-control" id="ozon-list-card-control" data-page="list"><button class="ant-switch" id="ozon-list-card-switch" type="button" role="switch" aria-label="隐藏列表分析卡片" aria-checked="false"><span class="ant-switch-handle"></span><span class="ant-switch-inner"><span class="ant-switch-inner-checked">隐藏卡片</span></span></button></div>
-      <div class="switch-control" id="ozon-detail-card-control" data-page="detail"><button class="ant-switch" id="ozon-detail-card-switch" type="button" role="switch" aria-label="显示商品详情分析卡片" aria-checked="true"><span class="ant-switch-handle"></span><span class="ant-switch-inner"><span class="ant-switch-inner-checked">其它卡片</span></span></button></div>
-      <button class="ant-btn ant-btn-link ant-btn-sm" id="ozon-enter-erp" type="button">进入ERP</button>
-    </div>
-    <div class="login-actions p-5" id="ozon-panel-login-actions" hidden>
-      <button class="ant-btn ant-btn-primary ant-btn-block ant-btn-round" id="ozon-panel-login" type="button">请登录</button>
-      <div class="login-help"><button class="ant-btn ant-btn-link ant-btn-block ant-btn-round" id="ozon-panel-login-help" type="button" aria-describedby="ozon-panel-login-tooltip">登录有问题？</button><div class="ant-tooltip" id="ozon-panel-login-tooltip" role="tooltip">1.关闭浏览器重新打开<br>2.卸载插件重新安装<br>3.仍然无法登录请联系客服</div></div>
-    </div>
-  </section>
-  <button class="launcher fixed bg-white rounded-full shadow-[0_0_16px_4px_rgba(238,19,27,0.6)] z-[9999] p-3 flex items-center justify-center transition-all duration-300 cursor-move" id="ozon-panel-launcher" type="button" aria-label="展开鲸智 AI 浮窗" hidden><img src="${logoUrl}" width="40px" draggable="false" alt="鲸智 AI" style="pointer-events:none;user-select:none"></button>
-  <div class="ant-modal-root" id="ozon-tool-dialog-backdrop" hidden>
-    <div class="ant-modal-mask"></div>
-    <div class="ant-modal-wrap" role="dialog" aria-modal="true" aria-labelledby="ozon-tool-dialog-title" aria-describedby="ozon-tool-dialog-content">
-      <div class="ant-modal"><div class="ant-modal-content"><div class="ant-modal-confirm-body-wrapper">
-        <div class="ant-modal-confirm-title" id="ozon-tool-dialog-title"></div>
-        <div class="ant-modal-confirm-content" id="ozon-tool-dialog-content"></div>
-        <div class="ant-modal-confirm-btns">
-          <button class="ant-btn ant-btn-primary" id="ozon-tool-dialog-confirm" type="button" aria-busy="false">确定</button>
-          <button class="ant-btn ant-btn-default" id="ozon-tool-dialog-cancel" type="button">取消</button>
-        </div>
-      </div></div></div>
-    </div>
-  </div>`
-}
-
 function requiredElement<T extends Element>(root: ShadowRoot, id: string): T {
   const element = root.querySelector<T>(`#${id}`)
   if (!element) throw new Error(`Ozon 浮窗缺少元素：${id}`)
@@ -253,8 +155,17 @@ export function startOzonFloatingPanel(options: OzonFloatingPanelOptions = {}): 
   host.id = OZON_FLOATING_PANEL_HOST_ID
   host.style.cssText = 'position:fixed;inset:0;z-index:2147483647;pointer-events:none;'
   const shadow = host.attachShadow({ mode: 'open' })
-  shadow.innerHTML = buildOzonFloatingPanelShadow(browser.runtime.getURL('/brand-logo.png'))
+  const style = document.createElement('style')
+  style.id = 'jingzhi-ozon-floating-panel-style'
+  style.textContent = floatingPanelStyles
+  const mountElement = document.createElement('div')
+  mountElement.id = 'jingzhi-ozon-floating-panel-root'
+  shadow.append(style, mountElement)
   document.documentElement.append(host)
+  const app = createApp(OzonFloatingPanel, {
+    logoUrl: browser.runtime.getURL('/brand-logo.png'),
+  })
+  app.mount(mountElement)
 
   const panel = requiredElement<HTMLElement>(shadow, 'ozon-floating-panel')
   const launcher = requiredElement<HTMLButtonElement>(shadow, 'ozon-panel-launcher')
@@ -262,7 +173,6 @@ export function startOzonFloatingPanel(options: OzonFloatingPanelOptions = {}): 
   const actions = requiredElement<HTMLElement>(shadow, 'ozon-panel-actions')
   const loginActions = requiredElement<HTMLElement>(shadow, 'ozon-panel-login-actions')
   const loginButton = requiredElement<HTMLButtonElement>(shadow, 'ozon-panel-login')
-  const openSellerButton = requiredElement<HTMLButtonElement>(shadow, 'ozon-open-seller')
   const listingButton = requiredElement<HTMLButtonElement>(shadow, 'ozon-one-click-listing')
   const profitButton = requiredElement<HTMLButtonElement>(shadow, 'ozon-profit-calculator')
   const pricingButton = requiredElement<HTMLButtonElement>(shadow, 'ozon-pricing-tool')
@@ -292,11 +202,9 @@ export function startOzonFloatingPanel(options: OzonFloatingPanelOptions = {}): 
     detailCardsVisible: initialState.detailCardsVisible,
   }
   let stopped = false
-  let sellerRequestSequence = 0
   let cookieRequestSequence = 0
   let authSequence = 0
   let dialogSequence = 0
-  let sellerRecheckTimer: number | undefined
   let authPollTimer: number | undefined
   let authPollStartedAt: number | undefined
   let dragReleaseTimer: number | undefined
@@ -318,10 +226,6 @@ export function startOzonFloatingPanel(options: OzonFloatingPanelOptions = {}): 
     expanded = nextExpanded
     syncPanelVisibility()
     if (nextExpanded && pageSupported) collapseButton.focus()
-  }
-
-  const setConnected = (connected: boolean): void => {
-    openSellerButton.hidden = connected
   }
 
   // The reference sidebar has no status region. Existing tool adapters still
@@ -439,19 +343,6 @@ export function startOzonFloatingPanel(options: OzonFloatingPanelOptions = {}): 
     scheduleAuthPoll()
   }
 
-  const checkSeller = async (): Promise<void> => {
-    const sequence = ++sellerRequestSequence
-    try {
-      await readOzonSellerId()
-      if (stopped || sequence !== sellerRequestSequence) return
-      setConnected(true)
-    } catch (error: unknown) {
-      if (stopped || sequence !== sellerRequestSequence) return
-      setConnected(false)
-      console.error('检查seller tab失败:', error)
-    }
-  }
-
   const bindSellerCookies = async (): Promise<void> => {
     const sequence = ++cookieRequestSequence
     closeDialog(false)
@@ -478,11 +369,6 @@ export function startOzonFloatingPanel(options: OzonFloatingPanelOptions = {}): 
   const openSeller = (): void => {
     if (!dialogBusy) closeDialog(false)
     window.open(OZON_SELLER_DASHBOARD_URL, '_blank', 'noopener,noreferrer')
-    if (sellerRecheckTimer !== undefined) window.clearTimeout(sellerRecheckTimer)
-    sellerRecheckTimer = window.setTimeout(() => {
-      sellerRecheckTimer = undefined
-      if (!stopped && host.isConnected) void checkSeller()
-    }, OZON_SELLER_RECHECK_DELAY_MS)
   }
 
   const cardVisibility = (): OzonCardVisibility => options.getCardVisibility?.() ?? fallbackVisibility
@@ -612,7 +498,6 @@ export function startOzonFloatingPanel(options: OzonFloatingPanelOptions = {}): 
     const clamped = clampOzonPanelPosition(launcherPosition, window.innerWidth, window.innerHeight)
     if (!samePosition(clamped, launcherPosition)) applyLauncherPosition(clamped, true)
   }, { signal })
-  openSellerButton.addEventListener('click', openSeller, { signal })
   loginButton.addEventListener('click', () => {
     loginButton.disabled = true
     void openErpRoot().then(() => {
@@ -684,21 +569,19 @@ export function startOzonFloatingPanel(options: OzonFloatingPanelOptions = {}): 
     stop: () => {
       if (stopped) return
       stopped = true
-      sellerRequestSequence += 1
       cookieRequestSequence += 1
       authSequence += 1
       dialogSequence += 1
       panelTools.stop()
       eventAbortController.abort()
       browser.storage.onChanged.removeListener(handleStorageChange)
-      if (sellerRecheckTimer !== undefined) window.clearTimeout(sellerRecheckTimer)
       stopAuthPolling()
       if (dragReleaseTimer !== undefined) window.clearTimeout(dragReleaseTimer)
+      app.unmount()
       host.remove()
       if (activeController === controller) activeController = undefined
     },
   }
   activeController = controller
-  void checkSeller()
   return controller
 }

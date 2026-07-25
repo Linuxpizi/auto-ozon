@@ -5,6 +5,75 @@ export type Platform = 'ozon' | 'wb' | '1688' | 'pdd'
 export interface ProductVariantValue {
   name: string
   value: string
+  sourcePath?: string
+  provenance?: FactProvenance
+  [key: string]: unknown
+}
+
+/** 可追溯事实的来源；未知的新来源仍可按原值无损透传。 */
+export type FactSource =
+  | 'ozon_pdp_characteristic'
+  | 'ozon_pdp_structured_data'
+  | 'ozon_seller_analytics'
+  | 'ozon_seller_variant_package'
+  | 'ozon_seller_package_api'
+  | 'legacy_variant_physical'
+  | 'manual_override'
+  | (string & {})
+
+export interface FactProvenance {
+  source: FactSource
+  sourcePath?: string
+  capturedAt?: string
+  /** 人工覆盖时必填；采集来源通常不提供。 */
+  reason?: string
+  [key: string]: unknown
+}
+
+export type PackagePhysicalField =
+  | 'packageWeightG'
+  | 'packageDepthMm'
+  | 'packageWidthMm'
+  | 'packageHeightMm'
+
+/** 每个包装物理量独立记录来源，禁止用一个模糊来源覆盖不同接口的事实。 */
+export type PackagePhysicalProvenance = Partial<Record<PackagePhysicalField, FactProvenance>>
+
+/**
+ * SKU 的包装/运输物理事实。它与 ProductSpec 的商品净重、商品尺寸语义严格分离。
+ * 采集阶段允许字段不完整；可上架性由提交边界验证。
+ */
+export interface PackagePhysicalSnapshot {
+  packageWeightG?: number
+  packageDepthMm?: number
+  packageWidthMm?: number
+  packageHeightMm?: number
+  packagePhysicalProvenance?: PackagePhysicalProvenance
+}
+
+export interface OzonAttributeFactValue {
+  /** Ozon 字典值 ID；只有正整数才可用于发布。 */
+  dictionaryValueId?: number
+  /** 非字典属性的事实文本；不得被解释为属性 ID。 */
+  value?: string
+  [key: string]: unknown
+}
+
+/**
+ * 已识别的 Ozon 类目属性事实。任意 PDP 文本特征必须留在 ProductFact/supplierAttrs，
+ * 不能仅凭名称推导 attributeId。发布器还会再次校验正整数 ID 与显式发布标记。
+ */
+export interface OzonAttributeFact {
+  attributeId: number
+  values: OzonAttributeFactValue[]
+  unit?: string
+  scope: 'product' | 'sku'
+  /** 同一 complex_attributes 条目的稳定分组身份。 */
+  complexGroupId?: string
+  recognized: boolean
+  publishable: boolean
+  provenance: FactProvenance
+  [key: string]: unknown
 }
 
 /** 从页面 DOM、结构化数据、平台接口或明确标记的插件节点采集到的事实。 */
@@ -12,6 +81,8 @@ export interface ProductFact {
   name: string
   value: string
   sourcePath?: string
+  provenance?: FactProvenance
+  [key: string]: unknown
 }
 
 /**
@@ -21,7 +92,7 @@ export interface ProductFact {
  * 明确提供的字段。`values` 必须描述该 SKU 的完整变体组合；对于平台明确
  * 只有一个 Offer 且不存在颜色/尺码等变体维度的普通商品，完整组合是空数组。
  */
-export interface ProductVariant {
+export interface ProductVariant extends PackagePhysicalSnapshot {
   sku: string
   barcode?: string
   values: ProductVariantValue[]
@@ -45,6 +116,8 @@ export interface ProductVariant {
   supplierSpecText?: string
   supplierAttrs?: Array<Record<string, unknown>>
   variantAttrs?: Record<string, unknown>
+  /** 仅保存有明确 Ozon 属性 ID/来源的 SKU 属性；普通文本事实不得放入这里。 */
+  ozonAttributeFacts?: OzonAttributeFact[]
   /** 变体事实来源，便于区分页面结构化数据、DOM 与平台接口。 */
   sourcePath?: string
 }
@@ -108,6 +181,10 @@ export interface ScrapedProduct {
   specList: ProductSpec[]
   /** 关于商品、特征及 BCS 追加信息等可追溯事实。 */
   facts?: ProductFact[]
+  /** 当前精确选中 SKU 的包装快照，便于后端在不猜测变体的情况下建草稿。 */
+  packageFacts?: PackagePhysicalSnapshot
+  /** 有明确 Ozon 属性 ID 的商品级/当前 SKU 级事实。 */
+  ozonAttributeFacts?: OzonAttributeFact[]
   /** 从颜色事实和真实 SKU 变体维度汇总的颜色列表。 */
   colorList?: string[]
   /** 从平台明确的主题/风格/场景特征自动采集，可在选品页修正。 */

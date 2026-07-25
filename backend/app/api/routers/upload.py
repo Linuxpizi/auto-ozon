@@ -118,19 +118,47 @@ def batch_create_drafts(body: BatchCreateDraftRequest, db: Session = Depends(get
 @router.put("/drafts/{draft_id}", response_model=UploadDraftRead)
 def update_draft(draft_id: int, body: UpdateDraftRequest, db: Session = Depends(get_db)):
     """更新草稿（仅传需要修改的字段）"""
-    update_data = body.model_dump(exclude_unset=True)
-    if not update_data:
-        raise HTTPException(status_code=400, detail="未提供更新字段")
-
-    draft = draft_crud.update_draft(db, draft_id, update_data)
+    draft = draft_crud.get_draft(db, draft_id)
     if not draft:
         raise HTTPException(status_code=404, detail="草稿不存在")
 
-    # Auto-update status: if category+type filled → ready
-    if draft.status == "draft" and draft.description_category_id and draft.type_id:
-        draft_crud.update_draft(db, draft_id, {"status": "ready"})
-        draft = draft_crud.get_draft(db, draft_id)
+    update_data = body.model_dump(exclude_unset=True)
+    package_override_reason = update_data.pop("package_override_reason", None)
+    if not update_data:
+        raise HTTPException(status_code=400, detail="未提供更新字段")
 
+    package_updates = {
+        field: update_data[field]
+        for field in upload_service.PACKAGE_FIELDS
+        if field in update_data
+    }
+    positive_package_updates = {
+        field: value
+        for field, value in package_updates.items()
+        if upload_service._positive_int(value) is not None
+    }
+    if positive_package_updates and not str(package_override_reason or "").strip():
+        raise HTTPException(status_code=400, detail="人工修改包装信息必须提供修改原因")
+
+    for field, value in update_data.items():
+        setattr(draft, field, value)
+
+    if package_updates:
+        audit = upload_service.apply_package_override_audit(
+            draft,
+            positive_package_updates,
+            package_override_reason,
+        )
+        for field in package_updates:
+            if field not in positive_package_updates:
+                audit.pop(field, None)
+        draft.package_override_audit = audit or None
+
+    for field, value in upload_service.draft_readiness_update(draft).items():
+        setattr(draft, field, value)
+
+    db.commit()
+    db.refresh(draft)
     return UploadDraftRead.model_validate(draft)
 
 

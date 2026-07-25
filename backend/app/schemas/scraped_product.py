@@ -46,6 +46,8 @@ class ScrapedProductBase(BaseModel):
     facts: List[dict] = []              # [{"name": "...", "value": "...", "sourcePath": "BCS card"}]
     tags: List[str] = []                # 平台事实特征自动采集；允许用户在选品页修正
     color_list: List[str] = []
+    package_facts: dict = {}             # 当前选中 SKU 的包装物理事实与字段级来源
+    ozon_attribute_facts: List[dict] = []  # 显式 Ozon 属性 ID、值、作用域与来源
 
     # ── Ozon 内部分类 ──
     ozon_category_id: int = 0
@@ -68,7 +70,7 @@ class ScrapedProductBase(BaseModel):
 
     @field_validator(
         "images", "video_urls", "sku_list", "variants", "spec_list", "facts", "tags",
-        "color_list", "variant_attr_ids", "price_ranges", mode="before",
+        "color_list", "variant_attr_ids", "price_ranges", "ozon_attribute_facts", mode="before",
     )
     @classmethod
     def normalize_list_fields(cls, value):
@@ -82,7 +84,7 @@ class ScrapedProductBase(BaseModel):
             return parsed if isinstance(parsed, list) else []
         return value
 
-    @field_validator("ozon_metrics", mode="before")
+    @field_validator("ozon_metrics", "package_facts", mode="before")
     @classmethod
     def normalize_dict_fields(cls, value):
         if value is None or value == "":

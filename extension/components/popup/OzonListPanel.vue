@@ -1,15 +1,35 @@
 <script setup lang="ts">
-import { onMounted, onUnmounted, ref, computed } from 'vue'
-import { NAlert, NButton, NIcon, NProgress, NTag } from 'naive-ui'
+import { computed, defineAsyncComponent, onMounted, onUnmounted, ref } from 'vue'
+import { NAlert, NButton, NCheckbox, NCheckboxGroup, NIcon, NInputNumber, NProgress, NSwitch, NTag } from 'naive-ui'
 import { PlayOutline, StopOutline } from '@vicons/ionicons5'
-import type { OzonListCrawlSnapshot } from '@/lib/ozonbox/list-crawl-contract'
+import {
+  assertOzonListCrawlStartConfig,
+  createDefaultOzonListCrawlStartConfig,
+  type OzonListCrawlSnapshot,
+} from '@/lib/ozonbox/list-crawl-contract'
+import type { OzonboxRuntimeMessage } from '@/lib/ozonbox/contract'
+import {
+  requirePanelToolData,
+  type PanelSelectionRule,
+  type PanelToolRequest,
+} from '@/lib/ozonbox/panel-tools-contract'
 
 const POLL_INTERVAL_MS = 2000
+const SelectionRulesManager = defineAsyncComponent(() => import('./SelectionRulesManager.vue'))
 
 const snapshot = ref<OzonListCrawlSnapshot | null>(null)
 const error = ref('')
 const polling = ref(false)
+const rulesLoading = ref(false)
+const startLoading = ref(false)
+const defaults = createDefaultOzonListCrawlStartConfig()
+const target = ref<number | null>(defaults.target)
+const collectVariants = ref(defaults.collectVariants)
+const selectionRuleIds = ref<Array<string | number>>([...defaults.selectionRuleIds])
+const rules = ref<PanelSelectionRule[]>([])
 let pollTimer: ReturnType<typeof setInterval> | undefined
+
+const enabledRules = computed(() => rules.value.filter(rule => rule.enabled))
 
 const isRunning = computed(() => {
   const s = snapshot.value
@@ -58,28 +78,64 @@ const progressPercent = computed(() => {
   return Math.min(100, Math.round((s.saved / s.target) * 100))
 })
 
-async function sendOzonboxMessage(type: string): Promise<unknown> {
-  return browser.runtime.sendMessage({ type } as any)
+function responseError(response: unknown): string | undefined {
+  if (!response || typeof response !== 'object' || !('error' in response)) return undefined
+  const value = (response as { error?: unknown }).error
+  return typeof value === 'string' && value.trim() ? value : '扩展服务请求失败'
+}
+
+async function sendOzonboxMessage(message: OzonboxRuntimeMessage): Promise<unknown> {
+  return browser.runtime.sendMessage(message)
+}
+
+async function loadSelectionRules() {
+  rulesLoading.value = true
+  try {
+    const request: PanelToolRequest = { type: 'PANEL_SELECTION_LIST' }
+    const response = await browser.runtime.sendMessage(request)
+    const { data } = requirePanelToolData<PanelSelectionRule[]>(response)
+    updateRules(data)
+  } catch (reason) {
+    error.value = reason instanceof Error ? reason.message : String(reason)
+  } finally {
+    rulesLoading.value = false
+  }
+}
+
+function updateRules(nextRules: PanelSelectionRule[]) {
+  rules.value = nextRules
+  const enabledIds = new Set(nextRules.filter(rule => rule.enabled).map(rule => rule.id))
+  selectionRuleIds.value = selectionRuleIds.value.filter(id => enabledIds.has(Number(id)))
 }
 
 async function startCrawl() {
   error.value = ''
+  startLoading.value = true
   try {
-    const response = await sendOzonboxMessage('OZONBOX_LIST_CRAWL_START')
-    if (response && typeof response === 'object' && 'error' in response) {
-      error.value = (response as any).error as string
-      return
-    }
+    const config = assertOzonListCrawlStartConfig({
+      target: target.value,
+      collectVariants: collectVariants.value,
+      selectionRuleIds: selectionRuleIds.value.map(Number),
+    })
+    if (config.selectionRuleIds.length === 0) throw new Error('请至少选择一条启用的选品规则')
+    const response = await sendOzonboxMessage({ type: 'OZONBOX_LIST_CRAWL_START', config })
+    const failure = responseError(response)
+    if (failure) throw new Error(failure)
+    if (response && typeof response === 'object') snapshot.value = response as OzonListCrawlSnapshot
     startPolling()
   } catch (reason) {
     error.value = reason instanceof Error ? reason.message : String(reason)
+  } finally {
+    startLoading.value = false
   }
 }
 
 async function stopCrawl() {
   error.value = ''
   try {
-    await sendOzonboxMessage('OZONBOX_LIST_CRAWL_STOP')
+    const response = await sendOzonboxMessage({ type: 'OZONBOX_LIST_CRAWL_STOP' })
+    const failure = responseError(response)
+    if (failure) throw new Error(failure)
     stopPolling()
     await fetchSnapshot()
   } catch (reason) {
@@ -89,12 +145,10 @@ async function stopCrawl() {
 
 async function fetchSnapshot() {
   try {
-    const response = await sendOzonboxMessage('OZONBOX_LIST_CRAWL_SNAPSHOT')
+    const response = await sendOzonboxMessage({ type: 'OZONBOX_LIST_CRAWL_SNAPSHOT' })
     if (response && typeof response === 'object') {
-      if ('error' in response) {
-        error.value = (response as any).error as string
-        return
-      }
+      const failure = responseError(response)
+      if (failure) throw new Error(failure)
       snapshot.value = response as OzonListCrawlSnapshot
     }
   } catch (reason) {
@@ -103,10 +157,10 @@ async function fetchSnapshot() {
 }
 
 function startPolling() {
-  polling.value = true
   stopPolling()
+  polling.value = true
   pollTimer = setInterval(() => {
-    fetchSnapshot()
+    void fetchSnapshot()
   }, POLL_INTERVAL_MS)
 }
 
@@ -119,7 +173,7 @@ function stopPolling() {
 }
 
 onMounted(async () => {
-  await fetchSnapshot()
+  await Promise.all([fetchSnapshot(), loadSelectionRules()])
   const s = snapshot.value
   if (s && (s.status === 'collecting' || s.status === 'paused')) {
     startPolling()
@@ -174,6 +228,38 @@ onUnmounted(() => {
 
       <p v-if="snapshot?.message" class="status-message">{{ snapshot.message }}</p>
 
+      <div v-if="!isRunning" class="start-config" aria-label="启动爬虫配置">
+        <label class="config-label" for="ozon-list-crawl-target">目标采集数目</label>
+        <NInputNumber
+          id="ozon-list-crawl-target"
+          v-model:value="target"
+          :min="1"
+          :precision="0"
+          :step="1"
+          placeholder="请输入目标数量"
+        />
+        <p class="config-hint">仅统计命中所选规则且成功上报的商品，默认 100。</p>
+
+        <div class="variant-row">
+          <div>
+            <div class="config-label">是否采集 SKU 变体</div>
+            <p class="config-hint">默认关闭：只采集当前 SKU，不采集 SKU 变体。</p>
+          </div>
+          <NSwitch v-model:value="collectVariants" aria-label="是否采集 SKU 变体" />
+        </div>
+
+        <div class="config-label">本次启动使用的选品规则</div>
+        <p v-if="rulesLoading" class="config-hint">正在读取启用的选品规则…</p>
+        <NAlert v-else-if="enabledRules.length === 0" type="warning" :bordered="false">
+          暂无启用的选品规则，请在下方新增或启用规则。
+        </NAlert>
+        <NCheckboxGroup v-else v-model:value="selectionRuleIds" class="rule-list">
+          <NCheckbox v-for="rule in enabledRules" :key="rule.id" :value="rule.id" :label="rule.name" />
+        </NCheckboxGroup>
+
+        <SelectionRulesManager :rules="rules" :loading="rulesLoading" @update:rules="updateRules" />
+      </div>
+
       <div class="panel-actions">
         <NButton
           v-if="!isRunning"
@@ -181,6 +267,8 @@ onUnmounted(() => {
           block
           size="large"
           class="panel-primary-button"
+          :loading="startLoading"
+          :disabled="rulesLoading || enabledRules.length === 0 || selectionRuleIds.length === 0"
           @click="startCrawl"
         >
           <template #icon><NIcon :component="PlayOutline" /></template>
@@ -218,6 +306,13 @@ onUnmounted(() => {
 .count-value.primary { color: #1677ff; }
 .count-value.error { color: #ef4444; }
 .status-message { margin: 6px 0 0; color: #595959; font-size: 12px; line-height: 1.5; word-break: break-all; }
+.start-config { display: flex; flex-direction: column; gap: 8px; margin-top: 12px; padding-top: 12px; border-top: 1px solid #f0f0f0; }
+.config-label { color: #262626; font-size: 12px; font-weight: 600; }
+.config-hint { margin: -4px 0 2px; color: #8c8c8c; font-size: 11px; line-height: 1.45; }
+.variant-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.variant-row > div { min-width: 0; }
+.variant-row .config-hint { margin: 2px 0 0; }
+.rule-list { display: flex; max-height: 112px; flex-direction: column; gap: 6px; overflow-y: auto; padding: 8px; border: 1px solid #e5e7eb; border-radius: 8px; }
 .panel-actions { margin-top: 10px; }
 .panel-alert { margin-top: 10px; }
 </style>

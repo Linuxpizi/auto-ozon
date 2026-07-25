@@ -10,7 +10,15 @@ from typing import Any, Dict
 
 import pytest
 
-from app.services.ozon_client import OzonClient
+from app.services.ozon_client import OzonClient, clear_cache
+
+
+@pytest.fixture(autouse=True)
+def isolate_ozon_client_cache():
+    """Prevent cached API responses from leaking across mocked HTTP tests."""
+    clear_cache()
+    yield
+    clear_cache()
 
 
 @pytest.fixture

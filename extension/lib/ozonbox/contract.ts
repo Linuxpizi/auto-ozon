@@ -1,3 +1,11 @@
+import type {
+  OzonAttributeFact,
+  OzonMetrics,
+  PackagePhysicalSnapshot,
+  ProductFact,
+} from '@/lib/utils/types'
+import type { OzonListCrawlProcessConfig, OzonListCrawlStartConfig } from './list-crawl-contract'
+
 /**
  * The single wire contract for the Ozonbox-compatible flow.
  *
@@ -32,7 +40,7 @@ export interface OzonboxPackageShopFacts {
   categories: unknown[]
 }
 
-export interface OzonboxVariant {
+export interface OzonboxVariant extends PackagePhysicalSnapshot {
   id?: string | null
   productId?: string | null
   sku?: string | null
@@ -53,9 +61,9 @@ export interface OzonboxVariant {
   supplierSpecText?: string | null
   supplierAttrs: Array<Record<string, unknown>>
   variantAttrs: Record<string, unknown>
+  /** 只包含已由可信平台元数据识别的 Ozon 属性，绝不从任意文本名称推导 ID。 */
+  ozonAttributeFacts?: OzonAttributeFact[]
 }
-
-import type { OzonMetrics } from '@/lib/utils/types'
 
 /** Product shape returned by the Ozon collector before category enrichment. */
 export interface OzonboxCollectedProduct {
@@ -75,6 +83,12 @@ export interface OzonboxCollectedProduct {
   images: string[]
   price: number
   specs: Array<Record<string, unknown>>
+  /** 原始可读事实；与可发布 Ozon 属性分开保存。 */
+  textFacts?: ProductFact[]
+  /** 当前精确 SKU 的包装/运输物理事实；允许采集阶段不完整。 */
+  packageFacts?: PackagePhysicalSnapshot
+  /** 商品级及当前 SKU 级、具有明确 Ozon ID 和来源的结构化属性。 */
+  ozonAttributeFacts?: OzonAttributeFact[]
   variantsData: OzonboxVariant[]
   variantAttrIds: number[]
   categoryPath?: string | null
@@ -203,12 +217,13 @@ export interface OzonboxProcessCardProductRequest {
   type: 'OZONBOX_PROCESS_CARD_PRODUCT'
   sku: string
   sourceUrl: string
+  config: OzonListCrawlProcessConfig
 }
 
 export interface OzonboxProcessCardProductResponse {
   success: true
   outcome: 'saved' | 'skipped'
-  reason?: 'no-enabled-rules' | 'no-rule-match'
+  reason?: 'no-selected-rules' | 'no-rule-match'
   sku: string
   matchedRuleIds: number[]
   created: number
@@ -217,6 +232,7 @@ export interface OzonboxProcessCardProductResponse {
 
 export interface OzonboxListCrawlStartRequest {
   type: 'OZONBOX_LIST_CRAWL_START'
+  config: OzonListCrawlStartConfig
 }
 
 export interface OzonboxListCrawlStopRequest {
@@ -266,7 +282,7 @@ export function assertOzonboxProcessCardProductResponse(
     }
   }
   if (value.outcome === 'skipped'
-    && value.reason !== 'no-enabled-rules'
+    && value.reason !== 'no-selected-rules'
     && value.reason !== 'no-rule-match') {
     throw new Error('列表商品跳过结果缺少有效原因')
   }

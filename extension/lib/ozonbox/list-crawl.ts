@@ -1,17 +1,20 @@
 import { getSettings } from '../utils/storage'
 import { analyticsPageForUrl } from './analytics-card'
 import type { OzonboxProcessCardProductResponse } from './contract'
-import type {
-  OzonListCardIdentity,
-  OzonListCrawlSnapshot,
-  OzonListCrawlStatus,
+import {
+  DEFAULT_OZON_LIST_TARGET,
+  assertOzonListCrawlStartConfig,
+  type OzonListCardIdentity,
+  type OzonListCrawlProcessConfig,
+  type OzonListCrawlSnapshot,
+  type OzonListCrawlStartConfig,
+  type OzonListCrawlStatus,
 } from './list-crawl-contract'
 
 export const OZON_LIST_CRAWL_HOST_ID = 'jingzhi-ai-ozon-list-crawl'
 
 const PRODUCT_LINK_SELECTOR = 'a[href*="/product/"]'
 const DEFAULT_OZON_ORIGIN = 'https://www.ozon.ru'
-export const DEFAULT_OZON_LIST_TARGET = 50
 const EMPTY_SNAPSHOT: OzonListCrawlSnapshot = {
   status: 'idle', target: DEFAULT_OZON_LIST_TARGET, collected: 0, saved: 0, skipped: 0, pending: 0, failed: 0, message: '等待启动',
 }
@@ -40,7 +43,8 @@ export function extractOzonListSku(href: string, baseUrl = currentBaseUrl()): st
     if (!pathPart) return ''
     // Match all digit groups; the SKU is the last one (typically the longest/trailing)
     const digits = pathPart[1].match(/\d+/g)
-    return digits?.pop() ?? ''
+    const sku = digits?.pop() ?? ''
+    return /^[1-9]\d*$/.test(sku) ? sku : ''
   } catch {
     return ''
   }
@@ -115,22 +119,36 @@ function createMonitor(): MonitorElements {
 }
 
 export interface OzonListCrawlController {
-  start: () => void
+  start: (config: OzonListCrawlStartConfig) => void
   reconcile: () => void
   snapshot: () => OzonListCrawlSnapshot
   stop: () => void
 }
 
 export interface OzonListCrawlOptions {
-  processCardProduct: (identity: OzonListCardIdentity) => Promise<OzonboxProcessCardProductResponse>
+  processCardProduct: (
+    identity: OzonListCardIdentity,
+    config: OzonListCrawlProcessConfig,
+  ) => Promise<OzonboxProcessCardProductResponse>
 }
 
 function identityKey(identity: OzonListCardIdentity): string {
   return `${identity.sku}\u0000${identity.sourceUrl}`
 }
 
+function sameStartConfig(
+  left: OzonListCrawlStartConfig | undefined,
+  right: OzonListCrawlStartConfig,
+): boolean {
+  return left !== undefined
+    && left.target === right.target
+    && left.collectVariants === right.collectVariants
+    && left.selectionRuleIds.length === right.selectionRuleIds.length
+    && left.selectionRuleIds.every((id, index) => id === right.selectionRuleIds[index])
+}
+
 function skippedReason(result: OzonboxProcessCardProductResponse): string {
-  if (result.reason === 'no-enabled-rules') return '未启用选品规则'
+  if (result.reason === 'no-selected-rules') return '本次启动未选择选品规则'
   if (result.reason === 'no-rule-match') return '未命中选品规则'
   return '规则已跳过'
 }
@@ -147,6 +165,7 @@ export function startOzonListCrawlController(options: OzonListCrawlOptions): Ozo
   let stopRequested = false
   let runner: Promise<void> | undefined
   let processing: Promise<boolean> | undefined
+  let activeConfig: OzonListCrawlStartConfig | undefined
 
   const render = (): void => {
     state = {
@@ -188,9 +207,9 @@ export function startOzonListCrawlController(options: OzonListCrawlOptions): Ozo
     render()
     return added
   }
-  const processOnce = async (target: number): Promise<boolean> => {
+  const processOnce = async (config: OzonListCrawlStartConfig): Promise<boolean> => {
     if (processing) return processing
-    if (hasReachedOzonListTarget(saved.size, target)) return true
+    if (hasReachedOzonListTarget(saved.size, config.target)) return true
     const key = pending.values().next().value as string | undefined
     if (!key) return true
     const identity = products.get(key)
@@ -201,7 +220,10 @@ export function startOzonListCrawlController(options: OzonListCrawlOptions): Ozo
     }
     processing = (async () => {
       try {
-        const result = await options.processCardProduct(identity)
+        const result = await options.processCardProduct(identity, {
+          collectVariants: config.collectVariants,
+          selectionRuleIds: [...config.selectionRuleIds],
+        })
         if (result.sku !== identity.sku) throw new Error('处理结果与列表商品 SKU 不一致')
         pending.delete(key)
         failed.delete(key)
@@ -231,18 +253,17 @@ export function startOzonListCrawlController(options: OzonListCrawlOptions): Ozo
     pending.clear()
     render()
   }
-  const drainPending = async (target: number): Promise<boolean> => {
-    while (!disposed && pending.size > 0 && !hasReachedOzonListTarget(saved.size, target)) {
-      await processOnce(target)
+  const drainPending = async (config: OzonListCrawlStartConfig): Promise<boolean> => {
+    while (!disposed && pending.size > 0 && !hasReachedOzonListTarget(saved.size, config.target)) {
+      await processOnce(config)
     }
-    if (hasReachedOzonListTarget(saved.size, target)) clearSurplusPending()
-    return pending.size === 0 || hasReachedOzonListTarget(saved.size, target)
+    if (hasReachedOzonListTarget(saved.size, config.target)) clearSurplusPending()
+    return pending.size === 0 || hasReachedOzonListTarget(saved.size, config.target)
   }
   const sleep = (ms: number) => new Promise<void>((resolve) => window.setTimeout(resolve, ms))
-  const run = async (): Promise<void> => {
-    const config = (await getSettings()).ozon
-    const target = normalizeOzonListTarget(config.maxItems)
-    state = { ...state, target }
+  const run = async (config: OzonListCrawlStartConfig): Promise<void> => {
+    const scrollDelay = (await getSettings()).ozon.scrollDelay
+    state = { ...state, target: config.target }
     render()
     let bottomRounds = 0
     while (!disposed && !stopRequested) {
@@ -251,13 +272,13 @@ export function startOzonListCrawlController(options: OzonListCrawlOptions): Ozo
         continue
       }
       const added = scan()
-      if (pending.size > 0) await processOnce(target)
-      if (hasReachedOzonListTarget(saved.size, target)) break
+      if (pending.size > 0) await processOnce(config)
+      if (hasReachedOzonListTarget(saved.size, config.target)) break
       const atBottom = window.scrollY + window.innerHeight >= document.documentElement.scrollHeight - 8
       bottomRounds = atBottom && added === 0 ? bottomRounds + 1 : 0
       if (bottomRounds >= 3) break
       window.scrollBy({ top: Math.max(320, Math.floor(window.innerHeight * .75)), behavior: 'smooth' })
-      await sleep(config.scrollDelay)
+      await sleep(scrollDelay)
     }
     if (disposed) return
     if (stopRequested) {
@@ -265,21 +286,26 @@ export function startOzonListCrawlController(options: OzonListCrawlOptions): Ozo
       setState('stopped', '采集已停止；进行中的商品处理已安全完成')
       return
     }
-    if (hasReachedOzonListTarget(saved.size, target)) {
+    if (hasReachedOzonListTarget(saved.size, config.target)) {
       clearSurplusPending()
-      setState('completed', `已达到目标数量 ${saved.size}/${target}`)
+      setState('completed', `已达到目标数量 ${saved.size}/${config.target}`)
       return
     }
     setState('collecting', '已到达列表底部，正在完成剩余商品…')
-    const ok = await drainPending(target)
+    const ok = await drainPending(config)
     if (disposed) return
     if (!ok) setState('error', state.message)
-    else if (hasReachedOzonListTarget(saved.size, target)) setState('completed', `已达到目标数量 ${saved.size}/${target}`)
-    else setState('completed', `已到达列表底部，成功上报 ${saved.size}/${target}`)
+    else if (hasReachedOzonListTarget(saved.size, config.target)) setState('completed', `已达到目标数量 ${saved.size}/${config.target}`)
+    else setState('completed', `已到达列表底部，成功上报 ${saved.size}/${config.target}`)
   }
-  const start = (): void => {
+  const start = (configValue: OzonListCrawlStartConfig): void => {
+    const config = assertOzonListCrawlStartConfig(configValue)
     monitor.panel.hidden = false
     if (runner) {
+      if (!sameStartConfig(activeConfig, config)) {
+        setState(state.status, '采集任务运行中，不能更改本次启动配置')
+        return
+      }
       if (state.status === 'paused') setState('collecting', '已继续采集')
       return
     }
@@ -293,9 +319,11 @@ export function startOzonListCrawlController(options: OzonListCrawlOptions): Ozo
       skipped.clear()
       failed.clear()
     }
+    activeConfig = { ...config, selectionRuleIds: [...config.selectionRuleIds] }
+    state = { ...state, target: config.target }
     stopRequested = false
     setState('collecting', pending.size > 0 ? '继续处理未完成任务并扫描可见商品…' : '采集任务已启动，正在扫描可见商品…')
-    runner = run().finally(() => { runner = undefined })
+    runner = run(activeConfig).finally(() => { runner = undefined })
   }
   monitor.pause.addEventListener('click', () => {
     if (state.status === 'paused') setState('collecting', '已继续采集')
@@ -306,12 +334,12 @@ export function startOzonListCrawlController(options: OzonListCrawlOptions): Ozo
     if (runner || processing || (pending.size === 0 && failed.size === 0)) return
     for (const key of failed) pending.add(key)
     failed.clear()
-    const target = normalizeOzonListTarget(state.target)
+    if (!activeConfig) return
     setState('stopping', '正在重试失败及待处理商品…')
-    runner = drainPending(target).then((ok) => {
+    runner = drainPending(activeConfig).then((ok) => {
       if (disposed) return
-      const reachedTarget = hasReachedOzonListTarget(saved.size, target)
-      setState(ok ? 'stopped' : 'error', ok ? (reachedTarget ? `重试完成，已达到目标数量 ${saved.size}/${target}` : '重试完成') : state.message)
+      const reachedTarget = hasReachedOzonListTarget(saved.size, activeConfig!.target)
+      setState(ok ? 'stopped' : 'error', ok ? (reachedTarget ? `重试完成，已达到目标数量 ${saved.size}/${activeConfig!.target}` : '重试完成') : state.message)
     }).finally(() => { runner = undefined })
   })
   monitor.close.addEventListener('click', () => { monitor.panel.hidden = true })

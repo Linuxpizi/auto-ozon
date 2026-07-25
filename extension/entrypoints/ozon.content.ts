@@ -13,7 +13,12 @@ import {
 } from '@/lib/ozonbox/contract'
 import { startOzonFloatingPanel } from '@/lib/ozonbox/floating-panel'
 import { startOzonListCrawlController } from '@/lib/ozonbox/list-crawl'
-import type { OzonListCardIdentity } from '@/lib/ozonbox/list-crawl-contract'
+import {
+  DEFAULT_OZON_LIST_TARGET,
+  assertOzonListCrawlStartConfig,
+  type OzonListCardIdentity,
+  type OzonListCrawlProcessConfig,
+} from '@/lib/ozonbox/list-crawl-contract'
 import { extractOzonProductId } from '@/lib/ozonbox/url'
 import {
   readOzonPanelState,
@@ -55,11 +60,14 @@ export default defineContentScript({
         : request.type === 'OZONBOX_FETCH_SELLER_OFFERS'
           ? fetchCurrentProductSellerOffers(request.sku)
           : request.type === 'OZONBOX_LIST_CRAWL_START'
-            ? (() => { listCrawler?.start(); return Promise.resolve({ success: true }) })()
+            ? (() => {
+                listCrawler?.start(assertOzonListCrawlStartConfig(request.config))
+                return Promise.resolve({ success: true })
+              })()
           : request.type === 'OZONBOX_LIST_CRAWL_STOP'
             ? (() => { listCrawler?.stop(); return Promise.resolve({ success: true }) })()
           : request.type === 'OZONBOX_LIST_CRAWL_SNAPSHOT'
-            ? Promise.resolve(listCrawler?.snapshot() ?? { status: 'idle', target: 50, collected: 0, saved: 0, skipped: 0, pending: 0, failed: 0, message: '采集器未就绪' })
+              ? Promise.resolve(listCrawler?.snapshot() ?? { status: 'idle', target: DEFAULT_OZON_LIST_TARGET, collected: 0, saved: 0, skipped: 0, pending: 0, failed: 0, message: '采集器未就绪' })
           : undefined
       if (!operation) return false
       operation
@@ -118,11 +126,13 @@ export default defineContentScript({
 
     const processListCardProduct = async (
       { sku, sourceUrl }: OzonListCardIdentity,
+      config: OzonListCrawlProcessConfig,
     ): Promise<OzonboxProcessCardProductResponse> => {
       const response: unknown = await browser.runtime.sendMessage({
         type: 'OZONBOX_PROCESS_CARD_PRODUCT',
         sku,
         sourceUrl,
+        config,
       } satisfies OzonboxRuntimeMessage)
       return assertOzonboxProcessCardProductResponse(response, sku)
     }
@@ -155,7 +165,7 @@ export default defineContentScript({
       setListCardsHidden: analyticsCards.setListCardsHidden,
       setDetailCardsVisible: analyticsCards.setDetailCardsVisible,
       persistLauncherPosition: (launcherPosition) => persistState({ launcherPosition }),
-      onStartListCrawl: () => listCrawler?.start(),
+      onStartListCrawl: (config) => listCrawler?.start(config),
     })
 
     ctx.addEventListener(window, 'wxt:locationchange', () => {

@@ -1,4 +1,5 @@
 import {
+  PANEL_SELECTION_RULES_STORAGE_KEY,
   requirePanelToolData,
   type PanelErpRoute,
   type PanelListingDraftInput,
@@ -17,10 +18,14 @@ import {
 } from './panel-tools-contract'
 import type { OzonboxCollectedProduct } from './contract'
 import { validatedErpBaseUrl } from './erp-url'
+import {
+  assertOzonListCrawlStartConfig,
+  createDefaultOzonListCrawlStartConfig,
+  type OzonListCrawlStartConfig,
+} from './list-crawl-contract'
 
 const DRAWER_WIDTH_KEY = 'drawerWidth'
 const LEGACY_DRAWER_WIDTH_KEY = 'jingzhi_ai_panel_pricing_drawer_width'
-export const PANEL_SELECTION_RULES_STORAGE_KEY = 'jingzhi_ai_product_selection_rules'
 const DEFAULT_DRAWER_WIDTH = 500
 const MIN_DRAWER_WIDTH = 300
 const FOLLOW_PRODUCT_ALERT_CLOSED_KEY = 'maozierp-follow-product-alert-closed'
@@ -115,7 +120,10 @@ const SELECTION_CONDITION_GROUPS: Array<{
 export interface FloatingPanelToolsController {
   openListing: (options?: FloatingPanelListingOptions) => void
   openPricing: (route: PanelPricingRoute, options?: FloatingPanelPricingOptions) => void
-  openSelection: (source?: HTMLElement) => void
+  openListCrawl: (
+    source: HTMLElement | undefined,
+    onStart: (config: OzonListCrawlStartConfig) => void | Promise<void>,
+  ) => void
   openErp: (source?: HTMLElement) => void
   close: () => void
   stop: () => void
@@ -348,6 +356,8 @@ export function createFloatingPanelTools(options: FloatingPanelToolsOptions): Fl
   let editingRule: PanelSelectionRule | undefined
   let selectionEditorReturnFocus: HTMLElement | null = null
   let deletingRuleId: number | undefined
+  let listCrawlStart: ((config: OzonListCrawlStartConfig) => void | Promise<void>) | undefined
+  let listCrawlDraft = createDefaultOzonListCrawlStartConfig()
   let resizing = false
   let resizeStartX = 0
   let resizeStartWidth = DEFAULT_DRAWER_WIDTH
@@ -402,6 +412,7 @@ export function createFloatingPanelTools(options: FloatingPanelToolsOptions): Fl
     if (root.hidden) return
     sequence += 1
     listingProduct = undefined
+    listCrawlStart = undefined
     resizing = false
     selectionEditorOpen = false
     editingRule = undefined
@@ -818,12 +829,24 @@ export function createFloatingPanelTools(options: FloatingPanelToolsOptions): Fl
     </form>`
   }
 
-  const renderSelection = (): void => {
-    body.setAttribute('aria-busy', 'false')
-    body.innerHTML = `<div class="jz-selection-main"><div class="jz-selection-content"><div data-selection-main-error></div><div class="jz-selection-toolbar"><span class="jz-selection-count">共 ${selectionRules.length} 条规则</span><button class="jz-button primary jz-selection-create" type="button" data-action="selection-create">${plusOutlinedIconHtml()}<span>新增规则</span></button></div><div class="jz-selection-table-wrap"><table class="jz-selection-table"><colgroup><col style="width:200px"><col style="width:120px"><col style="width:120px"><col style="width:120px"><col style="width:100px"><col style="width:150px"><col style="width:150px"></colgroup><thead><tr><th>规则名称</th><th class="center">标签</th><th class="center">自动收藏</th><th class="center">是否启用</th><th class="center">优先级</th><th class="center">更新时间</th><th class="center">操作</th></tr></thead><tbody>${selectionRules.length ? selectionRules.map(rule => {
+  const selectionManagementHtml = (): string => `<div class="jz-selection-main"><div class="jz-selection-content"><div data-selection-main-error></div><div class="jz-selection-toolbar"><span class="jz-selection-count">共 ${selectionRules.length} 条规则</span><span class="jz-selection-actions"><button class="jz-button" type="button" data-action="selection-save">保存规则设置</button><button class="jz-button primary jz-selection-create" type="button" data-action="selection-create">${plusOutlinedIconHtml()}<span>新增规则</span></button></span></div><div class="jz-selection-table-wrap"><table class="jz-selection-table"><colgroup><col style="width:200px"><col style="width:120px"><col style="width:120px"><col style="width:120px"><col style="width:100px"><col style="width:150px"><col style="width:150px"></colgroup><thead><tr><th>规则名称</th><th class="center">标签</th><th class="center">自动收藏</th><th class="center">是否启用</th><th class="center">优先级</th><th class="center">更新时间</th><th class="center">操作</th></tr></thead><tbody>${selectionRules.length ? selectionRules.map(rule => {
       const color = sanitizePanelRuleColor(rule.color)
       return `<tr><td>${escapeHtml(rule.name)}</td><td class="center"><span class="jz-selection-tag${color ? ' colored' : ''}" ${color ? `style="background:${color}"` : ''}>${escapeHtml(rule.tag)}</span></td><td class="center">${rule.autoFavorite ? '是' : '否'}</td><td class="center"><button class="jz-selection-switch${rule.enabled ? ' on' : ''}" type="button" role="switch" aria-checked="${rule.enabled}" data-action="selection-toggle" data-id="${rule.id}" data-enabled="${!rule.enabled}"><span class="jz-selection-switch-handle"></span><span class="jz-selection-switch-inner"><span>${rule.enabled ? '启用' : '禁用'}</span></span></button></td><td class="center">${rule.sort}</td><td class="center">${escapeHtml(formatSelectionUpdatedAt(rule.updatedAt))}</td><td class="center jz-selection-action-cell"><div class="jz-selection-actions"><button class="jz-button small link" type="button" data-action="selection-edit" data-id="${rule.id}">编辑</button><button class="jz-button small link dangerous" type="button" data-action="selection-delete" data-id="${rule.id}">删除</button></div>${deletingRuleId === rule.id ? `<div class="jz-selection-popover" role="alertdialog" aria-label="确认删除"><div class="jz-selection-popover-message"><div class="jz-selection-popover-title">确认删除</div></div><div class="jz-selection-popover-desc">确定要删除这个规则吗？删除后无法恢复。</div><div class="jz-selection-popover-actions"><button class="jz-button small" type="button" data-action="selection-delete-cancel">取消</button><button class="jz-button small primary" type="button" data-action="selection-delete-confirm" data-id="${rule.id}">确定</button></div></div>` : ''}</td></tr>`
-    }).join('') : '<tr><td class="jz-selection-empty" colspan="7">暂无数据</td></tr>'}</tbody></table></div></div><footer class="jz-selection-footer"><button class="jz-button" type="button" data-action="selection-main-cancel">取消</button><button class="jz-button primary" type="button" data-action="selection-save">保存设置(规则生效)</button></footer></div>`
+    }).join('') : '<tr><td class="jz-selection-empty" colspan="7">暂无数据</td></tr>'}</tbody></table></div></div></div>`
+
+  const captureListCrawlDraft = (): void => {
+    const formElement = body.querySelector<HTMLFormElement>('form[data-form="list-crawl-start"]')
+    if (!formElement) return
+    const form = new FormData(formElement)
+    const target = Number(form.get('target'))
+    if (Number.isInteger(target) && target > 0) listCrawlDraft.target = target
+    listCrawlDraft.collectVariants = form.get('collectVariants') === 'on'
+    listCrawlDraft.selectionRuleIds = form.getAll('selectionRuleIds').map(Number)
+  }
+
+  const renderSelection = (): void => {
+    captureListCrawlDraft()
+    renderListCrawlStart()
   }
 
   const renderSelectionEditor = (): void => {
@@ -909,21 +932,44 @@ export function createFloatingPanelTools(options: FloatingPanelToolsOptions): Fl
     return { name, tag, color, autoFavorite: autoFavoriteValue === '1', sort, enabled: editingRule?.enabled ?? true, conditions }
   }
 
-  const openSelection = (source?: HTMLElement): void => {
+  function renderListCrawlStart(): void {
+    const enabledRules = selectionRules.filter(rule => rule.enabled)
+    const enabledIds = new Set(enabledRules.map(rule => rule.id))
+    listCrawlDraft.selectionRuleIds = listCrawlDraft.selectionRuleIds.filter(id => enabledIds.has(id))
+    const rulesHtml = enabledRules.length
+      ? `<div class="jz-grid">${enabledRules.map(rule => `<label class="jz-radio"><input type="checkbox" name="selectionRuleIds" value="${rule.id}" ${listCrawlDraft.selectionRuleIds.includes(rule.id) ? 'checked' : ''}><span><strong>${escapeHtml(rule.name)}</strong><small>${escapeHtml(rule.tag)}</small></span></label>`).join('')}</div>`
+      : '<div class="jz-alert warning" role="alert">暂无启用的选品规则，请在下方新增规则或启用已有规则。</div>'
+    body.setAttribute('aria-busy', 'false')
+    body.innerHTML = `<form data-form="list-crawl-start">
+      <div class="jz-grid">
+        <label class="jz-field"><span class="jz-label">目标采集数目</span><input class="jz-input" name="target" type="number" min="1" step="1" required value="${listCrawlDraft.target}"><span class="jz-hint">仅统计命中所选规则且成功上报的商品，默认 100。</span></label>
+        <label class="jz-radio"><input type="checkbox" name="collectVariants" ${listCrawlDraft.collectVariants ? 'checked' : ''}><span><strong>是否采集 SKU 变体</strong><small>默认关闭：只采集当前 SKU，不采集 SKU 变体。</small></span></label>
+      </div>
+      <section class="jz-section"><h3 class="jz-section-title">本次启动使用的选品规则</h3>${rulesHtml}</section>
+      <section class="jz-section"><h3 class="jz-section-title">管理选品规则</h3>${selectionManagementHtml()}</section>
+      <div class="jz-actions"><button class="jz-button" type="button" data-action="close">取消</button><button class="jz-button primary" type="submit" ${enabledRules.length ? '' : 'disabled'}>启动爬取</button></div>
+      <div data-list-crawl-result></div>
+    </form>`
+  }
+
+  const openListCrawl = (
+    source: HTMLElement | undefined,
+    onStart: (config: OzonListCrawlStartConfig) => void | Promise<void>,
+  ): void => {
     const token = open(source)
+    listCrawlStart = onStart
+    listCrawlDraft = createDefaultOzonListCrawlStartConfig()
     selectionEditorOpen = false
     editingRule = undefined
     deletingRuleId = undefined
-    selectionEditorReturnFocus = null
-    root.querySelector('[data-selection-layer]')?.remove()
-    setHeader('设置选品规则', '', false, true)
+    setHeader('启动 Ozon 列表爬虫', '配置采集目标、SKU 变体，并在同一界面管理和选择规则', false, true)
     showLoading('正在读取选品规则...')
     void Promise.all([loadSettings(token), requestPanelTool<PanelSelectionRule[]>({ type: 'PANEL_SELECTION_LIST' })]).then(([, response]) => {
       if (!isCurrent(token)) return
       updateModeBadge(response.mode)
       selectionRules = response.data
-      renderSelection()
-      required<HTMLButtonElement>(body, '[data-action="selection-create"]').focus()
+      renderListCrawlStart()
+      body.querySelector<HTMLInputElement>('input[name="target"]')?.focus()
     }).catch((error: unknown) => {
       if (isCurrent(token)) showError(`获取规则列表失败：${errorMessage(error)}`)
     })
@@ -1135,8 +1181,6 @@ export function createFloatingPanelTools(options: FloatingPanelToolsOptions): Fl
       openSelectionEditor(undefined, target)
     } else if (action === 'selection-editor-close' || action === 'selection-editor-cancel') {
       closeSelectionEditor()
-    } else if (action === 'selection-main-cancel') {
-      close()
     } else if (action === 'selection-color-clear') {
       const form = target.closest<HTMLFormElement>('form[data-form="selection-rule"]')
       if (!form) return
@@ -1188,8 +1232,9 @@ export function createFloatingPanelTools(options: FloatingPanelToolsOptions): Fl
       void browser.storage.local.set({ [PANEL_SELECTION_RULES_STORAGE_KEY]: enabledRules }).then(() => {
         if (!isCurrent(token)) return
         setStatus(enabledRules.length ? `设置已保存，共启用 ${enabledRules.length} 条规则` : '已清除所有选品规则设置')
-        close()
-        window.location.reload()
+        captureListCrawlDraft()
+        renderListCrawlStart()
+        required<HTMLElement>(body, '[data-selection-main-error]').innerHTML = `<div class="jz-alert success" role="status">规则设置已保存，本次启动配置已保留。</div>`
       }).catch((error: unknown) => {
         if (!isCurrent(token)) return
         target.removeAttribute('disabled')
@@ -1315,7 +1360,33 @@ export function createFloatingPanelTools(options: FloatingPanelToolsOptions): Fl
     const submit = formElement.querySelector<HTMLButtonElement>('button[type="submit"]')
       ?? root.querySelector<HTMLButtonElement>(`button[type="submit"][form="${formElement.id}"]`)
     submit?.setAttribute('disabled', '')
-    if (formElement.dataset.form === 'listing') {
+    if (formElement.dataset.form === 'list-crawl-start') {
+      const token = sequence
+      try {
+        const form = new FormData(formElement)
+        const config = assertOzonListCrawlStartConfig({
+          target: Number(form.get('target')),
+          collectVariants: form.get('collectVariants') === 'on',
+          selectionRuleIds: form.getAll('selectionRuleIds').map(Number),
+        })
+        if (config.selectionRuleIds.length === 0) throw new Error('请至少选择一条启用的选品规则')
+        const onStart = listCrawlStart
+        if (!onStart) throw new Error('启动爬虫操作已失效，请重新打开')
+        void Promise.resolve(onStart(config)).then(() => {
+          if (!isCurrent(token)) return
+          setStatus(`已启动列表采集，目标 ${config.target} 个商品`)
+          close()
+        }).catch((error: unknown) => {
+          if (!isCurrent(token) || !formElement.isConnected) return
+          required<HTMLElement>(formElement, '[data-list-crawl-result]').innerHTML = `<div class="jz-alert" role="alert" style="margin-top:12px">${escapeHtml(errorMessage(error))}</div>`
+        }).finally(() => {
+          if (isCurrent(token) && submit?.isConnected) submit.removeAttribute('disabled')
+        })
+      } catch (error: unknown) {
+        required<HTMLElement>(formElement, '[data-list-crawl-result]').innerHTML = `<div class="jz-alert" role="alert" style="margin-top:12px">${escapeHtml(errorMessage(error))}</div>`
+        submit?.removeAttribute('disabled')
+      }
+    } else if (formElement.dataset.form === 'listing') {
       const token = sequence
       try {
         const input = listingInputFromForm(formElement)
@@ -1436,7 +1507,7 @@ export function createFloatingPanelTools(options: FloatingPanelToolsOptions): Fl
   const controller: FloatingPanelToolsController = {
     openListing,
     openPricing,
-    openSelection,
+    openListCrawl,
     openErp,
     close,
     stop: () => {
@@ -1444,6 +1515,7 @@ export function createFloatingPanelTools(options: FloatingPanelToolsOptions): Fl
       stopped = true
       sequence += 1
       listingProduct = undefined
+      listCrawlStart = undefined
       root.remove()
       shadow.querySelector('#jingzhi-panel-tools-style')?.remove()
     },

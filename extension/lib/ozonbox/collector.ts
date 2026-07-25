@@ -1,15 +1,17 @@
 import type { OzonboxCollectedProduct, OzonboxVariant } from './contract'
+import type {
+  FactProvenance,
+  PackagePhysicalField,
+  PackagePhysicalProvenance,
+  PackagePhysicalSnapshot,
+  ProductFact,
+} from '@/lib/utils/types'
 import { isRecord } from './contract'
 import { extractOzonProductId } from './url'
 
 type JsonRecord = Record<string, unknown>
 
-interface PackageFacts {
-  depth?: number
-  width?: number
-  height?: number
-  weight?: number
-}
+type PackageFacts = PackagePhysicalSnapshot
 
 type LengthUnit = 'mm' | 'cm' | 'm'
 type WeightUnit = 'g' | 'kg'
@@ -215,42 +217,88 @@ function parseLength(value: string, label: string): number | undefined {
   return amount && unit ? toMillimetres(amount, unit) : undefined
 }
 
-function parseCombinedDimensions(value: string, label: string): Pick<PackageFacts, 'depth' | 'width' | 'height'> | undefined {
+function parseCombinedDimensions(
+  value: string,
+  label: string,
+): Pick<PackageFacts, 'packageDepthMm' | 'packageWidthMm' | 'packageHeightMm'> | undefined {
   const amounts = value.match(/\d+(?:[.,]\d+)?/g)?.map(positiveDecimal)
   if (!amounts || amounts.length !== 3 || amounts.some((amount) => amount === undefined)) return undefined
   const unit = lengthUnit(value) ?? lengthUnit(label)
   if (!unit) return undefined
-  const [depth, width, height] = amounts.map((amount) => toMillimetres(amount!, unit))
-  return { depth, width, height }
+  const [packageDepthMm, packageWidthMm, packageHeightMm] = amounts.map((amount) => toMillimetres(amount!, unit))
+  return { packageDepthMm, packageWidthMm, packageHeightMm }
 }
 
 function readPackageFacts(specs: Array<Record<string, unknown>>): PackageFacts {
-  let combined: Pick<PackageFacts, 'depth' | 'width' | 'height'> | undefined
-  let depth: number | undefined
-  let width: number | undefined
-  let height: number | undefined
-  let weight: number | undefined
+  const facts: PackageFacts = {}
+  const provenance: PackagePhysicalProvenance = {}
+
+  const attach = (field: PackagePhysicalField, value: number | undefined, sourcePath: string): void => {
+    if (value === undefined || facts[field] !== undefined) return
+    facts[field] = value
+    provenance[field] = {
+      source: 'ozon_pdp_characteristic',
+      sourcePath,
+    }
+  }
 
   for (const spec of specs) {
     const label = text(spec.name)
     const value = text(spec.value)
     if (!label || !value || !PACKAGE_LABEL_PATTERN.test(label)) continue
+    const sourcePath = `pdp.characteristics[${label}]`
 
-    if (!combined && DIMENSIONS_LABEL_PATTERN.test(label)) {
-      combined = parseCombinedDimensions(value, label)
+    if (DIMENSIONS_LABEL_PATTERN.test(label)) {
+      const combined = parseCombinedDimensions(value, label)
+      if (combined) {
+        attach('packageDepthMm', combined.packageDepthMm, sourcePath)
+        attach('packageWidthMm', combined.packageWidthMm, sourcePath)
+        attach('packageHeightMm', combined.packageHeightMm, sourcePath)
+      }
     }
-    if (depth === undefined && DEPTH_LABEL_PATTERN.test(label)) depth = parseLength(value, label)
-    if (width === undefined && WIDTH_LABEL_PATTERN.test(label)) width = parseLength(value, label)
-    if (height === undefined && HEIGHT_LABEL_PATTERN.test(label)) height = parseLength(value, label)
-    if (weight === undefined && WEIGHT_LABEL_PATTERN.test(label)) {
+    if (DEPTH_LABEL_PATTERN.test(label)) attach('packageDepthMm', parseLength(value, label), sourcePath)
+    if (WIDTH_LABEL_PATTERN.test(label)) attach('packageWidthMm', parseLength(value, label), sourcePath)
+    if (HEIGHT_LABEL_PATTERN.test(label)) attach('packageHeightMm', parseLength(value, label), sourcePath)
+    if (WEIGHT_LABEL_PATTERN.test(label)) {
       const amount = onePositiveNumber(value)
       const unit = weightUnit(value) ?? weightUnit(label)
-      if (amount && unit) weight = toGrams(amount, unit)
+      attach('packageWeightG', amount && unit ? toGrams(amount, unit) : undefined, sourcePath)
     }
   }
 
-  const dimensions = combined ?? (depth && width && height ? { depth, width, height } : {})
-  return { ...dimensions, ...(weight ? { weight } : {}) }
+  return Object.keys(provenance).length
+    ? { ...facts, packagePhysicalProvenance: provenance }
+    : facts
+}
+
+function packageSnapshotFromVariant(variant: OzonboxVariant | undefined): PackagePhysicalSnapshot | undefined {
+  if (!variant) return undefined
+  const snapshot: PackagePhysicalSnapshot = {}
+  for (const field of ['packageWeightG', 'packageDepthMm', 'packageWidthMm', 'packageHeightMm'] as const) {
+    const value = variant[field]
+    if (typeof value === 'number' && Number.isFinite(value) && value > 0) snapshot[field] = value
+  }
+  if (variant.packagePhysicalProvenance && Object.keys(variant.packagePhysicalProvenance).length) {
+    snapshot.packagePhysicalProvenance = { ...variant.packagePhysicalProvenance }
+  }
+  return Object.keys(snapshot).length ? snapshot : undefined
+}
+
+function textFactsFromSpecs(specs: Array<Record<string, unknown>>): ProductFact[] {
+  return specs.flatMap((spec) => {
+    const name = text(spec.name)
+    const value = text(spec.value)
+    if (!name || !value) return []
+    return [{
+      name,
+      value,
+      sourcePath: `pdp.characteristics[${name}]`,
+      provenance: {
+        source: 'ozon_pdp_characteristic',
+        sourcePath: `pdp.characteristics[${name}]`,
+      },
+    }]
+  })
 }
 
 function uniqueUrls(values: unknown[], baseUrl?: string | null): string[] {
@@ -793,6 +841,20 @@ function mergeOptionalTextFact(
   return existingFact ?? incomingFact
 }
 
+function mergePackageProvenance(
+  existing: OzonboxVariant,
+  incoming: OzonboxVariant,
+): PackagePhysicalProvenance | undefined {
+  const result: PackagePhysicalProvenance = {}
+  for (const field of ['packageWeightG', 'packageDepthMm', 'packageWidthMm', 'packageHeightMm'] as const) {
+    const source = existing[field] !== undefined
+      ? existing.packagePhysicalProvenance?.[field]
+      : incoming.packagePhysicalProvenance?.[field]
+    if (source) result[field] = source
+  }
+  return Object.keys(result).length ? result : undefined
+}
+
 function stableFactValue(value: unknown): unknown {
   if (Array.isArray(value)) return value.map(stableFactValue)
   if (!isRecord(value)) return value
@@ -848,6 +910,11 @@ function mergeVariants(groups: OzonboxVariant[][]): OzonboxVariant[] {
         depth: mergeOptionalNumberFact(identity, '长度', existing.depth, variant.depth),
         width: mergeOptionalNumberFact(identity, '宽度', existing.width, variant.width),
         height: mergeOptionalNumberFact(identity, '高度', existing.height, variant.height),
+        packageWeightG: mergeOptionalNumberFact(identity, '包装重量', existing.packageWeightG, variant.packageWeightG),
+        packageDepthMm: mergeOptionalNumberFact(identity, '包装长度', existing.packageDepthMm, variant.packageDepthMm),
+        packageWidthMm: mergeOptionalNumberFact(identity, '包装宽度', existing.packageWidthMm, variant.packageWidthMm),
+        packageHeightMm: mergeOptionalNumberFact(identity, '包装高度', existing.packageHeightMm, variant.packageHeightMm),
+        packagePhysicalProvenance: mergePackageProvenance(existing, variant),
         images: uniqueUrls([...existing.images, ...variant.images], existing.sourceUrl ?? variant.sourceUrl),
         ...(videos.length ? { video: videos[0], videos } : {}),
         supplierAttrs: mergeRecordFacts([...existing.supplierAttrs, ...variant.supplierAttrs]),
@@ -893,11 +960,18 @@ export async function collectCurrentOzonProduct(): Promise<OzonboxCollectedProdu
   }
   const description = elementText('[data-widget="webDescription"]') ?? structured.description
   const path = readOzonCategoryPath()
+  const exactVariant = variantsData.find((variant) => variant.productId === productId)
+    ?? variantsData.find((variant) => structured.sku && variant.sku === structured.sku)
+  const packageFacts = packageSnapshotFromVariant(exactVariant)
+  const textFacts = textFactsFromSpecs(specs)
   return {
     source: 'OZON', sourceUrl, productId, recordName: title.slice(0, 200),
     ...(structured.sku ? { sku: structured.sku } : {}),
     title, ...(brand ? { brand } : {}), ...(description ? { description } : {}), images, price,
-    specs, ...(tags.length ? { tags } : {}), variantsData, variantAttrIds: [],
+    specs,
+    ...(textFacts.length ? { textFacts } : {}),
+    ...(packageFacts ? { packageFacts } : {}),
+    ...(tags.length ? { tags } : {}), variantsData, variantAttrIds: [],
     ...(path ? { categoryPath: path } : {}), status: 'draft',
   }
 }

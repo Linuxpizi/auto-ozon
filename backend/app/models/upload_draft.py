@@ -51,10 +51,10 @@ class UploadDraft(Base):
     vat = Column(String(16), default="0", comment="增值税率")
 
     # ── 物流尺寸 ──
-    weight = Column(Integer, default=500, comment="重量 (g)")
-    height = Column(Integer, default=100, comment="高 (mm)")
-    depth = Column(Integer, default=100, comment="深 (mm)")
-    width = Column(Integer, default=100, comment="宽 (mm)")
+    weight = Column(Integer, nullable=True, comment="事实包装重量 (g)")
+    height = Column(Integer, nullable=True, comment="事实包装高度 (mm)")
+    depth = Column(Integer, nullable=True, comment="事实包装深度 (mm)")
+    width = Column(Integer, nullable=True, comment="事实包装宽度 (mm)")
 
     # ── 图片 ──
     primary_image = Column(String(1024), default="", comment="主图 URL")
@@ -96,6 +96,17 @@ class UploadDraft(Base):
     ozonbox_category_id = Column(Integer, nullable=True)
     ozonbox_type_id = Column(Integer, nullable=True)
     ozonbox_description_category_id = Column(Integer, nullable=True)
+
+    # Exact selected-SKU and open factual snapshots.  These deliberately stay
+    # nullable so legacy SQLite databases can receive them additively.
+    selected_sku_snapshot = Column(JSON, nullable=True, comment="所选 SKU 的原始事实快照")
+    package_facts = Column(JSON, nullable=True, comment="所选 SKU 的包装事实与字段级来源")
+    package_override_audit = Column(JSON, nullable=True, comment="人工包装覆盖的字段级审计")
+    ozon_attribute_facts = Column(JSON, nullable=True, comment="显式识别且可追溯的 Ozon 属性事实")
+    video_urls = Column(JSON, nullable=True, comment="所选 SKU 的事实视频地址")
+    text_facts = Column(JSON, nullable=True, comment="任意可读文本事实（不可推导属性 ID）")
+    ozon_metrics = Column(JSON, nullable=True, comment="采集时的平台分析与物流事实")
+    readiness_errors = Column(JSON, nullable=True, comment="最近一次严格上架完整性错误")
 
     __table_args__ = (
         Index(

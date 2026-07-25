@@ -6,6 +6,12 @@ import {
   type OzonboxSellerApiResponse,
 } from './contract'
 import { requireOzonCompanyId } from './seller-session'
+import type {
+  FactSource,
+  PackagePhysicalField,
+  PackagePhysicalProvenance,
+  PackagePhysicalSnapshot,
+} from '@/lib/utils/types'
 
 export type OzonboxAnalyticsItem = Record<string, unknown>
 
@@ -14,6 +20,13 @@ const ANALYTICS_BLOCK_KEYS = ['metrics', 'summary', 'stat', 'stats', 'analytics'
 const NORMALIZED_DIMENSION_KEYS = ['dimension_mm'] as const
 
 const NORMALIZED_WEIGHT_KEYS = ['weight_g'] as const
+
+const PACKAGE_FIELDS = [
+  'packageWeightG',
+  'packageDepthMm',
+  'packageWidthMm',
+  'packageHeightMm',
+] as const satisfies readonly PackagePhysicalField[]
 
 const CATEGORY_PATH_KEYS = [
   'categoryPath',
@@ -148,6 +161,140 @@ export function mergeExactSkuAnalyticsBrand<T extends { brand?: string | null }>
   if (typeof product.brand === 'string' && product.brand.trim()) return product
   const brand = analyticsBrandForExactSku(data, skuValue)
   return brand ? { ...product, brand } : product
+}
+
+function packageSnapshotFrom(value: unknown): PackagePhysicalSnapshot | undefined {
+  if (!isRecord(value)) return undefined
+  const snapshot: PackagePhysicalSnapshot = {}
+  for (const field of PACKAGE_FIELDS) {
+    const fact = positiveContractNumber(value[field])
+    if (fact !== undefined) snapshot[field] = fact
+  }
+  if (isRecord(value.packagePhysicalProvenance)) {
+    snapshot.packagePhysicalProvenance = { ...value.packagePhysicalProvenance } as PackagePhysicalProvenance
+  }
+  return PACKAGE_FIELDS.some((field) => snapshot[field] !== undefined) ? snapshot : undefined
+}
+
+function mergePackageSnapshots(
+  primary: PackagePhysicalSnapshot | undefined,
+  fallback: PackagePhysicalSnapshot | undefined,
+): PackagePhysicalSnapshot | undefined {
+  if (!primary && !fallback) return undefined
+  const merged: PackagePhysicalSnapshot = {}
+  const provenance: PackagePhysicalProvenance = {}
+  for (const field of PACKAGE_FIELDS) {
+    const primaryValue = primary?.[field]
+    const fallbackValue = fallback?.[field]
+    const value = positiveContractNumber(primaryValue) ?? positiveContractNumber(fallbackValue)
+    if (value === undefined) continue
+    merged[field] = value
+    const source = primaryValue !== undefined
+      ? primary?.packagePhysicalProvenance?.[field]
+      : fallback?.packagePhysicalProvenance?.[field]
+    if (source) provenance[field] = { ...source }
+  }
+  if (Object.keys(provenance).length) merged.packagePhysicalProvenance = provenance
+  return PACKAGE_FIELDS.some((field) => merged[field] !== undefined) ? merged : undefined
+}
+
+function packageSnapshotWithSource(
+  dimension: OzonboxAnalyticsItem['dimension_mm'],
+  weight: number | undefined,
+  source: FactSource,
+  sourcePath: string,
+): PackagePhysicalSnapshot | undefined {
+  const snapshot: PackagePhysicalSnapshot = {}
+  const provenance: PackagePhysicalProvenance = {}
+  const attach = (field: PackagePhysicalField, value: unknown, path: string): void => {
+    const fact = positiveContractNumber(value)
+    if (fact === undefined) return
+    snapshot[field] = fact
+    provenance[field] = { source, sourcePath: path }
+  }
+  if (isRecord(dimension)) {
+    attach('packageDepthMm', dimension.length, `${sourcePath}.dimension_mm.length`)
+    attach('packageWidthMm', dimension.width, `${sourcePath}.dimension_mm.width`)
+    attach('packageHeightMm', dimension.height, `${sourcePath}.dimension_mm.height`)
+  }
+  attach('packageWeightG', weight, `${sourcePath}.weight_g`)
+  if (!PACKAGE_FIELDS.some((field) => snapshot[field] !== undefined)) return undefined
+  snapshot.packagePhysicalProvenance = provenance
+  return snapshot
+}
+
+function packageSnapshotFromFields(
+  fields: Partial<Record<PackagePhysicalField, unknown>>,
+  source: FactSource,
+  sourcePaths: Partial<Record<PackagePhysicalField, string>>,
+): PackagePhysicalSnapshot | undefined {
+  const snapshot: PackagePhysicalSnapshot = {}
+  const provenance: PackagePhysicalProvenance = {}
+  for (const field of PACKAGE_FIELDS) {
+    const fact = positiveContractNumber(fields[field])
+    if (fact === undefined) continue
+    snapshot[field] = fact
+    provenance[field] = { source, sourcePath: sourcePaths[field] }
+  }
+  if (!PACKAGE_FIELDS.some((field) => snapshot[field] !== undefined)) return undefined
+  snapshot.packagePhysicalProvenance = provenance
+  return snapshot
+}
+
+function exactOrNormalizedAnalyticsItem(data: unknown, skuValue: string): OzonboxAnalyticsItem | null {
+  const exact = analyticsItemForExactSku(data, skuValue)
+  if (exact) return exact
+  if (!isRecord(data)) return null
+  const sku = requirePositiveIntegerString(skuValue, 'sku')
+  const candidateSku = positiveIntegerText(data.sku) ?? positiveIntegerText(data.skuName)
+  return candidateSku === sku ? data : null
+}
+
+/**
+ * Enrich only the currently selected SKU. A PDP-proven brand and package field
+ * always wins; exact seller facts fill missing fields with their provenance.
+ */
+export function mergeExactSkuAnalyticsProduct<T extends OzonboxCollectedProduct>(
+  product: T,
+  data: unknown,
+  skuValue: string,
+): T {
+  const sourceItem = exactOrNormalizedAnalyticsItem(data, skuValue)
+  if (!sourceItem) return product
+  const normalized = normalizeAnalyticsItem(sourceItem)
+  const packageFacts = packageSnapshotFrom(normalized.packageFacts)
+  const brand = typeof product.brand === 'string' && product.brand.trim()
+    ? product.brand
+    : analyticsBrand(normalized)
+
+  let selectedIndex = product.variantsData.findIndex((variant) => (
+    positiveIntegerText(variant.productId) === positiveIntegerText(product.productId)
+  ))
+  if (selectedIndex < 0 && product.sku) {
+    selectedIndex = product.variantsData.findIndex((variant) => (
+      positiveIntegerText(variant.sku) === positiveIntegerText(product.sku)
+    ))
+  }
+  if (selectedIndex < 0) {
+    selectedIndex = product.variantsData.findIndex((variant) => (
+      positiveIntegerText(variant.productId) === positiveIntegerText(skuValue)
+      || positiveIntegerText(variant.sku) === positiveIntegerText(skuValue)
+    ))
+  }
+
+  const variantsData = packageFacts && selectedIndex >= 0
+    ? product.variantsData.map((variant, index) => index === selectedIndex
+      ? { ...variant, ...mergePackageSnapshots(variant, packageFacts) }
+      : variant)
+    : product.variantsData
+  const mergedPackageFacts = mergePackageSnapshots(product.packageFacts, packageFacts)
+
+  return {
+    ...product,
+    ...(brand ? { brand } : {}),
+    ...(mergedPackageFacts ? { packageFacts: mergedPackageFacts } : {}),
+    variantsData,
+  }
 }
 
 function hasFact(item: OzonboxAnalyticsItem, keys: readonly string[]): boolean {
@@ -371,7 +518,10 @@ function normalizedWeight(item: OzonboxAnalyticsItem): number | undefined {
   return weightInG(value, unit) ?? undefined
 }
 
-export function normalizeAnalyticsItem(item: OzonboxAnalyticsItem): OzonboxAnalyticsItem {
+export function normalizeAnalyticsItem(
+  item: OzonboxAnalyticsItem,
+  source: FactSource = 'ozon_seller_analytics',
+): OzonboxAnalyticsItem {
   const normalized = { ...item }
   for (const key of ANALYTICS_BLOCK_KEYS) {
     const block = item[key]
@@ -386,6 +536,10 @@ export function normalizeAnalyticsItem(item: OzonboxAnalyticsItem): OzonboxAnaly
   const weight = normalizedWeight(normalized)
   if (weight !== undefined) normalized.weight_g = weight
   else delete normalized.weight_g
+  const inferredPackageFacts = packageSnapshotWithSource(dimension, weight, source, 'seller.analytics')
+  const packageFacts = mergePackageSnapshots(packageSnapshotFrom(normalized.packageFacts), inferredPackageFacts)
+  if (packageFacts) normalized.packageFacts = packageFacts
+  else delete normalized.packageFacts
   return normalized
 }
 
@@ -400,23 +554,51 @@ export function normalizeSellerVariantPackage(data: unknown): OzonboxAnalyticsIt
   const width = positiveContractNumber(data.item.width)
   const height = positiveContractNumber(data.item.height)
   const weight = positiveContractNumber(data.item.weight)
+  const dimension = depth !== undefined && width !== undefined && height !== undefined
+    ? { length: depth, width, height }
+    : undefined
+  const packageFacts = packageSnapshotFromFields(
+    {
+      packageDepthMm: depth,
+      packageWidthMm: width,
+      packageHeightMm: height,
+      packageWeightG: weight,
+    },
+    'ozon_seller_variant_package',
+    {
+      packageDepthMm: 'seller.create-bundle-by-variant-id.item.depth',
+      packageWidthMm: 'seller.create-bundle-by-variant-id.item.width',
+      packageHeightMm: 'seller.create-bundle-by-variant-id.item.height',
+      packageWeightG: 'seller.create-bundle-by-variant-id.item.weight',
+    },
+  )
   return {
     ...(depth !== undefined && width !== undefined && height !== undefined
       ? { dimension_mm: { length: depth, width, height } }
       : {}),
     ...(weight !== undefined ? { weight_g: weight } : {}),
+    ...(packageFacts ? { packageFacts } : {}),
   }
 }
 
-function mergeKnownMeasures(item: OzonboxAnalyticsItem, attributes: OzonboxAnalyticsItem): OzonboxAnalyticsItem {
+function mergeKnownMeasures(
+  item: OzonboxAnalyticsItem,
+  attributes: OzonboxAnalyticsItem,
+  source: FactSource,
+): OzonboxAnalyticsItem {
   const merged = normalizeAnalyticsItem(item)
-  const normalizedAttributes = normalizeAnalyticsItem(attributes)
+  const normalizedAttributes = normalizeAnalyticsItem(attributes, source)
   if (!hasFact(merged, NORMALIZED_DIMENSION_KEYS) && hasFact(normalizedAttributes, NORMALIZED_DIMENSION_KEYS)) {
     merged.dimension_mm = firstFact(normalizedAttributes, NORMALIZED_DIMENSION_KEYS)
   }
   if (!hasFact(merged, NORMALIZED_WEIGHT_KEYS) && hasFact(normalizedAttributes, NORMALIZED_WEIGHT_KEYS)) {
     merged.weight_g = firstFact(normalizedAttributes, NORMALIZED_WEIGHT_KEYS)
   }
+  const packageFacts = mergePackageSnapshots(
+    packageSnapshotFrom(merged.packageFacts),
+    packageSnapshotFrom(normalizedAttributes.packageFacts),
+  )
+  if (packageFacts) merged.packageFacts = packageFacts
   return merged
 }
 
@@ -452,7 +634,11 @@ export async function fetchOzonAnalyticsItem(
         variantId,
         shopId,
       }))
-      item = mergeKnownMeasures(item, normalizeSellerVariantPackage(variantResponse.data))
+      item = mergeKnownMeasures(
+        item,
+        normalizeSellerVariantPackage(variantResponse.data),
+        'ozon_seller_variant_package',
+      )
       if (hasFact(item, NORMALIZED_DIMENSION_KEYS) && hasFact(item, NORMALIZED_WEIGHT_KEYS)) return item
     } catch (error: unknown) {
       const message = error instanceof Error ? error.message : 'Seller 变体包裹参数读取失败'
@@ -465,7 +651,11 @@ export async function fetchOzonAnalyticsItem(
     const shops = packageFactsFrom(await send({ type: 'OZONBOX_FETCH_PACKAGE_FACTS', sku }))
     const packageFacts = shops[0]
     if (!packageFacts) return item
-    return mergeKnownMeasures(item, { attributes: packageFacts.attributes })
+    return mergeKnownMeasures(
+      item,
+      { attributes: packageFacts.attributes },
+      'ozon_seller_package_api',
+    )
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : '包裹参数读取失败'
     console.warn('包裹参数补充失败，保留已获取的 analytics 数据', error)

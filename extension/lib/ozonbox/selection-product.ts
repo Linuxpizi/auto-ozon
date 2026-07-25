@@ -1,11 +1,30 @@
 import { isRecord, type OzonboxCollectedProduct, type OzonboxVariant } from './contract'
 import type {
+  FactProvenance,
+  OzonAttributeFact,
+  PackagePhysicalField,
+  PackagePhysicalProvenance,
+  PackagePhysicalSnapshot,
   ProductFact,
   ProductSpec,
   ProductVariant,
   ProductVariantValue,
   ScrapedProduct,
 } from '@/lib/utils/types'
+
+const PACKAGE_FIELDS = [
+  'packageWeightG',
+  'packageDepthMm',
+  'packageWidthMm',
+  'packageHeightMm',
+] as const satisfies readonly PackagePhysicalField[]
+
+const LEGACY_PACKAGE_FIELDS = {
+  packageWeightG: 'weight',
+  packageDepthMm: 'depth',
+  packageWidthMm: 'width',
+  packageHeightMm: 'height',
+} as const satisfies Record<PackagePhysicalField, keyof OzonboxVariant>
 
 function text(value: unknown): string | undefined {
   if (typeof value === 'string' && value.trim()) return value.trim()
@@ -64,6 +83,68 @@ function mergeRecordFacts(
   incoming: Array<Record<string, unknown>> = [],
 ): Array<Record<string, unknown>> {
   return recordFacts([...existing, ...incoming])
+}
+
+function ozonAttributeFacts(value: unknown): OzonAttributeFact[] {
+  return recordFacts(value) as OzonAttributeFact[]
+}
+
+function packageSnapshotFromVariant(variant: OzonboxVariant | undefined): PackagePhysicalSnapshot | undefined {
+  if (!variant) return undefined
+  const snapshot: PackagePhysicalSnapshot = {}
+  const provenance: PackagePhysicalProvenance = {}
+
+  for (const field of PACKAGE_FIELDS) {
+    const explicit = positiveNumber(variant[field])
+    const legacyField = LEGACY_PACKAGE_FIELDS[field]
+    const legacy = positiveNumber(variant[legacyField])
+    if (explicit !== undefined) {
+      snapshot[field] = explicit
+      const explicitProvenance = variant.packagePhysicalProvenance?.[field]
+      if (explicitProvenance) provenance[field] = { ...explicitProvenance }
+      continue
+    }
+    if (legacy === undefined) continue
+    snapshot[field] = legacy
+    provenance[field] = {
+      source: 'legacy_variant_physical',
+      sourcePath: `Ozon PDP variant.${legacyField}`,
+    }
+  }
+
+  if (!PACKAGE_FIELDS.some((field) => snapshot[field] !== undefined)) return undefined
+  if (Object.keys(provenance).length) snapshot.packagePhysicalProvenance = provenance
+  return snapshot
+}
+
+function mergePackageSnapshots(
+  sku: string,
+  existing: PackagePhysicalSnapshot | undefined,
+  incoming: PackagePhysicalSnapshot | undefined,
+  rejectConflicts: boolean,
+): PackagePhysicalSnapshot | undefined {
+  if (!existing && !incoming) return undefined
+  const snapshot: PackagePhysicalSnapshot = {}
+  const provenance: PackagePhysicalProvenance = {}
+
+  for (const field of PACKAGE_FIELDS) {
+    const existingValue = positiveNumber(existing?.[field])
+    const incomingValue = positiveNumber(incoming?.[field])
+    if (rejectConflicts && existingValue !== undefined && incomingValue !== undefined && existingValue !== incomingValue) {
+      throw new Error(`Ozon SKU ${sku} 对应了冲突的包装物理字段 ${field}`)
+    }
+    const value = existingValue ?? incomingValue
+    if (value === undefined) continue
+    snapshot[field] = value
+    const source = existingValue !== undefined
+      ? existing?.packagePhysicalProvenance?.[field]
+      : incoming?.packagePhysicalProvenance?.[field]
+    if (source) provenance[field] = { ...source }
+  }
+
+  if (!PACKAGE_FIELDS.some((field) => snapshot[field] !== undefined)) return undefined
+  if (Object.keys(provenance).length) snapshot.packagePhysicalProvenance = provenance
+  return snapshot
 }
 
 function mergeVariantAttrs(
@@ -170,7 +251,13 @@ function mergeDuplicateVariant(existing: ProductVariant, incoming: ProductVarian
   const supplierSpecText = mergeOptionalFact(existing.sku, '供应商规格', existing.supplierSpecText, incoming.supplierSpecText)
   const images = uniqueStrings([...(existing.images ?? []), existing.imageUrl, ...(incoming.images ?? []), incoming.imageUrl])
   const videoUrls = uniqueStrings([...(existing.videoUrls ?? []), ...(incoming.videoUrls ?? [])])
+  const packageFacts = mergePackageSnapshots(existing.sku, existing, incoming, true)
+  const attributes = ozonAttributeFacts([
+    ...(existing.ozonAttributeFacts ?? []),
+    ...(incoming.ozonAttributeFacts ?? []),
+  ])
   return {
+    ...existing,
     sku: existing.sku,
     values: existing.values,
     ...(price !== undefined ? { price } : {}),
@@ -182,6 +269,7 @@ function mergeDuplicateVariant(existing: ProductVariant, incoming: ProductVarian
     ...(depth !== undefined ? { depth } : {}),
     ...(width !== undefined ? { width } : {}),
     ...(height !== undefined ? { height } : {}),
+    ...(packageFacts ?? {}),
     ...(sourceUrl ? { sourceUrl } : {}),
     ...(id ? { id } : {}),
     ...(productId ? { productId } : {}),
@@ -190,35 +278,59 @@ function mergeDuplicateVariant(existing: ProductVariant, incoming: ProductVarian
     ...(supplierSpecText ? { supplierSpecText } : {}),
     supplierAttrs: mergeRecordFacts(existing.supplierAttrs, incoming.supplierAttrs),
     variantAttrs: mergeVariantAttrs(existing.sku, existing.variantAttrs, incoming.variantAttrs),
+    ...(attributes.length ? { ozonAttributeFacts: attributes } : {}),
     sourcePath: existing.sourcePath ?? incoming.sourcePath,
   }
 }
 
-function factsFrom(specs: Array<Record<string, unknown>>): ProductFact[] {
-  const seen = new Set<string>()
-  return specs.flatMap((spec) => {
+function factsFrom(textFacts: unknown, specs: Array<Record<string, unknown>>): ProductFact[] {
+  const result = new Map<string, ProductFact>()
+  const append = (fact: ProductFact): void => {
+    const key = `${canonicalText(fact.name)}\u0000${canonicalText(fact.value)}`
+    if (!result.has(key)) result.set(key, fact)
+  }
+
+  for (const item of Array.isArray(textFacts) ? textFacts : []) {
+    if (!isRecord(item)) continue
+    const name = text(item.name)
+    const value = text(item.value)
+    if (!name || !value) continue
+    append({ ...item, name, value } as ProductFact)
+  }
+
+  for (const spec of specs) {
     const name = text(spec.name) ?? text(spec.label)
     const value = text(spec.value)
-    if (!name || !value) return []
-    const key = `${name.toLocaleLowerCase()}\u0000${value.toLocaleLowerCase()}`
-    if (seen.has(key)) return []
-    seen.add(key)
-    return [{ name, value, sourcePath: 'Ozon PDP characteristics' }]
-  })
+    if (!name || !value) continue
+    append({
+      ...spec,
+      name,
+      value,
+      sourcePath: text(spec.sourcePath) ?? 'Ozon PDP characteristics',
+      provenance: isRecord(spec.provenance)
+        ? { ...spec.provenance } as FactProvenance
+        : {
+            source: 'ozon_pdp_characteristic',
+            sourcePath: 'Ozon PDP characteristics',
+          },
+    })
+  }
+  return [...result.values()]
 }
 
 function specsFrom(variant: OzonboxVariant | undefined): ProductSpec[] {
-  if (!variant) return []
-  const spec: ProductSpec = {}
-  const weight = positiveNumber(variant.weight)
-  const depth = positiveNumber(variant.depth)
-  const width = positiveNumber(variant.width)
-  const height = positiveNumber(variant.height)
-  if (weight !== undefined) spec.weight_g = weight
-  if (depth !== undefined) spec.depth_mm = depth
-  if (width !== undefined) spec.width_mm = width
-  if (height !== undefined) spec.height_mm = height
-  return Object.keys(spec).length ? [spec] : []
+  const packageFacts = packageSnapshotFromVariant(variant)
+  if (!packageFacts) return []
+  const spec: ProductSpec = {
+    ...(packageFacts.packageWeightG !== undefined ? { package_weight_g: packageFacts.packageWeightG } : {}),
+    ...(packageFacts.packageDepthMm !== undefined ? { package_depth_mm: packageFacts.packageDepthMm } : {}),
+    ...(packageFacts.packageWidthMm !== undefined ? { package_width_mm: packageFacts.packageWidthMm } : {}),
+    ...(packageFacts.packageHeightMm !== undefined ? { package_height_mm: packageFacts.packageHeightMm } : {}),
+    ...(packageFacts.packagePhysicalProvenance
+      ? { package_physical_provenance: packageFacts.packagePhysicalProvenance }
+      : {}),
+  }
+  return [spec]
 }
 
 export function toSelectionProduct(value: unknown): ScrapedProduct {
@@ -244,6 +356,8 @@ export function toSelectionProduct(value: unknown): ScrapedProduct {
     const offerId = text(variant.offerId)
     const supplierSkuId = text(variant.supplierSkuId)
     const supplierSpecText = text(variant.supplierSpecText)
+    const packageFacts = packageSnapshotFromVariant(variant)
+    const attributes = ozonAttributeFacts(variant.ozonAttributeFacts)
     return {
       sku,
       values,
@@ -256,6 +370,7 @@ export function toSelectionProduct(value: unknown): ScrapedProduct {
       ...(depth !== undefined ? { depth } : {}),
       ...(width !== undefined ? { width } : {}),
       ...(height !== undefined ? { height } : {}),
+      ...(packageFacts ?? {}),
       ...(sourceUrl ? { sourceUrl } : {}),
       ...(id ? { id } : {}),
       ...(productId ? { productId } : {}),
@@ -264,6 +379,7 @@ export function toSelectionProduct(value: unknown): ScrapedProduct {
       ...(supplierSpecText ? { supplierSpecText } : {}),
       supplierAttrs: recordFacts(variant.supplierAttrs),
       variantAttrs: isRecord(variant.variantAttrs) ? { ...variant.variantAttrs } : {},
+      ...(attributes.length ? { ozonAttributeFacts: attributes } : {}),
       sourcePath: 'Ozon PDP offer selector / structured data',
     }
   })
@@ -288,7 +404,7 @@ export function toSelectionProduct(value: unknown): ScrapedProduct {
     ...(variant.videos ?? []).map(text),
     text(variant.video),
   ]))
-  const facts = factsFrom(collected.specs)
+  const facts = factsFrom(collected.textFacts, collected.specs)
   const colors = colorValues(facts, variants)
   const brand = text(collected.brand)
   const category = text(collected.categoryPath)
@@ -312,6 +428,13 @@ export function toSelectionProduct(value: unknown): ScrapedProduct {
   const deliveryDays = positiveInteger(collected.deliveryDays)
   const discount = text(collected.discount)
   const stock = text(collected.stock)
+  const packageFacts = mergePackageSnapshots(
+    selectedSku ?? collected.productId,
+    collected.packageFacts,
+    packageSnapshotFromVariant(current),
+    false,
+  )
+  const attributes = ozonAttributeFacts(collected.ozonAttributeFacts)
 
   return {
     platform: 'ozon',
@@ -340,6 +463,8 @@ export function toSelectionProduct(value: unknown): ScrapedProduct {
     variants,
     specList: specsFrom(current),
     facts,
+    ...(packageFacts ? { packageFacts } : {}),
+    ...(attributes.length ? { ozonAttributeFacts: attributes } : {}),
     ...(colors.length ? { colorList: colors } : {}),
     ...(collected.tags?.length ? { tags: uniqueStrings(collected.tags.map(text)) } : {}),
     ...(ozonCategoryId !== undefined ? { ozonCategoryId } : {}),

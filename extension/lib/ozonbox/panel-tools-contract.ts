@@ -1,6 +1,8 @@
 import type { OzonboxCollectedProduct } from './contract'
 import { assertOzonboxCollectedProduct } from './contract'
 
+export const PANEL_SELECTION_RULES_STORAGE_KEY = 'jingzhi_ai_product_selection_rules'
+
 export type PanelToolMode = 'mock' | 'real'
 export type PanelPricingMode = 'suggest' | 'evaluate'
 export type PanelPricingRoute = 'calculate' | 'calculate2'

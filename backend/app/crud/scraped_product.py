@@ -65,6 +65,8 @@ def create_scraped_product(db: Session, product: ScrapedProductCreate) -> Scrape
         facts=product.facts,
         tags=_merge_unique_strings([], product.tags),
         color_list=product.color_list,
+        package_facts=product.package_facts,
+        ozon_attribute_facts=product.ozon_attribute_facts,
         ozon_category_id=product.ozon_category_id,
         ozon_type_id=product.ozon_type_id,
         ozon_metrics=product.ozon_metrics,
@@ -126,6 +128,49 @@ def _merge_unique_strings(old_value: Any, new_value: Any) -> list[str]:
     return merged
 
 
+def _is_empty_json_value(value: Any) -> bool:
+    return value is None or value == "" or value == [] or value == {}
+
+
+def _json_identity(value: Any) -> str:
+    try:
+        return json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    except (TypeError, ValueError):
+        return repr(value)
+
+
+def _merge_json_lists(old_value: Any, new_value: Any) -> list:
+    """Union JSON arrays without rebuilding their records or dropping unknown keys."""
+    merged: list = []
+    seen: set[str] = set()
+    for item in _as_list(old_value) + _as_list(new_value):
+        identity = _json_identity(item)
+        if identity in seen:
+            continue
+        seen.add(identity)
+        merged.append(item)
+    return merged
+
+
+def _deep_merge_json(old_value: Any, new_value: Any, *, prefer_new: bool = True) -> Any:
+    """Merge open JSON facts recursively; absent input never erases persisted facts."""
+    if isinstance(old_value, dict) and isinstance(new_value, dict):
+        merged = {**old_value}
+        for key, value in new_value.items():
+            if key in merged:
+                merged[key] = _deep_merge_json(merged[key], value, prefer_new=prefer_new)
+            elif not _is_empty_json_value(value):
+                merged[key] = value
+        return merged
+    if isinstance(old_value, list) and isinstance(new_value, list):
+        return _merge_json_lists(old_value, new_value)
+    if _is_empty_json_value(new_value):
+        return old_value
+    if _is_empty_json_value(old_value):
+        return new_value
+    return new_value if prefer_new else old_value
+
+
 def _merge_facts(old_value: Any, new_value: Any) -> list[dict]:
     merged: list[dict] = []
     by_key: dict[tuple[str, str], dict] = {}
@@ -138,14 +183,14 @@ def _merge_facts(old_value: Any, new_value: Any) -> list[dict]:
             continue
         key = (name.casefold(), value.casefold())
         existing = by_key.get(key)
-        source_path = fact.get("sourcePath") or fact.get("source_path")
         if existing is not None:
-            if source_path and not existing.get("sourcePath"):
-                existing["sourcePath"] = source_path
+            combined = _deep_merge_json(existing, fact, prefer_new=False)
+            combined["name"] = existing["name"]
+            combined["value"] = existing["value"]
+            existing.clear()
+            existing.update(combined)
             continue
-        normalized = {"name": name, "value": value}
-        if source_path:
-            normalized["sourcePath"] = source_path
+        normalized = {**fact, "name": name, "value": value}
         by_key[key] = normalized
         merged.append(normalized)
     return merged
@@ -174,8 +219,8 @@ def _merge_variants(old_value: Any, new_value: Any) -> list[dict]:
         for field, value in variant.items():
             if field in ("sku", "values"):
                 continue
-            if value is not None and value != "" and value != [] and value != {}:
-                enriched[field] = value
+            if not _is_empty_json_value(value):
+                enriched[field] = _deep_merge_json(existing.get(field), value)
         enriched["values"] = _merge_variant_values(existing.get("values"), variant.get("values"))
         merged[existing_index] = enriched
     return merged
@@ -183,7 +228,7 @@ def _merge_variants(old_value: Any, new_value: Any) -> list[dict]:
 
 def _merge_variant_values(old_value: Any, new_value: Any) -> list[dict]:
     merged: list[dict] = []
-    seen: set[tuple[str, str]] = set()
+    by_key: dict[tuple[str, str], dict] = {}
     for item in _as_list(old_value) + _as_list(new_value):
         if not isinstance(item, dict):
             continue
@@ -192,10 +237,103 @@ def _merge_variant_values(old_value: Any, new_value: Any) -> list[dict]:
         if not name or not value:
             continue
         key = (name.casefold(), value.casefold())
-        if key in seen:
+        existing = by_key.get(key)
+        if existing is not None:
+            combined = _deep_merge_json(existing, item)
+            combined["name"] = name
+            combined["value"] = value
+            existing.clear()
+            existing.update(combined)
             continue
-        seen.add(key)
-        merged.append({"name": name, "value": value})
+        normalized = {**item, "name": name, "value": value}
+        by_key[key] = normalized
+        merged.append(normalized)
+    return merged
+
+
+def _ozon_attribute_identity(fact: dict) -> Optional[tuple[str, str, str]]:
+    attribute_id = fact.get("attributeId", fact.get("attribute_id"))
+    try:
+        normalized_id = int(attribute_id)
+    except (TypeError, ValueError):
+        return None
+    if normalized_id <= 0:
+        return None
+    scope = str(fact.get("scope") or "").strip().casefold()
+    complex_group = str(fact.get("complexGroupId", fact.get("complex_group_id")) or "").strip()
+    return str(normalized_id), scope, complex_group
+
+
+def _ozon_attribute_value_identity(value: dict) -> Optional[tuple[str, str]]:
+    dictionary_id = value.get("dictionaryValueId", value.get("dictionary_value_id"))
+    text_value = str(value.get("value") or "").strip()
+    if dictionary_id not in (None, ""):
+        try:
+            return str(int(dictionary_id)), text_value.casefold()
+        except (TypeError, ValueError):
+            pass
+    return ("", text_value.casefold()) if text_value else None
+
+
+def _merge_ozon_attribute_values(old_value: Any, new_value: Any) -> list:
+    merged: list = []
+    by_key: dict[tuple[str, str], dict] = {}
+    seen_unkeyed: set[str] = set()
+    for value in _as_list(old_value) + _as_list(new_value):
+        if not isinstance(value, dict):
+            identity = _json_identity(value)
+            if identity not in seen_unkeyed:
+                seen_unkeyed.add(identity)
+                merged.append(value)
+            continue
+        key = _ozon_attribute_value_identity(value)
+        if key is None:
+            identity = _json_identity(value)
+            if identity not in seen_unkeyed:
+                seen_unkeyed.add(identity)
+                merged.append(value)
+            continue
+        existing = by_key.get(key)
+        if existing is None:
+            normalized = {**value}
+            by_key[key] = normalized
+            merged.append(normalized)
+        else:
+            combined = _deep_merge_json(existing, value)
+            existing.clear()
+            existing.update(combined)
+    return merged
+
+
+def _merge_ozon_attribute_facts(old_value: Any, new_value: Any) -> list:
+    merged: list = []
+    by_key: dict[tuple[str, str, str], dict] = {}
+    seen_unkeyed: set[str] = set()
+    for fact in _as_list(old_value) + _as_list(new_value):
+        if not isinstance(fact, dict):
+            identity = _json_identity(fact)
+            if identity not in seen_unkeyed:
+                seen_unkeyed.add(identity)
+                merged.append(fact)
+            continue
+        key = _ozon_attribute_identity(fact)
+        if key is None:
+            identity = _json_identity(fact)
+            if identity not in seen_unkeyed:
+                seen_unkeyed.add(identity)
+                merged.append(fact)
+            continue
+        existing = by_key.get(key)
+        if existing is None:
+            normalized = {**fact}
+            normalized["values"] = _merge_ozon_attribute_values([], fact.get("values"))
+            by_key[key] = normalized
+            merged.append(normalized)
+        else:
+            combined = _deep_merge_json(existing, fact)
+            combined["values"] = _merge_ozon_attribute_values(existing.get("values"), fact.get("values"))
+            existing.clear()
+            existing.update(combined)
     return merged
 
 
@@ -228,8 +366,12 @@ def _parse_ozon_list_count(value: str) -> Optional[int]:
     parsed = _parse_ozon_list_number(value)
     if parsed is None:
         return None
-    normalized = (value or "").strip().casefold()
-    multiplier = 1_000_000 if re.search(r"[mм]\b", normalized) else 1_000 if re.search(r"[kк]\b", normalized) else 1
+    number_match = re.search(r"[-+]?\d(?:[\d\s\u00a0\u202f.,]*\d)?", value or "")
+    suffix = (value or "")[number_match.end() :].lstrip().casefold() if number_match else ""
+    # Only a compact suffix directly following the number is authoritative.
+    # Searching the whole label would mistake ordinary words such as
+    # ``оценок`` for a Cyrillic ``к`` (thousand) suffix.
+    multiplier = 1_000_000 if re.match(r"[mм]\b", suffix) else 1_000 if re.match(r"[kк]\b", suffix) else 1
     return max(0, int(parsed * multiplier))
 
 
@@ -434,6 +576,8 @@ def bulk_create_scraped_products(
                 facts=product.facts,
                 tags=_merge_unique_strings([], product.tags),
                 color_list=product.color_list,
+                package_facts=product.package_facts,
+                ozon_attribute_facts=product.ozon_attribute_facts,
                 ozon_category_id=product.ozon_category_id,
                 ozon_type_id=product.ozon_type_id,
                 ozon_metrics=product.ozon_metrics,
@@ -573,6 +717,22 @@ def bulk_create_scraped_products(
             merged_colors = _merge_unique_strings(record.color_list, product.color_list)
             if merged_colors != _as_list(record.color_list):
                 record.color_list = merged_colors
+                changed = True
+
+            if product.package_facts:
+                old_package_facts = record.package_facts or {}
+                merged_package_facts = _deep_merge_json(old_package_facts, product.package_facts)
+                if merged_package_facts != old_package_facts:
+                    record.package_facts = merged_package_facts
+                    changed = True
+
+            old_attribute_facts = _as_list(record.ozon_attribute_facts)
+            merged_attribute_facts = _merge_ozon_attribute_facts(
+                old_attribute_facts,
+                product.ozon_attribute_facts,
+            )
+            if merged_attribute_facts != old_attribute_facts:
+                record.ozon_attribute_facts = merged_attribute_facts
                 changed = True
 
             old_variant_attr_ids = [item for item in _as_list(record.variant_attr_ids) if isinstance(item, int) and item > 0]

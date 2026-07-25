@@ -1,6 +1,6 @@
 from datetime import datetime
-from typing import Optional, List
-from pydantic import BaseModel, ConfigDict
+from typing import Any, Optional, List
+from pydantic import BaseModel, ConfigDict, Field
 
 
 # ── 基础 ──────────────────────────────────────────────────────
@@ -23,10 +23,10 @@ class UploadDraftBase(BaseModel):
     price_rub: float = 0.0
     old_price_rub: float = 0.0
     vat: str = "0"
-    weight: int = 500
-    height: int = 100
-    depth: int = 100
-    width: int = 100
+    weight: Optional[int] = None
+    height: Optional[int] = None
+    depth: Optional[int] = None
+    width: Optional[int] = None
     primary_image: str = ""
     ozonbox_tags: Optional[str] = None
 
@@ -79,6 +79,7 @@ class UpdateDraftRequest(BaseModel):
     height: Optional[int] = None
     depth: Optional[int] = None
     width: Optional[int] = None
+    package_override_reason: Optional[str] = None
     primary_image: Optional[str] = None
     images: Optional[List[str]] = None
     ozonbox_tags: Optional[str] = None
@@ -100,8 +101,28 @@ class BatchSubmitRequest(BaseModel):
 
 class UploadDraftRead(UploadDraftBase):
     id: int
-    source_images: list = []
-    images: list = []
+    description_category_id: Optional[int] = None
+    type_id: Optional[int] = None
+    category_name: Optional[str] = None
+    offer_id: Optional[str] = None
+    barcode: Optional[str] = None
+    name: Optional[str] = None
+    description: Optional[str] = None
+    price_cny: Optional[float] = None
+    price_rub: Optional[float] = None
+    old_price_rub: Optional[float] = None
+    vat: Optional[str] = None
+    primary_image: Optional[str] = None
+    source_images: list = Field(default_factory=list)
+    images: Optional[list] = None
+    selected_sku_snapshot: Optional[dict[str, Any]] = None
+    package_facts: Optional[dict[str, Any]] = None
+    package_override_audit: Optional[dict[str, Any]] = None
+    ozon_attribute_facts: Optional[list[dict[str, Any]]] = None
+    video_urls: Optional[list[str]] = None
+    text_facts: Optional[list[dict[str, Any]]] = None
+    ozon_metrics: Optional[dict[str, Any]] = None
+    readiness_errors: Optional[list[str]] = None
     status: str = "draft"
     error_message: str = ""
     ozon_task_id: int = 0

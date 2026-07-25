@@ -1,10 +1,22 @@
 import type {
+  FactProvenance,
+  OzonAttributeFact,
+  PackagePhysicalField,
+  PackagePhysicalProvenance,
+  PackagePhysicalSnapshot,
   ProductCompleteness,
   ProductVariant,
   ProductVariantValue,
   RequiredProductField,
   ScrapedProduct,
 } from '@/lib/utils/types'
+
+const PACKAGE_FIELDS = [
+  'packageWeightG',
+  'packageDepthMm',
+  'packageWidthMm',
+  'packageHeightMm',
+] as const satisfies readonly PackagePhysicalField[]
 
 function text(value: unknown): string {
   return typeof value === 'string' ? value.trim() : ''
@@ -13,6 +25,11 @@ function text(value: unknown): string {
 function positiveNumber(value: unknown): number | undefined {
   const number = typeof value === 'number' ? value : Number(value)
   return Number.isFinite(number) && number >= 0 ? number : undefined
+}
+
+function strictlyPositiveNumber(value: unknown): number | undefined {
+  const number = typeof value === 'number' ? value : Number(value)
+  return Number.isFinite(number) && number > 0 ? number : undefined
 }
 
 function uniqueTexts(values: unknown[]): string[] {
@@ -47,6 +64,64 @@ function normalizeRecordList(value: unknown): Array<Record<string, unknown>> {
   return [...result.values()]
 }
 
+function normalizePackageSnapshot(value: unknown): PackagePhysicalSnapshot | undefined {
+  if (!isRecord(value)) return undefined
+  const snapshot: PackagePhysicalSnapshot = {}
+  const provenance: PackagePhysicalProvenance = {}
+  const sourceProvenance = normalizeRecord(value.packagePhysicalProvenance)
+
+  for (const field of PACKAGE_FIELDS) {
+    const fieldValue = strictlyPositiveNumber(value[field])
+    if (fieldValue === undefined) continue
+    snapshot[field] = fieldValue
+
+    const fieldProvenance = normalizeRecord(sourceProvenance?.[field])
+    if (fieldProvenance && text(fieldProvenance.source)) {
+      provenance[field] = fieldProvenance as FactProvenance
+    }
+  }
+
+  if (!PACKAGE_FIELDS.some((field) => snapshot[field] !== undefined)) return undefined
+  if (Object.keys(provenance).length) snapshot.packagePhysicalProvenance = provenance
+  return snapshot
+}
+
+function normalizeOzonAttributeFacts(value: unknown): OzonAttributeFact[] {
+  const normalized: OzonAttributeFact[] = []
+  for (const record of normalizeRecordList(value)) {
+    const attributeId = positiveNumber(record.attributeId)
+    const scope = record.scope
+    const provenance = normalizeRecord(record.provenance)
+    if (
+      !Number.isSafeInteger(attributeId)
+      || !attributeId
+      || (scope !== 'product' && scope !== 'sku')
+      || typeof record.recognized !== 'boolean'
+      || typeof record.publishable !== 'boolean'
+      || !provenance
+      || !text(provenance.source)
+      || !Array.isArray(record.values)
+    ) continue
+
+    const values = record.values.flatMap((item) => {
+      const normalizedValue = normalizeRecord(item)
+      return normalizedValue ? [normalizedValue] : []
+    })
+    if (!values.length) continue
+
+    normalized.push({
+      ...record,
+      attributeId,
+      values,
+      scope,
+      recognized: record.recognized,
+      publishable: record.publishable,
+      provenance: provenance as FactProvenance,
+    })
+  }
+  return normalized
+}
+
 function normalizeVariantValues(values: ProductVariantValue[] = []): ProductVariantValue[] {
   const seen = new Set<string>()
   return values.flatMap((item) => {
@@ -55,7 +130,7 @@ function normalizeVariantValues(values: ProductVariantValue[] = []): ProductVari
     const key = name.toLocaleLowerCase()
     if (!name || !value || seen.has(key)) return []
     seen.add(key)
-    return [{ name, value }]
+    return [{ ...item, name, value }]
   })
 }
 
@@ -79,6 +154,8 @@ export function normalizeVariants(variants: ProductVariant[] = []): ProductVaria
     const videoUrls = uniqueTexts(Array.isArray(variant.videoUrls) ? variant.videoUrls : [])
     const supplierAttrs = normalizeRecordList(variant.supplierAttrs)
     const variantAttrs = normalizeRecord(variant.variantAttrs)
+    const packageFacts = normalizePackageSnapshot(variant)
+    const ozonAttributeFacts = normalizeOzonAttributeFacts(variant.ozonAttributeFacts)
     result.push({
       sku,
       ...(barcode ? { barcode } : {}),
@@ -92,6 +169,7 @@ export function normalizeVariants(variants: ProductVariant[] = []): ProductVaria
       ...(positiveNumber(variant.depth) !== undefined ? { depth: positiveNumber(variant.depth) } : {}),
       ...(positiveNumber(variant.width) !== undefined ? { width: positiveNumber(variant.width) } : {}),
       ...(positiveNumber(variant.height) !== undefined ? { height: positiveNumber(variant.height) } : {}),
+      ...(packageFacts ?? {}),
       ...(text(variant.sourceUrl) ? { sourceUrl: text(variant.sourceUrl) } : {}),
       ...(text(variant.id) ? { id: text(variant.id) } : {}),
       ...(text(variant.productId) ? { productId: text(variant.productId) } : {}),
@@ -100,6 +178,7 @@ export function normalizeVariants(variants: ProductVariant[] = []): ProductVaria
       ...(text(variant.supplierSpecText) ? { supplierSpecText: text(variant.supplierSpecText) } : {}),
       ...(supplierAttrs.length ? { supplierAttrs } : {}),
       ...(variantAttrs ? { variantAttrs } : {}),
+      ...(ozonAttributeFacts.length ? { ozonAttributeFacts } : {}),
       ...(text(variant.sourcePath) ? { sourcePath: text(variant.sourcePath) } : {}),
     })
   }
@@ -129,11 +208,18 @@ export function normalizeSkuList(
 
 export function normalizeProduct(product: ScrapedProduct): ScrapedProduct {
   const variants = normalizeVariants(product.variants)
-  return {
+  const normalized: ScrapedProduct = {
     ...product,
     variants,
     skuList: normalizeSkuList(product.skuList, variants),
   }
+  const packageFacts = normalizePackageSnapshot(product.packageFacts)
+  const ozonAttributeFacts = normalizeOzonAttributeFacts(product.ozonAttributeFacts)
+  if (packageFacts) normalized.packageFacts = packageFacts
+  else delete normalized.packageFacts
+  if (ozonAttributeFacts.length) normalized.ozonAttributeFacts = ozonAttributeFacts
+  else delete normalized.ozonAttributeFacts
+  return normalized
 }
 
 export function getProductCompleteness(product: ScrapedProduct): ProductCompleteness {

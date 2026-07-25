@@ -2,7 +2,7 @@
 import json
 import logging
 import os
-from typing import List, Optional
+from typing import Any, List, Optional
 from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, File
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
@@ -13,6 +13,7 @@ logger = logging.getLogger(__name__)
 from app.crud import scraped_product as sp_crud
 from app.crud import store as store_crud
 from app.schemas.scraped_product import ScrapedProductCreate, ScrapedProductRead
+from app.services import upload_service
 
 router = APIRouter()
 
@@ -64,6 +65,7 @@ class UploadRequest(BaseModel):
     width_mm: Optional[int] = None
     barcode: str = ""
     description: str = ""
+    package_override_reason: Optional[str] = None
 
 
 class BatchUploadRequest(BaseModel):
@@ -78,6 +80,7 @@ class BatchUploadRequest(BaseModel):
     height_mm: Optional[int] = None
     depth_mm: Optional[int] = None
     width_mm: Optional[int] = None
+    package_override_reason: Optional[str] = None
 
 
 class CategoryTreeRequest(BaseModel):
@@ -151,64 +154,108 @@ def _positive_int(value) -> int:
         return 0
 
 
-def _first_spec(record) -> dict:
-    """读取采集规格 spec_list[0]，兼容数据库 JSON 被序列化成字符串的情况。"""
-    spec_list = getattr(record, "spec_list", None) or []
-    if isinstance(spec_list, str):
-        try:
-            spec_list = json.loads(spec_list)
-        except Exception:
-            spec_list = []
-    if isinstance(spec_list, list) and spec_list and isinstance(spec_list[0], dict):
-        return spec_list[0]
-    return {}
-
-
-def _resolve_upload_dimensions(record, *, weight_g=None, height_mm=None, depth_mm=None, width_mm=None) -> tuple[int, int, int, int, dict]:
-    """上传尺寸/重量优先级：用户输入 > 采集 spec_list > 安全默认值。
-
-    返回：(weight, height, depth, width, meta)。meta 用于日志/响应，方便定位哪些字段仍在使用默认值。
-    """
-    spec = _first_spec(record)
+def _direct_package_overrides(body: Any) -> dict[str, int]:
     requested = {
-        "weight": _positive_int(weight_g),
-        "height": _positive_int(height_mm),
-        "depth": _positive_int(depth_mm),
-        "width": _positive_int(width_mm),
+        "weight": getattr(body, "weight_g", None),
+        "height": getattr(body, "height_mm", None),
+        "depth": getattr(body, "depth_mm", None),
+        "width": getattr(body, "width_mm", None),
     }
-    scraped = {
-        "weight": _positive_int(spec.get("weight_g")),
-        "height": _positive_int(spec.get("height_mm")),
-        "depth": _positive_int(spec.get("depth_mm")),
-        "width": _positive_int(spec.get("width_mm")),
+    return {
+        field: normalized
+        for field, value in requested.items()
+        if (normalized := _positive_int(value)) > 0
     }
-    defaults = {"weight": 500, "height": 100, "depth": 100, "width": 100}
 
-    values = {}
-    sources = {}
-    for key in ("weight", "height", "depth", "width"):
-        if requested[key]:
-            values[key] = requested[key]
-            sources[key] = "request"
-        elif scraped[key]:
-            values[key] = scraped[key]
-            sources[key] = "spec_list"
-        else:
-            values[key] = defaults[key]
-            sources[key] = "default"
 
-    missing = [key for key, source in sources.items() if source == "default"]
-    if missing:
-        logger.warning(
-            "Product %s missing upload dimensions %s, using safe defaults",
-            getattr(record, "id", None),
-            missing,
+def _build_direct_upload_draft(record, body: Any, *, offer_id: str):
+    """Normalize a selection record through the shared strict draft boundary."""
+    package_overrides = _direct_package_overrides(body)
+    override_reason = str(getattr(body, "package_override_reason", None) or "").strip()
+    if package_overrides and not override_reason:
+        raise upload_service.OzonItemValidationError([
+            "手工修改包装重量或尺寸时必须填写 package_override_reason",
+        ])
+
+    requested_price = getattr(body, "price_rub", None)
+    requested_old_price = getattr(body, "old_price_rub", None)
+    draft = upload_service.build_transient_draft_from_scraped(
+        record,
+        body.store_id,
+        source_sku=str(record.selected_sku or ""),
+        description_category_id=getattr(body, "description_category_id", 0) or 0,
+        type_id=getattr(body, "type_id", 0) or 0,
+        offer_id=offer_id,
+        price_rub=float(requested_price) if requested_price and requested_price > 0 else 0.0,
+        old_price_rub=float(requested_old_price) if requested_old_price and requested_old_price > 0 else 0.0,
+    )
+
+    # The legacy direct API treats collected prices as RUB. Preserve that
+    # compatibility, but use the exact selected-SKU price exposed by the
+    # canonical mapper and never allow zero through strict readiness.
+    if not requested_price or requested_price <= 0:
+        draft.price_rub = float(draft.price_cny or 0)
+
+    barcode = str(getattr(body, "barcode", "") or "").strip()
+    description = str(getattr(body, "description", "") or "").strip()
+    if barcode:
+        draft.barcode = barcode
+    if description:
+        draft.description = description
+
+    if package_overrides:
+        for field, value in package_overrides.items():
+            setattr(draft, field, value)
+        draft.package_override_audit = upload_service.apply_package_override_audit(
+            draft,
+            package_overrides,
+            override_reason,
         )
+    return draft
 
-    return values["weight"], values["height"], values["depth"], values["width"], {
+
+def _extract_task_ids(result: Any) -> list[int]:
+    """Accept current list and legacy dict-shaped Ozon import responses."""
+    payload = result.get("result", []) if isinstance(result, dict) else []
+    if isinstance(payload, dict):
+        payload = payload.get("task_id", [])
+    if not isinstance(payload, list):
+        payload = [payload]
+    task_ids: list[int] = []
+    for value in payload:
+        try:
+            task_id = int(value)
+        except (TypeError, ValueError):
+            continue
+        if task_id > 0:
+            task_ids.append(task_id)
+    return task_ids
+
+
+def _dimension_response(draft) -> dict[str, Any]:
+    audit = draft.package_override_audit if isinstance(draft.package_override_audit, dict) else {}
+    facts = draft.package_facts if isinstance(draft.package_facts, dict) else {}
+    provenance = facts.get("packagePhysicalProvenance", {})
+    fact_keys = {
+        "weight": "packageWeightG",
+        "height": "packageHeightMm",
+        "depth": "packageDepthMm",
+        "width": "packageWidthMm",
+    }
+    sources: dict[str, str] = {}
+    for field, fact_key in fact_keys.items():
+        if field in audit:
+            sources[field] = "manual_override"
+        else:
+            source = provenance.get(fact_key, {}) if isinstance(provenance, dict) else {}
+            sources[field] = str(source.get("source") or "collected_package_fact")
+    return {
+        "weight_g": draft.weight,
+        "height_mm": draft.height,
+        "depth_mm": draft.depth,
+        "width_mm": draft.width,
         "sources": sources,
-        "missing": missing,
-        "scraped_spec": spec,
+        "missing": [],
     }
 
 
@@ -435,8 +482,6 @@ def upload_to_store(product_id: int, body: UploadRequest, db: Session = Depends(
     """
     from app.models.scraped_product import ScrapedProductRecord
     from app.models.store import Store
-    from app.services.ozon_client import OzonClient
-
     record = db.query(ScrapedProductRecord).filter(ScrapedProductRecord.id == product_id).first()
     if not record:
         raise HTTPException(status_code=404, detail="商品不存在")
@@ -445,79 +490,21 @@ def upload_to_store(product_id: int, body: UploadRequest, db: Session = Depends(
     if not store:
         raise HTTPException(status_code=404, detail="店铺不存在")
 
-    client = OzonClient(client_id=store.client_id, api_key=store.api_key)
-
-    # 构建 Ozon import payload
-    offer_id = body.offer_id or f"AUTO-{record.source_id}"
-
-    # 尺寸数据: 优先使用请求中的值，其次使用采集 spec_list，最后才使用安全默认值
-    weight, height, depth, width, dimensions_meta = _resolve_upload_dimensions(
-        record,
-        weight_g=body.weight_g,
-        height_mm=body.height_mm,
-        depth_mm=body.depth_mm,
-        width_mm=body.width_mm,
-    )
-
-    # 价格处理
-    price_kopecks = str(int(body.price_rub * 100)) if body.price_rub else (
-        str(int(record.price * 100)) if record.price else "0"
-    )
-    old_price_kopecks = str(int(body.old_price_rub * 100)) if body.old_price_rub else (
-        str(int(record.old_price * 100)) if record.old_price and record.old_price > record.price else ""
-    )
-    # 构建图片列表
-    images = [img for img in (record.images or []) if img and img.startswith("http")]
-
-    item = {
-        "offer_id": offer_id,
-        "name": record.title,
-        "description_category_id": body.description_category_id or record.ozon_category_id or 0,
-        "type_id": body.type_id or record.ozon_type_id or 0,
-        "barcode": body.barcode or "",
-        "dimension_unit": "mm",
-        "weight_unit": "g",
-        "height": height,
-        "depth": depth,
-        "width": width,
-        "weight": weight,
-        "primary_image": images[0] if images else "",
-        "images": images[:10],
-        "price": price_kopecks,
-        "old_price": old_price_kopecks,
-        "vat": "0",
-        "currency_code": "RUB",
-        "status": "processed",
-    }
-
-    if body.description:
-        item["description"] = body.description
-    elif record.description:
-        item["description"] = record.description
-
-    # 验证必填字段
-    errors = []
-    if not item["description_category_id"]:
-        errors.append("请先选择 Ozon 商品分类 (description_category_id)")
-    if not item["type_id"]:
-        errors.append("请先选择 Ozon 商品类型 (type_id)")
-    if not images:
-        errors.append("商品没有可用图片")
-    if errors:
-        raise HTTPException(status_code=400, detail="; ".join(errors))
+    offer_id = str(body.offer_id or "").strip() or f"AUTO-{record.source_id}"
+    try:
+        draft = _build_direct_upload_draft(record, body, offer_id=offer_id)
+        item = upload_service._build_ozon_item(draft)
+    except upload_service.OzonItemValidationError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     try:
-        result = client.import_products([item])
+        from app.services.ozon_client import OzonClient
 
-        # 保存上传状态到数据库
-        task_data = result.get("result", {})
-        task_id = 0
-        if isinstance(task_data, dict):
-            task_ids = task_data.get("task_id", [])
-            if task_ids:
-                task_id = task_ids[0] if isinstance(task_ids, list) else task_ids
+        client = OzonClient(client_id=store.client_id, api_key=store.api_key)
+        result = client.import_products(items=[item])
+        task_ids = _extract_task_ids(result)
+        task_id = task_ids[0] if task_ids else 0
 
-        # 更新记录的 Ozon 分类信息
         record.ozon_category_id = item["description_category_id"]
         record.ozon_type_id = item["type_id"]
         record.upload_status = "uploading"
@@ -530,15 +517,10 @@ def upload_to_store(product_id: int, body: UploadRequest, db: Session = Depends(
             "result": result,
             "task_id": task_id,
             "offer_id": offer_id,
-            "dimensions": {
-                "weight_g": weight,
-                "height_mm": height,
-                "depth_mm": depth,
-                "width_mm": width,
-                **dimensions_meta,
-            },
+            "dimensions": _dimension_response(draft),
         }
     except Exception as e:
+        db.rollback()
         logger.error("Upload failed for product %d: %s", product_id, str(e))
         raise HTTPException(status_code=500, detail=f"上传失败: {str(e)}")
 
@@ -548,13 +530,11 @@ def batch_upload_products(body: BatchUploadRequest, db: Session = Depends(get_db
     """批量上传选品商品到指定 Ozon 店铺"""
     from app.models.scraped_product import ScrapedProductRecord
     from app.models.store import Store
-    from app.services.ozon_client import OzonClient
 
     store = db.query(Store).filter(Store.id == body.store_id).first()
     if not store:
         raise HTTPException(status_code=404, detail="店铺不存在")
 
-    client = OzonClient(client_id=store.client_id, api_key=store.api_key)
     records = db.query(ScrapedProductRecord).filter(
         ScrapedProductRecord.id.in_(body.product_ids)
     ).all()
@@ -562,90 +542,66 @@ def batch_upload_products(body: BatchUploadRequest, db: Session = Depends(get_db
     if not records:
         raise HTTPException(status_code=404, detail="没有找到任何商品")
 
-    items = []
     results = {"success": 0, "failed": 0, "errors": []}
+    records_by_id = {record.id: record for record in records}
+    valid_uploads = []
 
-    for record in records:
+    for product_id in body.product_ids:
+        record = records_by_id.get(product_id)
+        if record is None:
+            results["failed"] += 1
+            results["errors"].append({"product_id": product_id, "error": "商品不存在"})
+            continue
         try:
             offer_id = f"AUTO-{record.source_id}"
-            images = [img for img in (record.images or []) if img and img.startswith("http")]
-
-            if not images:
-                results["failed"] += 1
-                results["errors"].append({"product_id": record.id, "error": "缺少图片"})
-                continue
-
-            weight, height, depth, width, dimensions_meta = _resolve_upload_dimensions(
-                record,
-                weight_g=body.weight_g,
-                height_mm=body.height_mm,
-                depth_mm=body.depth_mm,
-                width_mm=body.width_mm,
-            )
-            if dimensions_meta["missing"]:
-                results["errors"].append({
-                    "product_id": record.id,
-                    "warning": f"缺少 {', '.join(dimensions_meta['missing'])}，已使用安全默认值",
-                })
-
-            price_kopecks = str(int(body.price_rub * 100)) if body.price_rub else (
-                str(int(record.price * 100)) if record.price else "0"
-            )
-            item = {
-                "offer_id": offer_id,
-                "name": record.title,
-                "description_category_id": body.description_category_id,
-                "type_id": body.type_id,
-                "barcode": "",
-                "dimension_unit": "mm",
-                "weight_unit": "g",
-                "height": height,
-                "depth": depth,
-                "width": width,
-                "weight": weight,
-                "primary_image": images[0] if images else "",
-                "images": images[:10],
-                "price": price_kopecks,
-                "old_price": "",
-                "vat": "0",
-                "currency_code": "RUB",
-                "status": "processed",
-            }
-            items.append(item)
-
-            record.ozon_category_id = body.description_category_id
-            record.ozon_type_id = body.type_id
-            record.upload_status = "pending"
-            record.offer_id = offer_id
-        except Exception as e:
+            draft = _build_direct_upload_draft(record, body, offer_id=offer_id)
+            item = upload_service._build_ozon_item(draft)
+            valid_uploads.append((record.id, offer_id, item))
+        except upload_service.OzonItemValidationError as exc:
             results["failed"] += 1
-            results["errors"].append({"product_id": record.id, "error": str(e)})
+            results["errors"].append({"product_id": record.id, "error": str(exc)})
 
-    if not items:
-        db.commit()
+    if not valid_uploads:
         return {"success": True, "result": results}
 
-    try:
-        import_result = client.import_products(items)
-        results["success"] = len(items)
+    from app.services.ozon_client import OzonClient
 
-        task_data = import_result.get("result", {})
-        task_id = 0
-        if isinstance(task_data, dict):
-            task_ids = task_data.get("task_id", [])
-            task_id = task_ids[0] if isinstance(task_ids, list) and task_ids else 0
+    client = OzonClient(client_id=store.client_id, api_key=store.api_key)
+    first_task_id = 0
+    for chunk_start in range(0, len(valid_uploads), 100):
+        chunk = valid_uploads[chunk_start:chunk_start + 100]
+        try:
+            import_result = client.import_products(items=[entry[2] for entry in chunk])
+            task_ids = _extract_task_ids(import_result)
+            fallback_task_id = task_ids[0] if task_ids else 0
+            if not first_task_id:
+                first_task_id = fallback_task_id
 
-        for record in records:
-            if record.upload_status == "pending":
+            for index, (product_id, offer_id, item) in enumerate(chunk):
+                record = records_by_id[product_id]
+                task_id = task_ids[index] if index < len(task_ids) else fallback_task_id
+                record.ozon_category_id = item["description_category_id"]
+                record.ozon_type_id = item["type_id"]
                 record.upload_status = "uploading"
                 record.upload_task_id = str(task_id) if task_id else ""
+                record.offer_id = offer_id
 
-        db.commit()
-        return {"success": True, "result": results, "task_id": task_id}
-    except Exception as e:
-        db.rollback()
-        logger.error("Batch upload failed: %s", str(e))
-        raise HTTPException(status_code=500, detail=f"批量上传失败: {str(e)}")
+            db.commit()
+            results["success"] += len(chunk)
+        except Exception as exc:
+            db.rollback()
+            logger.error(
+                "Batch upload chunk failed for products %s: %s",
+                [entry[0] for entry in chunk],
+                str(exc),
+            )
+            results["failed"] += len(chunk)
+            results["errors"].extend(
+                {"product_id": product_id, "error": str(exc)}
+                for product_id, _, _ in chunk
+            )
+
+    return {"success": True, "result": results, "task_id": first_task_id}
 
 
 @router.post("/products/{product_id}/upload-status")

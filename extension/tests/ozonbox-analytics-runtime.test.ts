@@ -34,7 +34,9 @@ import {
   OZON_SELLER_ORIGIN,
   requireOzonCompanyId,
 } from '../lib/ozonbox/seller-session'
+import { mergeExactSkuAnalyticsProduct } from '../lib/ozonbox/seller-analytics'
 import { SuccessfulRequestCache } from '../lib/ozonbox/successful-request-cache'
+import type { OzonboxCollectedProduct } from '../lib/ozonbox/contract'
 
 assert.equal(OZON_SELLER_ORIGIN, 'https://seller.ozon.ru')
 assert.equal(OZON_SELLER_DASHBOARD_URL, 'https://seller.ozon.ru/app/dashboard/main')
@@ -123,8 +125,6 @@ for (const expectedMarkup of [
   '>定价工具</button>',
   'id="ozon-bind-cookie"',
   '>绑定Cookie</button>',
-  'id="ozon-selection-settings"',
-  '>设置选品</button>',
   'id="ozon-start-list-crawl"',
   '>启动爬取</button>',
   'id="ozon-list-card-switch"',
@@ -165,7 +165,6 @@ const orderedControlIds = [
   'ozon-profit-calculator',
   'ozon-pricing-tool',
   'ozon-bind-cookie',
-  'ozon-selection-settings',
   'ozon-start-list-crawl',
   'ozon-list-card-control',
   'ozon-detail-card-control',
@@ -376,6 +375,90 @@ assert.throws(() => parseSellerCookieBindResponse({ success: true, clientId: '',
 assert.throws(() => parseSellerCookieBindResponse({ success: true, clientId: '123456', cookieCount: -1 }), /无效响应/)
 assert.throws(() => parseSellerCookieBindResponse(null), /无效响应/)
 
+const pdpPackageSource = {
+  source: 'ozon_pdp_characteristic' as const,
+  sourcePath: 'pdp.characteristics.packageDepth',
+}
+const exactSkuProduct: OzonboxCollectedProduct = {
+  source: 'OZON',
+  sourceUrl: 'https://www.ozon.ru/product/123456/',
+  productId: '123456',
+  recordName: 'Exact SKU factual product',
+  sku: '123456',
+  title: 'Exact SKU factual product',
+  brand: 'PDP Brand',
+  images: ['https://cdn.example/product.jpg'],
+  price: 1_299,
+  specs: [],
+  packageFacts: {
+    packageDepthMm: 120,
+    packagePhysicalProvenance: { packageDepthMm: pdpPackageSource },
+  },
+  variantsData: [
+    {
+      productId: '123456',
+      sku: '123456',
+      images: ['https://cdn.example/exact.jpg'],
+      supplierAttrs: [],
+      variantAttrs: { color: 'red' },
+      packageDepthMm: 120,
+      packagePhysicalProvenance: { packageDepthMm: pdpPackageSource },
+    },
+    {
+      productId: '654321',
+      sku: '654321',
+      images: ['https://cdn.example/other.jpg'],
+      supplierAttrs: [],
+      variantAttrs: { color: 'blue' },
+      packageWeightG: 777,
+    },
+  ],
+  variantAttrIds: [],
+  status: 'draft',
+}
+const exactSkuAnalyticsResponse = {
+  items: [{
+    sku: '123456',
+    brand: 'Seller Brand Must Not Replace PDP Brand',
+    dimension_mm: { length: 999, width: 220, height: 80 },
+    weight_g: 640,
+  }],
+}
+const exactSkuEnriched = mergeExactSkuAnalyticsProduct(
+  exactSkuProduct,
+  exactSkuAnalyticsResponse,
+  '123456',
+)
+assert.equal(exactSkuEnriched.brand, 'PDP Brand')
+assert.equal(exactSkuEnriched.packageFacts?.packageDepthMm, 120)
+assert.equal(exactSkuEnriched.packageFacts?.packageWidthMm, 220)
+assert.equal(exactSkuEnriched.packageFacts?.packageHeightMm, 80)
+assert.equal(exactSkuEnriched.packageFacts?.packageWeightG, 640)
+assert.deepEqual(
+  exactSkuEnriched.packageFacts?.packagePhysicalProvenance?.packageDepthMm,
+  pdpPackageSource,
+)
+assert.equal(
+  exactSkuEnriched.packageFacts?.packagePhysicalProvenance?.packageWidthMm?.source,
+  'ozon_seller_analytics',
+)
+assert.equal(exactSkuEnriched.variantsData[0]?.packageDepthMm, 120)
+assert.equal(exactSkuEnriched.variantsData[0]?.packageWidthMm, 220)
+assert.equal(exactSkuEnriched.variantsData[0]?.packageHeightMm, 80)
+assert.equal(exactSkuEnriched.variantsData[0]?.packageWeightG, 640)
+assert.deepEqual(
+  exactSkuEnriched.variantsData[0]?.packagePhysicalProvenance?.packageDepthMm,
+  pdpPackageSource,
+)
+assert.strictEqual(exactSkuEnriched.variantsData[1], exactSkuProduct.variantsData[1])
+
+const nonExactSkuResult = mergeExactSkuAnalyticsProduct(
+  exactSkuProduct,
+  { items: [{ sku: '999999', brand: 'Wrong Product', weight_g: 999 }] },
+  '123456',
+)
+assert.strictEqual(nonExactSkuResult, exactSkuProduct)
+
 const backgroundSource = readFileSync(new URL('../entrypoints/background.ts', import.meta.url), 'utf8')
 const contentSource = readFileSync(new URL('../entrypoints/ozon.content.ts', import.meta.url), 'utf8')
 const floatingPanelSource = readFileSync(new URL('../lib/ozonbox/floating-panel.ts', import.meta.url), 'utf8')
@@ -385,6 +468,15 @@ const apiSource = readFileSync(new URL('../lib/utils/api.ts', import.meta.url), 
 assert.ok(backgroundSource.includes("type === 'OZONBOX_COLLECT_AND_SAVE_CURRENT_PRODUCT'"))
 assert.ok(backgroundSource.includes('collectAndSaveOzonProduct(request.tabId ?? sender.tab?.id)'))
 assert.ok(backgroundSource.includes('handleProductScraped(toSelectionProduct(collected))'))
+assert.ok(backgroundSource.includes('fetchOzonAnalyticsItem(sku, sellerId)'))
+assert.ok(backgroundSource.includes('mergeExactSkuAnalyticsProduct(product, analyticsItem, sku)'))
+const sellerEnrichmentStart = backgroundSource.indexOf('if (!enrichFromSeller) return product')
+const sellerFetchStart = backgroundSource.indexOf('fetchOzonAnalyticsItem(sku, sellerId)', sellerEnrichmentStart)
+assert.ok(sellerEnrichmentStart >= 0 && sellerFetchStart > sellerEnrichmentStart)
+assert.ok(
+  !backgroundSource.slice(sellerEnrichmentStart, sellerFetchStart).includes('product.brand'),
+  'PDP 已有品牌不得阻止精确 SKU 包装事实富化',
+)
 // Legacy GET remains available for compatibility, but the user action must use
 // the authenticated persistence flow below rather than treating a local read as binding.
 assert.ok(backgroundSource.includes("type === 'OZONBOX_GET_SELLER_COOKIES'"))
@@ -418,7 +510,7 @@ assert.ok(contentSource.includes("import { startOzonListCrawlController } from '
 assert.ok(contentSource.includes("type: 'OZONBOX_PROCESS_CARD_PRODUCT'"))
 assert.ok(contentSource.includes('return assertOzonboxProcessCardProductResponse(response, sku)'))
 assert.ok(contentSource.includes('listCrawler = startOzonListCrawlController({ processCardProduct: processListCardProduct })'))
-assert.ok(contentSource.includes('onStartListCrawl: () => listCrawler?.start()'))
+assert.ok(contentSource.includes('onStartListCrawl: (config) => listCrawler?.start(config)'))
 assert.ok(contentSource.includes('listCrawler?.stop()'))
 assert.ok(contentSource.includes('listCrawler?.reconcile()'))
 for (const vueMountContract of [
@@ -466,7 +558,13 @@ assert.ok(floatingPanelSource.includes('panelTools.openListing({ source: listing
 assert.ok(floatingPanelSource.includes("panelTools.openPricing('calculate2', { source: profitButton })"))
 assert.ok(floatingPanelSource.includes("panelTools.openPricing('calculate', { source: pricingButton })"))
 assert.ok(floatingPanelSource.includes("startListCrawlButton.hidden = page.kind !== 'list'"))
-assert.ok(floatingPanelSource.includes('void options.onStartListCrawl?.()'))
+assert.ok(floatingPanelSource.includes(
+  'panelTools.openListCrawl(startListCrawlButton, options.onStartListCrawl)',
+))
+assert.ok(!floatingPanelComponent.includes('id="ozon-selection-settings"'))
+assert.ok(!floatingPanelComponent.includes('>设置选品</button>'))
+assert.ok(!floatingPanelSource.includes('ozon-selection-settings'))
+assert.ok(!floatingPanelSource.includes('openSelection('))
 assert.ok(floatingPanelSource.includes('openListingForProduct: (product) => panelTools.openListing({ product })'))
 assert.ok(floatingPanelSource.includes('openPricingForProduct: (route, product) => panelTools.openPricing(route, { product })'))
 
@@ -548,4 +646,4 @@ assert.equal(analyticsLoadStatus({
   ozonboxPackageFactsError: 'backend unavailable',
 }), '已加载；Seller 变体包裹参数读取失败：variant endpoint unavailable；后端包裹事实读取失败：backend unavailable')
 
-console.log('Ozon runtime fixtures passed: floating panel, Seller contract, request deduplication and routes')
+console.log('Ozon runtime fixtures passed: exact-SKU enrichment, floating panel, Seller contract, request deduplication and routes')

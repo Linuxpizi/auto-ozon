@@ -1,18 +1,13 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, defineAsyncComponent, onMounted, ref } from 'vue'
 import {
   NButton,
   NConfigProvider,
   NDialogProvider,
   NInput,
-  NInputNumber,
   NMessageProvider,
   type GlobalThemeOverrides,
 } from 'naive-ui'
-import OzonboxPanel from '@/components/popup/OzonboxPanel.vue'
-import OzonListPanel from '@/components/popup/OzonListPanel.vue'
-import RecordsPanel from '@/components/popup/RecordsPanel.vue'
-import ScrapePanel from '@/components/popup/ScrapePanel.vue'
 import { validatedErpBaseUrl } from '@/lib/ozonbox/erp-url'
 import { isOzonListPage, isOzonProductUrl } from '@/lib/ozonbox/url'
 import { checkBackendHealth, getCurrentUser, login, register } from '@/lib/utils/api'
@@ -21,6 +16,11 @@ import type { AuthSession } from '@/lib/utils/types'
 import packageJson from '@/package.json'
 
 type PopupView = 'home' | 'auth' | 'settings' | 'scrape' | 'records'
+
+const OzonboxPanel = defineAsyncComponent(() => import('@/components/popup/OzonboxPanel.vue'))
+const OzonListPanel = defineAsyncComponent(() => import('@/components/popup/OzonListPanel.vue'))
+const RecordsPanel = defineAsyncComponent(() => import('@/components/popup/RecordsPanel.vue'))
+const ScrapePanel = defineAsyncComponent(() => import('@/components/popup/ScrapePanel.vue'))
 
 const APP_NAME = '鲸智 AI'
 const view = ref<PopupView>('home')
@@ -40,8 +40,6 @@ const logoutLoading = ref(false)
 const authError = ref('')
 const homeNotice = ref('')
 const erpBaseUrlDraft = ref('')
-const ozonListTarget = ref(50)
-const ozonListTargetDraft = ref<number | null>(50)
 const settingsError = ref('')
 const settingsSaving = ref(false)
 
@@ -98,13 +96,9 @@ async function loadSettings() {
     const settings = await getSettings()
     erpBaseUrl.value = settings.erpBaseUrl
     erpBaseUrlDraft.value = settings.erpBaseUrl
-    ozonListTarget.value = settings.ozon.maxItems
-    ozonListTargetDraft.value = settings.ozon.maxItems
   } catch {
     erpBaseUrl.value = ''
     erpBaseUrlDraft.value = ''
-    ozonListTarget.value = 50
-    ozonListTargetDraft.value = 50
   }
 }
 
@@ -198,7 +192,6 @@ function setAuthMode(mode: 'login' | 'register') {
 
 function openSettings() {
   erpBaseUrlDraft.value = erpBaseUrl.value
-  ozonListTargetDraft.value = ozonListTarget.value
   settingsError.value = ''
   homeNotice.value = ''
   view.value = 'settings'
@@ -209,20 +202,13 @@ async function saveErpSettings() {
   settingsSaving.value = true
   try {
     const normalizedUrl = validatedErpBaseUrl(erpBaseUrlDraft.value)
-    const normalizedTarget = ozonListTargetDraft.value
-    if (!Number.isSafeInteger(normalizedTarget) || (normalizedTarget ?? 0) < 1) {
-      throw new Error('Ozon 目标数量必须是大于 0 的整数')
-    }
     const currentSettings = await getSettings()
     await saveSettings({
       ...currentSettings,
       erpBaseUrl: normalizedUrl,
-      ozon: { ...currentSettings.ozon, maxItems: normalizedTarget as number },
     })
     erpBaseUrl.value = normalizedUrl
     erpBaseUrlDraft.value = normalizedUrl
-    ozonListTarget.value = normalizedTarget as number
-    ozonListTargetDraft.value = normalizedTarget
     homeNotice.value = '插件设置已保存'
     view.value = 'home'
   } catch (error) {
@@ -335,15 +321,11 @@ onMounted(() => {
               <strong>插件设置</strong>
               <span aria-hidden="true"></span>
             </header>
-            <p class="settings-description">配置 ERP Web 根地址与 Ozon 列表采集目标。目标仅统计命中选品规则且成功上报的商品。</p>
+            <p class="settings-description">配置 ERP Web 根地址，用于从插件进入管理中心。</p>
             <label class="field-label" for="erp-base-url">ERP Web 根地址</label>
             <NInput id="erp-base-url" v-model:value="erpBaseUrlDraft" type="text" placeholder="请输入 http 或 https 地址"
               clearable @keyup.enter="saveErpSettings" />
             <p class="settings-hint">仅支持不含账号密码、查询参数和锚点的 http/https 地址。</p>
-            <label class="field-label" for="ozon-list-target">Ozon 列表采集目标数量</label>
-            <NInputNumber id="ozon-list-target" v-model:value="ozonListTargetDraft" :min="1" :precision="0" :step="1"
-              placeholder="请输入目标数量" />
-            <p class="settings-hint">未命中规则或处理失败的商品不计入目标，默认 50。</p>
             <p v-if="settingsError" class="auth-error" role="alert">{{ settingsError }}</p>
             <NButton class="auth-submit" type="primary" block :loading="settingsSaving" @click="saveErpSettings">
               保存插件设置

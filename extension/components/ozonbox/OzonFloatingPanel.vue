@@ -29,7 +29,6 @@ defineProps<{
       <button id="ozon-profit-calculator" class="ant-btn ant-btn-primary ant-btn-block ant-btn-round" type="button">计算利润</button>
       <button id="ozon-pricing-tool" class="ant-btn ant-btn-default ant-btn-amber ant-btn-block ant-btn-round" type="button">定价工具</button>
       <button id="ozon-bind-cookie" class="ant-btn ant-btn-primary ant-btn-block ant-btn-round" type="button" aria-busy="false">绑定Cookie</button>
-      <button id="ozon-selection-settings" class="ant-btn ant-btn-default ant-btn-block ant-btn-round" type="button">设置选品</button>
       <button id="ozon-start-list-crawl" class="ant-btn ant-btn-primary ant-btn-block ant-btn-round" type="button" data-page="list">启动爬取</button>
       <div id="ozon-list-card-control" class="switch-control" data-page="list">
         <button id="ozon-list-card-switch" class="ant-switch" type="button" role="switch" aria-label="隐藏列表分析卡片" aria-checked="false">

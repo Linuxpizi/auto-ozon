@@ -1,3 +1,4 @@
+import copy
 import math
 from typing import Any
 
@@ -12,6 +13,15 @@ from app.schemas.panel_tools import (
     PanelListingPrepareRequest,
     PanelPricingInput,
     PanelPricingResult,
+)
+from app.services.upload_service import (
+    _first_present,
+    _merge_attribute_facts,
+    _merge_package_facts,
+    _serialize_tags,
+    _valid_http_urls,
+    _variant_video_urls,
+    draft_readiness_update,
 )
 
 
@@ -71,12 +81,27 @@ def _variant_identity(variant: Any) -> set[str]:
     }
 
 
-def _http_images(values: list[Any]) -> list[str]:
-    return [
-        str(value).strip()
-        for value in values
-        if str(value).strip().startswith(("http://", "https://"))
-    ]
+def _json_value(value: Any, *, exclude_unset: bool = False) -> Any:
+    """Convert Pydantic facts to JSON data without dropping allowed extras."""
+    if hasattr(value, "model_dump"):
+        return value.model_dump(
+            mode="json",
+            by_alias=True,
+            exclude_unset=exclude_unset,
+        )
+    return copy.deepcopy(value)
+
+
+def _json_list(values: Any, *, exclude_unset: bool = False) -> list[Any]:
+    if not isinstance(values, list):
+        return []
+    return [_json_value(value, exclude_unset=exclude_unset) for value in values]
+
+
+def _panel_tags(value: Any) -> str | None:
+    if isinstance(value, str):
+        return value.strip() or None
+    return _serialize_tags(value)
 
 
 def prepare_listing_draft(
@@ -120,22 +145,63 @@ def prepare_listing_draft(
     factual_variant = next(
         row for row in product.variants if primary.sku in _variant_identity(row)
     )
-    images = _http_images(primary.images if inp.follow_source_images else product.images)
+    editable_snapshot = primary.model_dump(mode="json", by_alias=True)
+    # exclude_unset is intentional: an explicitly collected empty video list owns
+    # emptiness, while an omitted video field may still fall back to product media.
+    factual_snapshot = factual_variant.model_dump(
+        mode="json",
+        by_alias=True,
+        exclude_unset=True,
+    )
+    selected_snapshot = {
+        **copy.deepcopy(factual_snapshot),
+        **copy.deepcopy(editable_snapshot),
+        "selectionIdentity": primary.sku,
+        "editableSkuSnapshot": copy.deepcopy(editable_snapshot),
+        "variantSnapshot": copy.deepcopy(factual_snapshot),
+    }
+    product_package = (
+        _json_value(product.package_facts, exclude_unset=True)
+        if product.package_facts is not None
+        else None
+    )
+    package_scalars, package_facts = _merge_package_facts(
+        factual_snapshot,
+        product_package,
+        product.ozon_metrics,
+    )
+    product_attribute_facts = _json_list(product.ozon_attribute_facts)
+    variant_attribute_facts = _first_present(
+        factual_snapshot,
+        ("ozonAttributeFacts", "ozon_attribute_facts"),
+    )
+    attribute_facts = _merge_attribute_facts(
+        product_attribute_facts,
+        variant_attribute_facts,
+    )
+    variant_owns_videos, selected_videos = _variant_video_urls(factual_snapshot)
+    video_urls = (
+        selected_videos
+        if variant_owns_videos
+        else _valid_http_urls([str(value) for value in product.video_urls])
+    )
+    images = _valid_http_urls(
+        [
+            str(value)
+            for value in (primary.images if inp.follow_source_images else product.images)
+        ]
+    )
     warnings: list[str] = []
     if len(selected) > 1:
         warnings.append("当前 UploadDraft 仅提交一个商品；已保留全部所选变体事实，首个变体驱动当前草稿")
-    dimensions = {
-        "weight": factual_variant.weight,
-        "height": factual_variant.height,
-        "depth": factual_variant.depth,
-        "width": factual_variant.width,
-    }
-    if any(value is None for value in dimensions.values()):
-        warnings.append("采集事实缺少完整包裹尺寸/重量；提交管线的默认值仍需人工复核")
+    if any(value is None for value in package_scalars.values()):
+        warnings.append(
+            "采集事实缺少完整包装尺寸/重量，补充有来源的包装数据或人工测量并填写修改原因后才能提交"
+        )
     if not images:
         warnings.append("所选图片中没有有效 HTTP(S) URL")
 
-    variants_json = [row.model_dump(mode="json", by_alias=False) for row in product.variants]
+    variants_json = _json_list(product.variants)
     draft = (
         db.query(UploadDraft)
         .filter(
@@ -167,11 +233,19 @@ def prepare_listing_draft(
     draft.old_price_rub = primary.old_price_rub
     draft.primary_image = images[0] if images else ""
     draft.images = images[:15]
-    draft.status = "ready"
-    draft.error_message = ""
-    for field, value in dimensions.items():
-        if value is not None:
-            setattr(draft, field, max(1, round(value)))
+    draft.barcode = str(_first_present(factual_snapshot, ("barcode",)) or "").strip()
+    # Explicit assignment (including None) prevents a repeated prepare from
+    # retaining stale dimensions. Factual refresh also invalidates old manual
+    # audits, which must never authorize a newly absent package value.
+    for field, value in package_scalars.items():
+        setattr(draft, field, value)
+    draft.selected_sku_snapshot = selected_snapshot
+    draft.package_facts = package_facts or None
+    draft.package_override_audit = None
+    draft.ozon_attribute_facts = attribute_facts or None
+    draft.video_urls = video_urls or None
+    draft.text_facts = _json_list(product.text_facts) or None
+    draft.ozon_metrics = copy.deepcopy(product.ozon_metrics)
     draft.ozonbox_record_name = product.record_name
     draft.ozonbox_product_id = product.product_id
     draft.ozonbox_source_url = str(product.source_url)
@@ -180,7 +254,7 @@ def prepare_listing_draft(
     draft.ozonbox_title_ru = product.title_ru
     draft.ozonbox_description = product.description
     draft.ozonbox_description_ru = product.description_ru
-    draft.ozonbox_tags = product.tags
+    draft.ozonbox_tags = _panel_tags(product.tags)
     draft.ozonbox_images = [str(value) for value in product.images]
     draft.ozonbox_price = product.price
     draft.ozonbox_specs = product.specs
@@ -190,6 +264,10 @@ def prepare_listing_draft(
     draft.ozonbox_category_id = product.category_id
     draft.ozonbox_type_id = product.type_id
     draft.ozonbox_description_category_id = product.description_category_id
+    readiness = draft_readiness_update(draft)
+    draft.status = readiness["status"]
+    draft.readiness_errors = readiness["readiness_errors"]
+    draft.error_message = readiness["error_message"]
     try:
         db.commit()
     except IntegrityError:
@@ -198,7 +276,7 @@ def prepare_listing_draft(
     db.refresh(draft)
     return PanelListingDraftResult(
         draftId=draft.id,
-        status="ready",
+        status=draft.status,
         offerId=draft.offer_id,
         selectedVariantCount=len(selected),
         warnings=warnings,

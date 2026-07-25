@@ -20,6 +20,7 @@ const CARD_OPERATION_SELECTOR = '[data-ozonbox-card-operation="true"]'
 const RECONCILE_DELAY_MS = 80
 const LIST_BATCH_SIZE = 4
 const LIST_BATCH_DELAY_MS = 300
+const OZON_STOREFRONT_HOSTS = new Set(['ozon.ru', 'www.ozon.ru', 'm.ozon.ru'])
 
 export type OzonAnalyticsPage =
   | { kind: 'detail'; sku: string }
@@ -190,7 +191,12 @@ export function cardProductContext(
     try {
       const url = new URL(href, baseUrl)
       const sku = extractOzonProductId(url.href)
-      if (!sku || !isOzonProductUrl(url.href)) continue
+      if (
+        !sku
+        || !/^[1-9]\d*$/.test(sku)
+        || !OZON_STOREFRONT_HOSTS.has(url.hostname.toLowerCase())
+        || !isOzonProductUrl(url.href)
+      ) continue
       url.search = ''
       url.hash = ''
       return { sku, sourceUrl: url.href }

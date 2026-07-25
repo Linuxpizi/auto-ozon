@@ -66,11 +66,42 @@ def test_browser_sync_http_preserves_brand_and_tags_in_selection_products(test_a
                             "sourcePath": "Ozon PDP characteristics",
                         },
                     ],
+                    "packageFacts": {
+                        "packageWeightG": 1250,
+                        "packageDepthMm": 300,
+                        "packageWidthMm": 200,
+                        "packageHeightMm": 100,
+                        "packagePhysicalProvenance": {
+                            "packageWeightG": {
+                                "source": "ozon_seller_analytics",
+                                "sourcePath": "seller.analytics.exactSku",
+                                "unknownEvidence": {"requestId": "req-1"},
+                            }
+                        },
+                    },
+                    "ozonAttributeFacts": [
+                        {
+                            "attributeId": 85,
+                            "scope": "product",
+                            "recognized": True,
+                            "publishable": True,
+                            "values": [{"dictionaryValueId": 1234, "value": "Черный"}],
+                            "provenance": {
+                                "source": "ozon_pdp_structured_data",
+                                "sourcePath": "page.attributeMeta",
+                            },
+                        }
+                    ],
                     "variants": [
                         {
                             "sku": "2268446233-complete",
                             "values": [{"name": "Цвет", "value": "Черный"}],
                             "images": ["https://cdn.example/variant.jpg"],
+                            "videoUrls": ["https://cdn.example/variant.mp4"],
+                            "packageWeightG": 1250,
+                            "packageDepthMm": 300,
+                            "packageWidthMm": 200,
+                            "packageHeightMm": 100,
                             "unknownNestedFact": {"keep": True},
                         },
                     ],
@@ -144,11 +175,44 @@ def test_browser_sync_http_preserves_brand_and_tags_in_selection_products(test_a
             "sourcePath": "Ozon PDP characteristics",
         },
     ]
+    assert product["package_facts"] == {
+        "packageWeightG": 1250,
+        "packageDepthMm": 300,
+        "packageWidthMm": 200,
+        "packageHeightMm": 100,
+        "packagePhysicalProvenance": {
+            "packageWeightG": {
+                "source": "ozon_seller_analytics",
+                "sourcePath": "seller.analytics.exactSku",
+                "unknownEvidence": {"requestId": "req-1"},
+            }
+        },
+    }
+    assert product["ozon_attribute_facts"] == [
+        {
+            "attributeId": 85,
+            "scope": "product",
+            "recognized": True,
+            "publishable": True,
+            "values": [{"dictionaryValueId": 1234, "value": "Черный"}],
+            "provenance": {
+                "source": "ozon_pdp_structured_data",
+                "sourcePath": "page.attributeMeta",
+            },
+        }
+    ]
+    # Text facts remain display facts and are never inferred into Ozon attribute IDs.
+    assert {fact["attributeId"] for fact in product["ozon_attribute_facts"]} == {85}
     assert product["variants"] == [
         {
             "sku": "2268446233-complete",
             "values": [{"name": "Цвет", "value": "Черный"}],
             "images": ["https://cdn.example/variant.jpg"],
+            "videoUrls": ["https://cdn.example/variant.mp4"],
+            "packageWeightG": 1250,
+            "packageDepthMm": 300,
+            "packageWidthMm": 200,
+            "packageHeightMm": 100,
             "unknownNestedFact": {"keep": True},
         },
     ]
@@ -180,6 +244,8 @@ def test_schema_normalizes_extension_payload() -> None:
             "skuList": '[{"sku":"SKU-1","barcode":"460000000001"}]',
             "facts": '[{"name":"Color","value":"Black","sourcePath":"BCS card"}]',
             "variants": '[{"sku":"SKU-1","values":[{"name":"Color","value":"Black"}]}]',
+            "packageFacts": '{"packageWeightG":1250,"packageDepthMm":300}',
+            "ozonAttributeFacts": '[{"attributeId":85,"scope":"product","recognized":true,"publishable":true,"values":[{"value":"Black"}],"provenance":{"source":"ozon_pdp_structured_data"}}]',
             "scrapedAt": "2026-07-18T12:00:00Z",
         }
     )
@@ -196,6 +262,8 @@ def test_schema_normalizes_extension_payload() -> None:
     assert product.variants == [
         {"sku": "SKU-1", "values": [{"name": "Color", "value": "Black"}]}
     ]
+    assert product.package_facts == {"packageWeightG": 1250, "packageDepthMm": 300}
+    assert product.ozon_attribute_facts[0]["attributeId"] == 85
     assert isinstance(product.scraped_at, datetime)
     assert product.scraped_at.isoformat() == "2026-07-18T12:00:00+00:00"
 
@@ -510,3 +578,209 @@ def test_bulk_upsert_keeps_variant_commerce_and_values_isolated_by_sku(test_db) 
             "offerId": "OFFER-BLUE-L",
         },
     }
+
+
+def test_bulk_upsert_losslessly_enriches_package_attribute_and_nested_sku_facts(test_db) -> None:
+    initial = ScrapedProductCreate.model_validate(
+        {
+            "platform": "ozon",
+            "sourceId": "fidelity-1001",
+            "selectedSku": "SKU-EXACT",
+            "facts": [
+                {
+                    "name": "Материал",
+                    "value": "Сталь",
+                    "sourcePath": "PDP characteristics",
+                    "provenance": {"source": "ozon_pdp_characteristic"},
+                    "unknownEvidence": {"selector": "#material"},
+                }
+            ],
+            "packageFacts": {
+                "packageWeightG": 1250,
+                "packageDepthMm": 300,
+                "packagePhysicalProvenance": {
+                    "packageWeightG": {
+                        "source": "ozon_seller_analytics",
+                        "sourcePath": "analytics.exactSku",
+                        "raw": {"weight": "1.25 kg"},
+                    }
+                },
+            },
+            "ozonAttributeFacts": [
+                {
+                    "attributeId": 85,
+                    "scope": "product",
+                    "recognized": True,
+                    "publishable": True,
+                    "values": [
+                        {"dictionaryValueId": 1234, "value": "Черный", "raw": {"id": "1234"}}
+                    ],
+                    "provenance": {"source": "ozon_pdp_structured_data"},
+                },
+                {
+                    "attributeId": 900,
+                    "scope": "sku",
+                    "complexGroupId": "media-1",
+                    "recognized": True,
+                    "publishable": True,
+                    "values": [{"value": "Первый"}],
+                    "provenance": {"source": "ozon_pdp_structured_data"},
+                },
+            ],
+            "variants": [
+                {
+                    "sku": "SKU-EXACT",
+                    "values": [
+                        {
+                            "name": "Цвет",
+                            "value": "Черный",
+                            "sourcePath": "offer selector",
+                            "unknownEvidence": {"nodeId": "color-black"},
+                        }
+                    ],
+                    "images": ["https://cdn.example/exact-1.jpg"],
+                    "videoUrls": ["https://cdn.example/exact-1.mp4"],
+                    "packageWeightG": 1250,
+                    "packageDepthMm": 300,
+                    "unknownNestedFact": {"keep": True},
+                }
+            ],
+        }
+    )
+    record = bulk_create_scraped_products(test_db, [initial])[0]
+
+    enrichment = ScrapedProductCreate.model_validate(
+        {
+            "platform": "ozon",
+            "sourceId": "fidelity-1001",
+            "facts": [
+                {
+                    "name": "материал",
+                    "value": "сталь",
+                    "capturedAt": "2026-07-25T01:00:00Z",
+                },
+                {
+                    "name": "Маркетинговое имя без Ozon ID",
+                    "value": "Не превращать в attributeId",
+                    "sourcePath": "PDP text",
+                },
+            ],
+            "packageFacts": {
+                "packageWidthMm": 200,
+                "packageHeightMm": 100,
+                "packagePhysicalProvenance": {
+                    "packageWeightG": {"capturedAt": "2026-07-25T01:00:00Z"},
+                    "packageWidthMm": {
+                        "source": "ozon_seller_variant_package",
+                        "sourcePath": "variant.width",
+                    },
+                    "packageHeightMm": {
+                        "source": "ozon_seller_variant_package",
+                        "sourcePath": "variant.height",
+                    },
+                },
+            },
+            "ozonAttributeFacts": [
+                {
+                    "attributeId": 85,
+                    "scope": "product",
+                    "recognized": True,
+                    "publishable": True,
+                    "values": [
+                        {"dictionaryValueId": 1234, "value": "Черный", "confidence": 1.0},
+                        {"dictionaryValueId": 5678, "value": "Графит"},
+                    ],
+                    "provenance": {
+                        "source": "ozon_pdp_structured_data",
+                        "capturedAt": "2026-07-25T01:00:00Z",
+                    },
+                }
+            ],
+            "variants": [
+                {
+                    "sku": "SKU-EXACT",
+                    "values": [
+                        {
+                            "name": "Цвет",
+                            "value": "Черный",
+                            "provenance": {"source": "ozon_pdp_structured_data"},
+                        }
+                    ],
+                    "images": ["https://cdn.example/exact-2.jpg"],
+                    "videoUrls": ["https://cdn.example/exact-2.mp4"],
+                    "packageWidthMm": 200,
+                    "packageHeightMm": 100,
+                }
+            ],
+        }
+    )
+    assert bulk_create_scraped_products(test_db, [enrichment]) == [record]
+    test_db.refresh(record)
+
+    assert record.package_facts == {
+        "packageWeightG": 1250,
+        "packageDepthMm": 300,
+        "packageWidthMm": 200,
+        "packageHeightMm": 100,
+        "packagePhysicalProvenance": {
+            "packageWeightG": {
+                "source": "ozon_seller_analytics",
+                "sourcePath": "analytics.exactSku",
+                "raw": {"weight": "1.25 kg"},
+                "capturedAt": "2026-07-25T01:00:00Z",
+            },
+            "packageWidthMm": {
+                "source": "ozon_seller_variant_package",
+                "sourcePath": "variant.width",
+            },
+            "packageHeightMm": {
+                "source": "ozon_seller_variant_package",
+                "sourcePath": "variant.height",
+            },
+        },
+    }
+    assert record.facts[0]["unknownEvidence"] == {"selector": "#material"}
+    assert record.facts[0]["capturedAt"] == "2026-07-25T01:00:00Z"
+    assert record.facts[1]["name"] == "Маркетинговое имя без Ozon ID"
+    assert len(record.ozon_attribute_facts) == 2
+    assert {fact["attributeId"] for fact in record.ozon_attribute_facts} == {85, 900}
+    standard = next(fact for fact in record.ozon_attribute_facts if fact["attributeId"] == 85)
+    assert standard["values"] == [
+        {
+            "dictionaryValueId": 1234,
+            "value": "Черный",
+            "raw": {"id": "1234"},
+            "confidence": 1.0,
+        },
+        {"dictionaryValueId": 5678, "value": "Графит"},
+    ]
+    complex_fact = next(fact for fact in record.ozon_attribute_facts if fact["attributeId"] == 900)
+    assert complex_fact["complexGroupId"] == "media-1"
+
+    exact_variant = record.variants[0]
+    assert exact_variant["images"] == [
+        "https://cdn.example/exact-1.jpg",
+        "https://cdn.example/exact-2.jpg",
+    ]
+    assert exact_variant["videoUrls"] == [
+        "https://cdn.example/exact-1.mp4",
+        "https://cdn.example/exact-2.mp4",
+    ]
+    assert exact_variant["unknownNestedFact"] == {"keep": True}
+    assert exact_variant["values"][0]["unknownEvidence"] == {"nodeId": "color-black"}
+    assert exact_variant["values"][0]["provenance"] == {
+        "source": "ozon_pdp_structured_data"
+    }
+    assert exact_variant["packageWeightG"] == 1250
+    assert exact_variant["packageDepthMm"] == 300
+    assert exact_variant["packageWidthMm"] == 200
+    assert exact_variant["packageHeightMm"] == 100
+
+    persisted = (
+        test_db.query(ScrapedProductRecord)
+        .filter(ScrapedProductRecord.source_id == "fidelity-1001")
+        .one()
+    )
+    assert persisted.package_facts == record.package_facts
+    assert persisted.ozon_attribute_facts == record.ozon_attribute_facts
+    assert all("attributeId" not in fact for fact in persisted.facts)

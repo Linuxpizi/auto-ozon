@@ -34,10 +34,13 @@ import {
 } from '@/lib/ozonbox/panel-tools-mock'
 import { toSelectionProduct } from '@/lib/ozonbox/selection-product'
 import { buildOzonSelectionCandidate, matchSelectionRules } from '@/lib/ozonbox/selection-matcher'
+import { assertOzonListCrawlProcessConfig } from '@/lib/ozonbox/list-crawl-contract'
+import { retainExactRequestedSkuVariant } from '@/lib/ozonbox/list-crawl-product'
 import {
   analyticsItemForExactSku,
   collectedProductAnalyticsSku,
-  mergeExactSkuAnalyticsBrand,
+  fetchOzonAnalyticsItem,
+  mergeExactSkuAnalyticsProduct,
   normalizeAnalyticsItem,
 } from '@/lib/ozonbox/seller-analytics'
 import type { OzonboxAnalyticsItem } from '@/lib/ozonbox/seller-analytics'
@@ -311,15 +314,37 @@ async function processExactCardProduct(
   request: OzonboxProcessCardProductRequest,
 ): Promise<OzonboxProcessCardProductResponse> {
   const identity = exactCardProductIdentity(request)
+  const processConfig = assertOzonListCrawlProcessConfig(request.config)
   if (!(await isAuthenticated())) throw new Error(authRequired().error)
 
-  const enabledRules = (await listPanelSelectionRules()).filter(rule => rule.enabled)
+  if (processConfig.selectionRuleIds.length === 0) {
+    return {
+      success: true,
+      outcome: 'skipped',
+      reason: 'no-selected-rules',
+      sku: identity.sku,
+      matchedRuleIds: [],
+      created: 0,
+      skipped: 1,
+    }
+  }
+  const rules = await listPanelSelectionRules()
+  const rulesById = new Map(rules.map(rule => [rule.id, rule]))
+  const selectedRules = processConfig.selectionRuleIds.map((id) => {
+    const rule = rulesById.get(id)
+    if (!rule) throw new Error(`本次启动选择的选品规则 ${id} 不存在`)
+    if (!rule.enabled) throw new Error(`本次启动选择的选品规则“${rule.name}”已停用`)
+    return rule
+  })
 
   const facts = await withExactCardProductTab(identity, async (tabId) => {
-    const product = assertExactCollectedCardIdentity(
+    const collectedProduct = assertExactCollectedCardIdentity(
       await collectOzonProductInTab(tabId, { enrichFromSeller: false }),
       identity.sku,
     )
+    const product = processConfig.collectVariants
+      ? collectedProduct
+      : retainExactRequestedSkuVariant(collectedProduct, identity.sku)
     const analyticsSku = collectedProductAnalyticsSku(product) ?? identity.sku
     const [analytics, rubToCny, sellerOffers] = await Promise.all([
       fetchExactSellerAnalyticsItem(analyticsSku),
@@ -329,15 +354,23 @@ async function processExactCardProduct(
     return { product, analytics, rubToCny, sellerOffers }
   })
 
-  let matchedRules: Array<{ id: number }> = []
-  if (enabledRules.length) {
-    const candidate = buildOzonSelectionCandidate({
-      product: facts.product,
-      analytics: facts.analytics,
-      rubToCny: facts.rubToCny,
-      sellerOffers: facts.sellerOffers,
-    })
-    matchedRules = matchSelectionRules(candidate, enabledRules)
+  const candidate = buildOzonSelectionCandidate({
+    product: facts.product,
+    analytics: facts.analytics,
+    rubToCny: facts.rubToCny,
+    sellerOffers: facts.sellerOffers,
+  })
+  const matchedRules = matchSelectionRules(candidate, selectedRules)
+  if (matchedRules.length === 0) {
+    return {
+      success: true,
+      outcome: 'skipped',
+      reason: 'no-rule-match',
+      sku: identity.sku,
+      matchedRuleIds: [],
+      created: 0,
+      skipped: 1,
+    }
   }
 
   if (!(await checkBackendHealth())) throw new Error('后端不可用,请检查 backend 是否运行')
@@ -843,20 +876,15 @@ async function collectOzonProductInTab(
   }
   const product = collectedOzonProduct(response)
   if (!enrichFromSeller) return product
-  if (typeof product.brand === 'string' && product.brand.trim()) return product
 
   const sku = collectedProductAnalyticsSku(product)
   if (!sku) return product
   try {
     const sellerId = await readOzonSellerId()
-    const analytics = await fetchSellerAnalytics(sku, sellerId)
-    if (!analytics.ok) {
-      console.warn(`Ozon seller analytics 品牌补充失败（HTTP ${analytics.status}），保留 PDP 采集结果`)
-      return product
-    }
-    return mergeExactSkuAnalyticsBrand(product, analytics.data, sku)
+    const analyticsItem = await fetchOzonAnalyticsItem(sku, sellerId)
+    return analyticsItem ? mergeExactSkuAnalyticsProduct(product, analyticsItem, sku) : product
   } catch (error: unknown) {
-    console.warn('Ozon seller analytics 品牌补充不可用，保留 PDP 采集结果', error)
+    console.warn('Ozon seller analytics 精确 SKU 富化不可用，保留 PDP 采集结果', error)
     return product
   }
 }

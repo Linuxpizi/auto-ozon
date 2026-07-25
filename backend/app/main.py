@@ -108,13 +108,15 @@ def _ensure_scraped_product_columns():
             logger.info("DB migration: added column %s %s", column.name, typedef)
         list_json_columns = [
             "images", "video_urls", "sku_list", "variants", "spec_list", "facts",
-            "tags", "color_list", "price_ranges", "matched_suppliers",
+            "tags", "color_list", "ozon_attribute_facts", "price_ranges", "matched_suppliers",
         ]
         for column_name in list_json_columns:
             if column_name in existing or column_name in {c.name for c in ScrapedProductRecord.__table__.columns}:
                 cur.execute(f"UPDATE scraped_product_records SET {column_name} = '[]' WHERE {column_name} IS NULL")
-        if "ozon_metrics" in existing or "ozon_metrics" in {c.name for c in ScrapedProductRecord.__table__.columns}:
-            cur.execute("UPDATE scraped_product_records SET ozon_metrics = '{}' WHERE ozon_metrics IS NULL")
+        dict_json_columns = ["ozon_metrics", "package_facts"]
+        for column_name in dict_json_columns:
+            if column_name in existing or column_name in {c.name for c in ScrapedProductRecord.__table__.columns}:
+                cur.execute(f"UPDATE scraped_product_records SET {column_name} = '{{}}' WHERE {column_name} IS NULL")
 
         # 商品属性链路已移除；同步清理旧数据库中的持久化字段。
         retired_columns = {

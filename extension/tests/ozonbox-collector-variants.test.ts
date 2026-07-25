@@ -8,6 +8,8 @@ import {
   readOfferSelectorGraph,
   readOzonVariantFacts,
 } from '../lib/ozonbox/collector'
+import type { OzonboxCollectedProduct } from '../lib/ozonbox/contract'
+import { retainExactRequestedSkuVariant } from '../lib/ozonbox/list-crawl-product'
 import { toSelectionProduct } from '../lib/ozonbox/selection-product'
 import {
   analyticsBrandForExactSku,
@@ -117,16 +119,104 @@ assert.deepEqual(normalizeSellerVariantPackage({
 }), {
   dimension_mm: { length: 119, width: 110, height: 16 },
   weight_g: 16,
+  packageFacts: {
+    packageWeightG: 16,
+    packageDepthMm: 119,
+    packageWidthMm: 110,
+    packageHeightMm: 16,
+    packagePhysicalProvenance: {
+      packageWeightG: {
+        source: 'ozon_seller_variant_package',
+        sourcePath: 'seller.create-bundle-by-variant-id.item.weight',
+      },
+      packageDepthMm: {
+        source: 'ozon_seller_variant_package',
+        sourcePath: 'seller.create-bundle-by-variant-id.item.depth',
+      },
+      packageWidthMm: {
+        source: 'ozon_seller_variant_package',
+        sourcePath: 'seller.create-bundle-by-variant-id.item.width',
+      },
+      packageHeightMm: {
+        source: 'ozon_seller_variant_package',
+        sourcePath: 'seller.create-bundle-by-variant-id.item.height',
+      },
+    },
+  },
 })
 assert.deepEqual(normalizeSellerVariantPackage({
   item: { depth: '119', width: '110', height: '16', weight: '16' },
 }), {
   dimension_mm: { length: 119, width: 110, height: 16 },
   weight_g: 16,
+  packageFacts: {
+    packageWeightG: 16,
+    packageDepthMm: 119,
+    packageWidthMm: 110,
+    packageHeightMm: 16,
+    packagePhysicalProvenance: {
+      packageWeightG: {
+        source: 'ozon_seller_variant_package',
+        sourcePath: 'seller.create-bundle-by-variant-id.item.weight',
+      },
+      packageDepthMm: {
+        source: 'ozon_seller_variant_package',
+        sourcePath: 'seller.create-bundle-by-variant-id.item.depth',
+      },
+      packageWidthMm: {
+        source: 'ozon_seller_variant_package',
+        sourcePath: 'seller.create-bundle-by-variant-id.item.width',
+      },
+      packageHeightMm: {
+        source: 'ozon_seller_variant_package',
+        sourcePath: 'seller.create-bundle-by-variant-id.item.height',
+      },
+    },
+  },
 })
 assert.deepEqual(normalizeSellerVariantPackage({
   item: { depth: 119, width: 110, weight: 16 },
-}), { weight_g: 16 })
+}), {
+  weight_g: 16,
+  packageFacts: {
+    packageWeightG: 16,
+    packageDepthMm: 119,
+    packageWidthMm: 110,
+    packagePhysicalProvenance: {
+      packageWeightG: {
+        source: 'ozon_seller_variant_package',
+        sourcePath: 'seller.create-bundle-by-variant-id.item.weight',
+      },
+      packageDepthMm: {
+        source: 'ozon_seller_variant_package',
+        sourcePath: 'seller.create-bundle-by-variant-id.item.depth',
+      },
+      packageWidthMm: {
+        source: 'ozon_seller_variant_package',
+        sourcePath: 'seller.create-bundle-by-variant-id.item.width',
+      },
+    },
+  },
+})
+const partialSellerPackage = normalizeSellerVariantPackage({ item: { weight: 77, width: 88 } })
+assert.equal('dimension_mm' in partialSellerPackage, false)
+assert.deepEqual(partialSellerPackage, {
+  weight_g: 77,
+  packageFacts: {
+    packageWeightG: 77,
+    packageWidthMm: 88,
+    packagePhysicalProvenance: {
+      packageWeightG: {
+        source: 'ozon_seller_variant_package',
+        sourcePath: 'seller.create-bundle-by-variant-id.item.weight',
+      },
+      packageWidthMm: {
+        source: 'ozon_seller_variant_package',
+        sourcePath: 'seller.create-bundle-by-variant-id.item.width',
+      },
+    },
+  },
+})
 assert.deepEqual(normalizeAnalyticsItem({ depth: 119, width: 110, height: 16, weight: 16 }), {
   depth: 119,
   width: 110,
@@ -463,10 +553,28 @@ assert.deepEqual(richVariant, {
     { name: '适用场景', value: 'Дом / офис' },
   ],
   variantAttrs: { 'Объем, мл': '3' },
-  depth: 300,
-  width: 200,
-  height: 100,
-  weight: 1250,
+  packageWeightG: 1250,
+  packageDepthMm: 300,
+  packageWidthMm: 200,
+  packageHeightMm: 100,
+  packagePhysicalProvenance: {
+    packageWeightG: {
+      source: 'ozon_pdp_characteristic',
+      sourcePath: 'pdp.characteristics[Вес товара с упаковкой]',
+    },
+    packageDepthMm: {
+      source: 'ozon_pdp_characteristic',
+      sourcePath: 'pdp.characteristics[Размер упаковки, см]',
+    },
+    packageWidthMm: {
+      source: 'ozon_pdp_characteristic',
+      sourcePath: 'pdp.characteristics[Размер упаковки, см]',
+    },
+    packageHeightMm: {
+      source: 'ozon_pdp_characteristic',
+      sourcePath: 'pdp.characteristics[Размер упаковки, см]',
+    },
+  },
 })
 
 const richVariantTags = readFactualTags(richVariant.supplierAttrs)
@@ -475,6 +583,45 @@ assert.deepEqual(richVariantTags, [
   'Минимализм, скандинавский',
   'Дом / офис',
 ])
+
+const exactIdentityVariants = [
+  { ...richVariant, id: '101', productId: '201', sku: '301', offerId: '401' },
+  { ...richVariant, id: '102', productId: '202', sku: '302', offerId: '402' },
+  { ...richVariant, id: '103', productId: '203', sku: '303', offerId: '403' },
+]
+const exactVariantProduct: OzonboxCollectedProduct = {
+  source: 'OZON',
+  sourceUrl: CURRENT_URL,
+  productId: CURRENT_PRODUCT_ID,
+  recordName: 'Exact requested SKU fixture',
+  sku: '301',
+  title: 'Exact requested SKU fixture',
+  description: 'Facts outside variants must survive filtering',
+  images: richVariant.images,
+  price: 1299,
+  specs: richVariant.supplierAttrs,
+  variantsData: exactIdentityVariants,
+  variantAttrIds: [101],
+  status: 'draft',
+}
+
+for (const [requestedSku, expectedVariant] of [
+  ['101', exactIdentityVariants[0]],
+  ['202', exactIdentityVariants[1]],
+  ['303', exactIdentityVariants[2]],
+] as const) {
+  const retained = retainExactRequestedSkuVariant(exactVariantProduct, requestedSku)
+  assert.notEqual(retained, exactVariantProduct)
+  assert.notEqual(retained.variantsData, exactVariantProduct.variantsData)
+  assert.deepEqual(retained.variantsData, [expectedVariant])
+  assert.equal(retained.title, exactVariantProduct.title)
+  assert.equal(retained.description, exactVariantProduct.description)
+  assert.equal(retained.specs, exactVariantProduct.specs)
+}
+assert.equal(exactVariantProduct.variantsData.length, 3)
+assert.deepEqual(exactVariantProduct.variantsData, exactIdentityVariants)
+assert.throws(() => retainExactRequestedSkuVariant(exactVariantProduct, '401'), /缺少当前 SKU 401 的真实变体/)
+assert.throws(() => retainExactRequestedSkuVariant(exactVariantProduct, '999'), /缺少当前 SKU 999 的真实变体/)
 
 const richOzonMetrics = {
   sku: 'SKU-RICH-1',
@@ -572,9 +719,14 @@ assert.deepEqual(normalizedProduct.videoUrls, [
 ])
 assert.deepEqual(normalizedProduct.colorList, ['Черный'])
 assert.deepEqual(normalizedProduct.facts, richVariant.supplierAttrs.map((item) => ({
+  ...item,
   name: item.name ?? item.label,
   value: item.value,
   sourcePath: 'Ozon PDP characteristics',
+  provenance: {
+    source: 'ozon_pdp_characteristic',
+    sourcePath: 'Ozon PDP characteristics',
+  },
 })).filter((item) => typeof item.name === 'string'))
 assert.deepEqual(normalizedProduct.tags, [
   'Подарок на день рождения',
@@ -592,10 +744,11 @@ assert.deepEqual(normalizedProduct.variants, [{
   images: richVariant.images,
   imageUrl: richVariant.images[0],
   videoUrls: richVariant.videos,
-  weight: 1250,
-  depth: 300,
-  width: 200,
-  height: 100,
+  packageWeightG: 1250,
+  packageDepthMm: 300,
+  packageWidthMm: 200,
+  packageHeightMm: 100,
+  packagePhysicalProvenance: richVariant.packagePhysicalProvenance,
   sourceUrl: CURRENT_URL,
   productId: CURRENT_PRODUCT_ID,
   offerId: 'OFFER-RICH-1',
@@ -603,6 +756,187 @@ assert.deepEqual(normalizedProduct.variants, [{
   variantAttrs: { 'Объем, мл': '3' },
   sourcePath: 'Ozon PDP offer selector / structured data',
 }])
+assert.deepEqual(normalizedProduct.packageFacts, {
+  packageWeightG: 1250,
+  packageDepthMm: 300,
+  packageWidthMm: 200,
+  packageHeightMm: 100,
+  packagePhysicalProvenance: richVariant.packagePhysicalProvenance,
+})
+assert.deepEqual(normalizedProduct.specList, [{
+  package_weight_g: 1250,
+  package_depth_mm: 300,
+  package_width_mm: 200,
+  package_height_mm: 100,
+  package_physical_provenance: richVariant.packagePhysicalProvenance,
+}])
+for (const itemField of ['weight_g', 'depth_mm', 'width_mm', 'height_mm']) {
+  assert.equal(itemField in normalizedProduct.specList[0]!, false)
+}
+
+const productAttributeFact = {
+  attributeId: 85,
+  values: [{ dictionaryValueId: 971082, value: 'Черный', localized: { ru: 'Черный' } }],
+  scope: 'product' as const,
+  recognized: true,
+  publishable: true,
+  provenance: {
+    source: 'ozon_pdp_structured_data' as const,
+    sourcePath: 'pdp.ozonAttributes[85]',
+    raw: { attributeName: 'Цвет' },
+  },
+  extraStructuredMetadata: { complex: false },
+}
+const skuAttributeFact = {
+  attributeId: 9048,
+  values: [{ value: '3 мл', rawValue: 3 }],
+  unit: 'мл',
+  scope: 'sku' as const,
+  complexGroupId: 'volume-group',
+  recognized: true,
+  publishable: true,
+  provenance: {
+    source: 'ozon_pdp_structured_data' as const,
+    sourcePath: 'pdp.variants[SKU-FIDELITY].ozonAttributes[9048]',
+  },
+}
+const fidelityVariant = {
+  ...richVariant,
+  productId: `${CURRENT_PRODUCT_ID}1`,
+  sku: 'SKU-FIDELITY',
+  offerId: 'OFFER-FIDELITY',
+  weight: 999,
+  depth: 998,
+  width: 997,
+  height: 996,
+  packageWeightG: 1500,
+  packageDepthMm: 310,
+  packageWidthMm: 210,
+  packageHeightMm: 110,
+  packagePhysicalProvenance: {
+    packageWeightG: { source: 'ozon_seller_analytics', sourcePath: 'analytics.exactSku.packageWeightG' },
+    packageDepthMm: { source: 'ozon_seller_analytics', sourcePath: 'analytics.exactSku.packageDepthMm' },
+    packageWidthMm: { source: 'ozon_seller_analytics', sourcePath: 'analytics.exactSku.packageWidthMm' },
+    packageHeightMm: { source: 'ozon_seller_analytics', sourcePath: 'analytics.exactSku.packageHeightMm' },
+  },
+  videos: [...(richVariant.videos ?? []), 'https://cdn.example/video/sku-fidelity.mp4'],
+  ozonAttributeFacts: [skuAttributeFact],
+  unknownVariantPayload: { seller: { warehouseCode: 'WH-LOSSLESS' } },
+}
+const factualText = {
+  name: 'Пользовательский факт',
+  value: 'Должен сохраниться только как текстовый факт',
+  confidence: 0.91,
+  raw: { localizedName: 'Custom fact', flags: ['display-only'] },
+  provenance: {
+    source: 'ozon_pdp_characteristic' as const,
+    sourcePath: 'pdp.characteristics[Пользовательский факт]',
+  },
+}
+const fidelityProduct = assertCompleteProduct(toSelectionProduct({
+  source: 'OZON',
+  sourceUrl: CURRENT_URL,
+  productId: `${CURRENT_PRODUCT_ID}1`,
+  recordName: 'Lossless fidelity fixture',
+  sku: 'SKU-FIDELITY',
+  title: 'Lossless fidelity fixture',
+  images: richVariant.images,
+  price: 1299,
+  specs: [],
+  textFacts: [factualText],
+  packageFacts: {
+    packageWeightG: 1500,
+    packageDepthMm: 310,
+    packageWidthMm: 210,
+    packageHeightMm: 110,
+    packagePhysicalProvenance: fidelityVariant.packagePhysicalProvenance,
+  },
+  ozonAttributeFacts: [productAttributeFact],
+  variantsData: [fidelityVariant],
+  variantAttrIds: [9048],
+  status: 'draft',
+}))
+assert.deepEqual(fidelityProduct.packageFacts, {
+  packageWeightG: 1500,
+  packageDepthMm: 310,
+  packageWidthMm: 210,
+  packageHeightMm: 110,
+  packagePhysicalProvenance: fidelityVariant.packagePhysicalProvenance,
+})
+assert.deepEqual(fidelityProduct.specList, [{
+  package_weight_g: 1500,
+  package_depth_mm: 310,
+  package_width_mm: 210,
+  package_height_mm: 110,
+  package_physical_provenance: fidelityVariant.packagePhysicalProvenance,
+}])
+assert.deepEqual(fidelityProduct.facts, [factualText])
+assert.deepEqual(fidelityProduct.ozonAttributeFacts, [productAttributeFact])
+assert.deepEqual(fidelityProduct.variants[0]?.ozonAttributeFacts, [skuAttributeFact])
+assert.deepEqual(fidelityProduct.variants[0]?.videoUrls, fidelityVariant.videos)
+assert.equal(fidelityProduct.ozonAttributeFacts?.some((fact) => fact.attributeId === 85), true)
+assert.equal(fidelityProduct.ozonAttributeFacts?.some((fact) => JSON.stringify(fact).includes(factualText.value)), false)
+
+const explicitUnknownSourceVariant = {
+  ...fidelityVariant,
+  productId: `${CURRENT_PRODUCT_ID}2`,
+  sku: 'SKU-UNKNOWN-SOURCE',
+  offerId: 'OFFER-UNKNOWN-SOURCE',
+  packageWeightG: 700,
+  packageDepthMm: 170,
+  packageWidthMm: 80,
+  packageHeightMm: 40,
+  packagePhysicalProvenance: undefined,
+}
+const explicitUnknownSourceProduct = assertCompleteProduct(toSelectionProduct({
+  source: 'OZON',
+  sourceUrl: CURRENT_URL,
+  productId: `${CURRENT_PRODUCT_ID}2`,
+  sku: 'SKU-UNKNOWN-SOURCE',
+  title: 'Explicit package facts without asserted source',
+  images: richVariant.images,
+  price: 1299,
+  specs: [],
+  variantsData: [explicitUnknownSourceVariant],
+  variantAttrIds: [],
+  status: 'draft',
+}))
+assert.deepEqual(explicitUnknownSourceProduct.packageFacts, {
+  packageWeightG: 700,
+  packageDepthMm: 170,
+  packageWidthMm: 80,
+  packageHeightMm: 40,
+})
+assert.equal('package_physical_provenance' in explicitUnknownSourceProduct.specList[0]!, false)
+
+assert.throws(() => toSelectionProduct({
+  source: 'OZON',
+  sourceUrl: CURRENT_URL,
+  productId: `${CURRENT_PRODUCT_ID}3`,
+  sku: 'SKU-CONFLICT',
+  title: 'Conflicting duplicate SKU package facts',
+  images: richVariant.images,
+  price: 1299,
+  specs: [],
+  variantsData: [
+    {
+      ...fidelityVariant,
+      productId: `${CURRENT_PRODUCT_ID}3`,
+      sku: 'SKU-CONFLICT',
+      offerId: 'OFFER-CONFLICT',
+      packageDepthMm: 310,
+    },
+    {
+      ...fidelityVariant,
+      productId: `${CURRENT_PRODUCT_ID}3`,
+      sku: 'SKU-CONFLICT',
+      offerId: 'OFFER-CONFLICT',
+      packageDepthMm: 311,
+    },
+  ],
+  variantAttrIds: [],
+  status: 'draft',
+}), /SKU-CONFLICT 对应了冲突的包装物理字段 packageDepthMm/)
 
 const malformedVariantAttrProduct = toSelectionProduct({
   source: 'OZON',

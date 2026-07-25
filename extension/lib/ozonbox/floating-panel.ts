@@ -11,6 +11,7 @@ import type {
 } from './contract'
 import { isRecord } from './contract'
 import { createFloatingPanelTools } from './floating-panel-tools'
+import type { OzonListCrawlStartConfig } from './list-crawl-contract'
 import { requirePanelToolData, type PanelPricingRoute, type PanelToolRequest } from './panel-tools-contract'
 import {
   clampOzonPanelPosition,
@@ -46,7 +47,7 @@ export interface OzonFloatingPanelOptions {
   setDetailCardsVisible?: (visible: boolean) => Promise<void>
   persistLauncherPosition?: (position: OzonPanelPosition) => Promise<void>
   collectAndSaveCurrentProduct?: () => Promise<OzonboxCollectAndSaveResult>
-  onStartListCrawl?: () => void | Promise<void>
+  onStartListCrawl?: (config: OzonListCrawlStartConfig) => void | Promise<void>
 }
 
 export interface SellerInteractionErrorState {
@@ -177,7 +178,6 @@ export function startOzonFloatingPanel(options: OzonFloatingPanelOptions = {}): 
   const profitButton = requiredElement<HTMLButtonElement>(shadow, 'ozon-profit-calculator')
   const pricingButton = requiredElement<HTMLButtonElement>(shadow, 'ozon-pricing-tool')
   const bindCookieButton = requiredElement<HTMLButtonElement>(shadow, 'ozon-bind-cookie')
-  const selectionButton = requiredElement<HTMLButtonElement>(shadow, 'ozon-selection-settings')
   const startListCrawlButton = requiredElement<HTMLButtonElement>(shadow, 'ozon-start-list-crawl')
   const listCardControl = requiredElement<HTMLElement>(shadow, 'ozon-list-card-control')
   const detailCardControl = requiredElement<HTMLElement>(shadow, 'ozon-detail-card-control')
@@ -514,8 +514,11 @@ export function startOzonFloatingPanel(options: OzonFloatingPanelOptions = {}): 
   listingButton.addEventListener('click', () => panelTools.openListing({ source: listingButton }), { signal })
   profitButton.addEventListener('click', () => panelTools.openPricing('calculate2', { source: profitButton }), { signal })
   pricingButton.addEventListener('click', () => panelTools.openPricing('calculate', { source: pricingButton }), { signal })
-  selectionButton.addEventListener('click', () => panelTools.openSelection(selectionButton), { signal })
-  startListCrawlButton.addEventListener('click', () => { void options.onStartListCrawl?.() }, { signal })
+  startListCrawlButton.addEventListener('click', () => {
+    if (options.onStartListCrawl) {
+      panelTools.openListCrawl(startListCrawlButton, options.onStartListCrawl)
+    }
+  }, { signal })
   enterErpButton.addEventListener('click', () => {
     enterErpButton.disabled = true
     void openErpRoot().catch((error: unknown) => {

@@ -44,6 +44,8 @@ class ScrapedProductRecord(Base):
     facts = Column(JSON, default=list, comment="页面/API/BCS 采集事实 [{name, value, sourcePath}]")
     tags = Column(JSON, default=list, comment="由平台主题/风格/场景事实自动采集；允许用户修正")
     color_list = Column(JSON, default=list, comment="从事实与真实变体汇总的颜色列表")
+    package_facts = Column(JSON, default=dict, comment="当前选中 SKU 的包装物理事实与字段级来源")
+    ozon_attribute_facts = Column(JSON, default=list, comment="显式、可追溯的 Ozon 属性事实")
 
     # ── Ozon 内部分类 ──
     ozon_category_id = Column(Integer, default=0, comment="Ozon description_category_id")

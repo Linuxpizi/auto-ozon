@@ -2,6 +2,7 @@ import {
   startOzonAnalyticsCards,
   type OzonCardProductContext,
 } from '@/lib/ozonbox/analytics-card'
+import { mergeCardListingPackageFacts } from '@/lib/ozonbox/card-listing-product'
 import { collectCurrentOzonProduct } from '@/lib/ozonbox/collector'
 import {
   assertOzonboxCollectedProduct,
@@ -142,12 +143,34 @@ export default defineContentScript({
       return floatingPanel
     }
 
+    const requireAnalyticsCards = (): NonNullable<typeof analyticsCards> => {
+      if (!analyticsCards) throw new Error('Ozon 商品分析卡片尚未就绪')
+      return analyticsCards
+    }
+
+    const prepareCurrentListingProduct = async (): Promise<OzonboxCollectedProduct> => {
+      const sku = extractOzonProductId(location.href)
+      if (!sku || !/^[1-9]\d*$/.test(sku)) {
+        throw new Error('当前页面缺少有效 Ozon 商品 SKU')
+      }
+      requireAnalyticsCards().requireDisplayedPackageFacts(sku)
+      const product = await collectCurrentOzonProduct()
+      if (extractOzonProductId(location.href) !== sku) {
+        throw new Error('商品采集期间当前 Ozon 商品详情页已发生变化')
+      }
+      const packageFacts = requireAnalyticsCards().requireDisplayedPackageFacts(sku)
+      return mergeCardListingPackageFacts(product, sku, packageFacts)
+    }
+
     analyticsCards = startOzonAnalyticsCards({
       initialState: panelState,
       persistCardVisibility: (visibility) => persistState(visibility),
       onCardListing: async (context) => {
+        requireAnalyticsCards().requireDisplayedPackageFacts(context.sku, context.sourceUrl)
         const product = await collectCardProduct(context)
-        requireFloatingPanel().openListingForProduct(product)
+        const packageFacts = requireAnalyticsCards().requireDisplayedPackageFacts(context.sku, context.sourceUrl)
+        const listingProduct = mergeCardListingPackageFacts(product, context.sku, packageFacts)
+        requireFloatingPanel().openListingForProduct(listingProduct)
       },
       onCardProfit: async (context) => {
         const product = await collectCardProduct(context)
@@ -165,6 +188,7 @@ export default defineContentScript({
       setListCardsHidden: analyticsCards.setListCardsHidden,
       setDetailCardsVisible: analyticsCards.setDetailCardsVisible,
       persistLauncherPosition: (launcherPosition) => persistState({ launcherPosition }),
+      prepareCurrentListingProduct,
       onStartListCrawl: (config) => listCrawler?.start(config),
     })
 

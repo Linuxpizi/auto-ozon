@@ -1,6 +1,6 @@
 import type { OzonboxCollectedProduct, OzonboxVariant } from './contract'
 
-function variantHasExactSku(variant: OzonboxVariant, sku: string): boolean {
+export function variantHasExactSku(variant: OzonboxVariant, sku: string): boolean {
   return [variant.id, variant.productId, variant.sku]
     .some(value => typeof value === 'string' && value.trim() === sku)
 }

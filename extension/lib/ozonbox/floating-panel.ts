@@ -47,6 +47,7 @@ export interface OzonFloatingPanelOptions {
   setDetailCardsVisible?: (visible: boolean) => Promise<void>
   persistLauncherPosition?: (position: OzonPanelPosition) => Promise<void>
   collectAndSaveCurrentProduct?: () => Promise<OzonboxCollectAndSaveResult>
+  prepareCurrentListingProduct?: () => Promise<OzonboxCollectedProduct>
   onStartListCrawl?: (config: OzonListCrawlStartConfig) => void | Promise<void>
 }
 
@@ -511,7 +512,32 @@ export function startOzonFloatingPanel(options: OzonFloatingPanelOptions = {}): 
   bindCookieButton.addEventListener('click', () => {
     void bindSellerCookies()
   }, { signal })
-  listingButton.addEventListener('click', () => panelTools.openListing({ source: listingButton }), { signal })
+  listingButton.addEventListener('click', () => {
+    if (listingButton.disabled) return
+    const prepareProduct = options.prepareCurrentListingProduct
+    if (!prepareProduct) {
+      showFailure('一键上架失败', new Error('当前页面未配置一键上架商品准备器'))
+      return
+    }
+
+    const idleText = listingButton.textContent
+    listingButton.disabled = true
+    listingButton.setAttribute('aria-busy', 'true')
+    listingButton.textContent = '采集中...'
+    void prepareProduct()
+      .then((product) => {
+        if (!stopped) panelTools.openListing({ source: listingButton, product })
+      })
+      .catch((error: unknown) => {
+        if (!stopped) showFailure('一键上架失败', error)
+      })
+      .finally(() => {
+        if (stopped) return
+        listingButton.disabled = false
+        listingButton.setAttribute('aria-busy', 'false')
+        listingButton.textContent = idleText
+      })
+  }, { signal })
   profitButton.addEventListener('click', () => panelTools.openPricing('calculate2', { source: profitButton }), { signal })
   pricingButton.addEventListener('click', () => panelTools.openPricing('calculate', { source: pricingButton }), { signal })
   startListCrawlButton.addEventListener('click', () => {

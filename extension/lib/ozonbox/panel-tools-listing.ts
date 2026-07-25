@@ -1,8 +1,8 @@
-import type { OzonboxCollectedProduct, OzonboxStore } from './contract'
+import type { OzonboxCollectedProduct, OzonboxStore, OzonboxVariant } from './contract'
 import type { PanelListingPreview, PanelListingStore, PanelListingVariant } from './panel-tools-contract'
 
 function productVariants(product: OzonboxCollectedProduct): PanelListingVariant[] {
-  const variants = product.variantsData.length
+  const variants: OzonboxVariant[] = product.variantsData.length
     ? product.variantsData
     : [{ sku: product.sku || product.productId, price: product.price, images: [], supplierAttrs: [], variantAttrs: {} }]
   return variants.map((variant, index) => ({
@@ -13,6 +13,10 @@ function productVariants(product: OzonboxCollectedProduct): PanelListingVariant[
     priceRub: variant.price || product.price,
     oldPriceRub: variant.oldPrice || Math.round((variant.price || product.price) * 1.2),
     images: variant.images?.length ? variant.images : product.images,
+    customWeightG: variant.packageWeightG,
+    packageLengthMm: variant.packageDepthMm,
+    packageWidthMm: variant.packageWidthMm,
+    packageHeightMm: variant.packageHeightMm,
     selected: index === 0,
   }))
 }

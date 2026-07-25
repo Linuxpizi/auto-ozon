@@ -3,6 +3,11 @@ import {
   renderAnalyticsItem,
   setAnalyticsStatus,
 } from './analytics-view'
+import type { PackagePhysicalSnapshot } from '../utils/types'
+import {
+  requireCardListingPackageFacts,
+  requireCompleteCardPackageFacts,
+} from './card-listing-product'
 import { readOzonCategoryPath } from './collector'
 import { analyticsCategoryName, fetchOzonAnalyticsItem, readOzonSellerId } from './seller-analytics'
 import { SuccessfulRequestCache } from './successful-request-cache'
@@ -30,6 +35,7 @@ export type OzonAnalyticsPage =
 export interface OzonAnalyticsCardsController {
   reconcile: () => void
   getCardVisibility: () => OzonCardVisibility
+  requireDisplayedPackageFacts: (sku: string, sourceUrl?: string) => PackagePhysicalSnapshot
   setListCardsHidden: (hidden: boolean) => Promise<void>
   setDetailCardsVisible: (visible: boolean) => Promise<void>
   stop: () => void
@@ -61,6 +67,11 @@ interface PendingListInsertion {
   context: OzonCardProductContext
 }
 
+interface DisplayedPackageSnapshot {
+  iframe: HTMLIFrameElement
+  facts: PackagePhysicalSnapshot
+}
+
 export function analyticsPageForUrl(value: string): OzonAnalyticsPage {
   if (isOzonProductUrl(value)) {
     const sku = extractOzonProductId(value)
@@ -89,6 +100,20 @@ function resolveSellerId(forceRefresh: boolean): Promise<string> {
   return sellerIdCache.get('seller-id', readOzonSellerId, forceRefresh)
 }
 
+function loadAnalyticsItem(sku: string, forceRefresh = false): Promise<{
+  shopId: string
+  item: Awaited<ReturnType<typeof fetchOzonAnalyticsItem>>
+}> {
+  return resolveSellerId(forceRefresh).then(async (shopId) => ({
+    shopId,
+    item: await analyticsItemCache.get(
+      `${shopId}:${sku}`,
+      () => fetchOzonAnalyticsItem(sku, shopId),
+      forceRefresh,
+    ),
+  }))
+}
+
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : 'Ozon analytics 加载失败'
 }
@@ -115,18 +140,18 @@ function updateAnalyticsIframe(
   sku: string,
   forceRefresh = false,
   categoryFallback?: () => string | undefined,
+  onRendered?: (
+    iframe: HTMLIFrameElement,
+    sku: string,
+    item: NonNullable<Awaited<ReturnType<typeof fetchOzonAnalyticsItem>>>,
+  ) => void,
 ): Promise<void> {
   const activeRequest = iframeRequests.get(iframe)
   if (activeRequest) return activeRequest
 
   setAnalyticsStatus(iframe, '加载中...')
-  const request = resolveSellerId(forceRefresh)
-    .then(async (shopId) => {
-      const item = await analyticsItemCache.get(
-        `${shopId}:${sku}`,
-        () => fetchOzonAnalyticsItem(sku, shopId),
-        forceRefresh,
-      )
+  const request = loadAnalyticsItem(sku, forceRefresh)
+    .then(({ shopId, item }) => {
       if (!iframeHasCurrentIdentity(iframe, sku)) return
       if (!item) {
         setAnalyticsStatus(iframe, `暂无数据（店铺ID: ${shopId}）`)
@@ -135,6 +160,7 @@ function updateAnalyticsIframe(
 
       const categoryName = analyticsCategoryName(item) ?? categoryFallback?.()
       renderAnalyticsItem(iframe, categoryName ? { ...item, categoryName } : item)
+      onRendered?.(iframe, sku, item)
     })
     .catch((error: unknown) => {
       if (iframeHasCurrentIdentity(iframe, sku)) setAnalyticsStatus(iframe, errorMessage(error))
@@ -223,7 +249,44 @@ export function startOzonAnalyticsCards(options: OzonAnalyticsCardsOptions = {})
     : { ...DEFAULT_OZON_CARD_VISIBILITY }
   const timers = new Set<number>()
   const insertionTimers = new Map<HTMLElement, PendingListInsertion>()
+  const displayedPackageFacts = new Map<string, DisplayedPackageSnapshot>()
   const eventAbortController = new AbortController()
+
+  const displayedFactsKey = (sku: string, sourceUrl?: string): string => (
+    sourceUrl ? `list:${sku}:${sourceUrl}` : `detail:${sku}`
+  )
+
+  const recordDisplayedPackageFacts = (
+    iframe: HTMLIFrameElement,
+    sku: string,
+    item: NonNullable<Awaited<ReturnType<typeof fetchOzonAnalyticsItem>>>,
+  ): void => {
+    const sourceUrl = iframe.dataset.type === 'lite' ? iframe.dataset.sourceUrl : undefined
+    if (iframe.dataset.type === 'lite' && !sourceUrl) {
+      throw new Error(`商品卡片 SKU ${sku} 缺少来源页面身份`)
+    }
+    displayedPackageFacts.set(
+      displayedFactsKey(sku, sourceUrl),
+      {
+        iframe,
+        facts: requireCardListingPackageFacts(item, sku),
+      },
+    )
+  }
+
+  const requireDisplayedPackageFacts = (sku: string, sourceUrl?: string): PackagePhysicalSnapshot => {
+    if (!/^[1-9]\d*$/.test(sku)) throw new Error('商品分析卡片缺少有效 SKU')
+    const snapshot = displayedPackageFacts.get(displayedFactsKey(sku, sourceUrl))
+    if (!snapshot) throw new Error(`商品分析卡片 SKU ${sku} 缺少已展示的包装长宽高重量事实`)
+
+    const { iframe, facts } = snapshot
+    const isCurrentFrame = iframeHasCurrentIdentity(iframe, sku)
+      && (sourceUrl
+        ? iframe.dataset.type === 'lite' && iframe.dataset.sourceUrl === sourceUrl
+        : iframe.dataset.type === 'detail')
+    if (!isCurrentFrame) throw new Error(`商品分析卡片 SKU ${sku} 尚未成功展示`)
+    return requireCompleteCardPackageFacts(facts, sku)
+  }
 
   const schedule = (callback: () => void, delay: number): number => {
     const timer = window.setTimeout(() => {
@@ -366,7 +429,7 @@ export function startOzonAnalyticsCards(options: OzonAnalyticsCardsOptions = {})
     const initialize = (): void => {
       if (initialized || stopped || !iframe.isConnected) return
       initialized = true
-      void updateAnalyticsIframe(iframe, sku, false, categoryFallback)
+      void updateAnalyticsIframe(iframe, sku, false, categoryFallback, recordDisplayedPackageFacts)
     }
     iframe.addEventListener('load', initialize, { once: true, signal: eventAbortController.signal })
     schedule(initialize, iframe.dataset.type === 'detail' ? 800 : 600)
@@ -467,6 +530,7 @@ export function startOzonAnalyticsCards(options: OzonAnalyticsCardsOptions = {})
     if (!samePage(previousPage, page)) {
       clearInsertionTimers()
       removeGeneratedFrames()
+      displayedPackageFacts.clear()
       previousPage = page
     }
 
@@ -499,6 +563,7 @@ export function startOzonAnalyticsCards(options: OzonAnalyticsCardsOptions = {})
     timers.clear()
     reconcileTimer = undefined
     removeGeneratedFrames()
+    displayedPackageFacts.clear()
     sellerIdCache.clear()
     analyticsItemCache.clear()
     if (activeController === controller) activeController = undefined
@@ -511,14 +576,20 @@ export function startOzonAnalyticsCards(options: OzonAnalyticsCardsOptions = {})
   const setListCardsHidden = async (hidden: boolean): Promise<void> => {
     cardVisibility = { ...cardVisibility, listCardsHidden: hidden }
     clearInsertionTimers()
-    if (hidden) removeFramesByType('lite')
+    if (hidden) {
+      removeFramesByType('lite')
+      displayedPackageFacts.clear()
+    }
     else reconcileNow()
     await persistVisibility()
   }
 
   const setDetailCardsVisible = async (visible: boolean): Promise<void> => {
     cardVisibility = { ...cardVisibility, detailCardsVisible: visible }
-    if (!visible) removeFramesByType('detail')
+    if (!visible) {
+      removeFramesByType('detail')
+      displayedPackageFacts.clear()
+    }
     else reconcileNow()
     await persistVisibility()
   }
@@ -526,6 +597,7 @@ export function startOzonAnalyticsCards(options: OzonAnalyticsCardsOptions = {})
   controller = {
     reconcile: scheduleReconcile,
     getCardVisibility: () => ({ ...cardVisibility }),
+    requireDisplayedPackageFacts,
     setListCardsHidden,
     setDetailCardsVisible,
     stop,

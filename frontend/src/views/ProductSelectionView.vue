@@ -116,19 +116,13 @@
 
             <!-- 店铺与 Ozon 分类 -->
             <div class="section-block">
-              <div class="section-label category-section-heading">
-                <span>🏪 店铺与 Ozon 分类</span>
-                <n-button size="tiny" type="primary" secondary :loading="categorySyncing"
-                  :disabled="!editProduct.store_id" @click="syncCategoryTree">
-                  同步中文分类
-                </n-button>
-              </div>
+              <div class="section-label">🏪 店铺与 Ozon 分类</div>
               <n-grid :cols="1" :x-gap="8">
                 <n-gi>
                   <div class="field-label">Ozon 店铺</div>
                   <n-select v-model:value="editProduct.store_id" :options="storeOptions" placeholder="选择店铺" size="small"
                     clearable @update:value="onEditStoreChange" />
-                  <div class="category-selection-hint">浏览本地分类无需店铺；只有从 Ozon 同步分类时才使用所选店铺凭证。</div>
+                  <div class="category-selection-hint">浏览本地分类无需店铺；所选店铺用于商品编辑与上架。</div>
                 </n-gi>
                 <n-gi style="margin-top:8px">
                   <div class="field-label category-field-heading">
@@ -185,12 +179,7 @@
                           @update:selected-keys="onCategoryTreeSelect" @update:expanded-keys="onCategoryTreeExpand" />
                       </div>
                       <n-empty v-else description="本地暂无 Ozon 中文分类" style="padding: 48px 16px;">
-                        <template #extra>
-                          <n-button size="small" type="primary" :loading="categorySyncing"
-                            :disabled="!editProduct.store_id" @click="syncCategoryTree">
-                            选择店铺后同步
-                          </n-button>
-                        </template>
+                        <template #extra>请先在“定时任务”中同步 Ozon 中文分类</template>
                       </n-empty>
                     </div>
                   </n-popover>
@@ -1675,10 +1664,8 @@ const categoryTreeNodes = ref<any[]>([]);
 const selectedCategoryKeys = ref<any[]>([]);
 const expandedCategoryKeys = ref<any[]>([]);
 const categoryLoading = ref(false);
-const categorySyncing = ref(false);
 const categorySnapshotCount = ref(0);
 const categorySyncedAt = ref<string | null>(null);
-const categorySourceStoreId = ref<number | null>(null);
 const categoryTreeMap = ref<Map<any, any[]>>(new Map()); // node key -> children[]
 const categoryPathLabelMap = ref<Map<any, string>>(new Map()); // node key -> breadcrumb label
 
@@ -1696,11 +1683,11 @@ function filterCategoryTree(pattern: string, node: any): boolean {
 }
 
 function getCategoryId(node: any) {
-  return node.description_category_id ?? node.category_id ?? node.id ?? null;
+  return node.description_category_id ?? null;
 }
 
 function getCategoryTypeId(node: any) {
-  return node.type_id ?? node.ozon_type_id ?? node.typeId ?? null;
+  return node.type_id ?? null;
 }
 
 function makeCategorySelectionKey(categoryId: any, typeId?: any) {
@@ -1717,12 +1704,9 @@ function getCategoryNodeKey(node: any, parentCategoryId: any = null) {
 }
 
 function getCategoryNodeLabel(node: any) {
-  return node.type_name
-    ?? node.category_name
-    ?? node.title
-    ?? node.label
-    ?? node.name
-    ?? String(getCategoryId(node) ?? getCategoryTypeId(node) ?? '未知分类');
+  return getCategoryTypeId(node) !== null
+    ? node.type_name
+    : node.category_name;
 }
 
 function getCategoryPathLabelByKey(key: any) {
@@ -1820,11 +1804,10 @@ function buildCategoryPathLabelMap(nodes: any[], parentLabels: string[] = [], pa
 async function loadCategoryTree() {
   categoryLoading.value = true;
   try {
-    const resp = await apiGet<OzonCategorySnapshot | any[]>('/selection/ozon-categories', { language: 'ZH_HANS' });
+    const resp = await apiGet<OzonCategorySnapshot | any[]>('/selection/ozon-categories');
     const raw = Array.isArray(resp) ? resp : (resp?.categories || []);
     categorySnapshotCount.value = Array.isArray(resp) ? raw.length : Number(resp?.count || 0);
     categorySyncedAt.value = Array.isArray(resp) ? null : (resp?.synced_at || null);
-    categorySourceStoreId.value = Array.isArray(resp) ? null : (resp?.source_store_id || null);
     categoryTreeMap.value.clear();
     categoryPathLabelMap.value.clear();
     expandedCategoryKeys.value = [];
@@ -1839,25 +1822,6 @@ async function loadCategoryTree() {
     message.error('加载分类失败');
   } finally {
     categoryLoading.value = false;
-  }
-}
-
-async function syncCategoryTree() {
-  const storeId = Number(editProduct.value?.store_id || 0);
-  if (!storeId) {
-    message.warning('请先选择用于同步 Ozon 分类的店铺');
-    return;
-  }
-
-  categorySyncing.value = true;
-  try {
-    await apiPost(`/selection/ozon-categories/sync?store_id=${encodeURIComponent(String(storeId))}`);
-    await loadCategoryTree();
-    message.success('Ozon 中文分类已同步到本地数据库');
-  } catch (e: any) {
-    message.error(`同步分类失败: ${e?.message || '未知错误'}`);
-  } finally {
-    categorySyncing.value = false;
   }
 }
 

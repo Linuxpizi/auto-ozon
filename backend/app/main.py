@@ -184,6 +184,38 @@ def _ensure_upload_draft_columns():
 
 
 _ensure_upload_draft_columns()
+
+
+def _ensure_task_config_columns():
+    """Add nullable task source-store configuration to existing SQLite databases."""
+    import sqlite3 as _sqlite3
+
+    from app.core.config import DATABASE_URL
+
+    if not DATABASE_URL.startswith("sqlite:///"):
+        return
+    db_path = DATABASE_URL.replace("sqlite:///", "", 1)
+    conn = _sqlite3.connect(db_path)
+    try:
+        cur = conn.cursor()
+        cur.execute(
+            'SELECT name FROM sqlite_master WHERE type = "table" AND name = "task_configs"'
+        )
+        if cur.fetchone() is None:
+            return
+        cur.execute('PRAGMA table_info("task_configs")')
+        existing = {row[1] for row in cur.fetchall()}
+        if "source_store_id" not in existing:
+            cur.execute(
+                'ALTER TABLE "task_configs" ADD COLUMN "source_store_id" INTEGER'
+            )
+            logger.info("DB migration: added column task_configs.source_store_id INTEGER")
+            conn.commit()
+    finally:
+        conn.close()
+
+
+_ensure_task_config_columns()
 # ────────────────────────────────────────────────────────────────────────
 
 

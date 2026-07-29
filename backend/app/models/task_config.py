@@ -1,5 +1,5 @@
 from datetime import datetime, timezone
-from sqlalchemy import Column, Integer, String, Boolean, DateTime, Text
+from sqlalchemy import Boolean, Column, DateTime, ForeignKey, Integer, String, Text
 from app.core.db import Base
 
 
@@ -20,6 +20,12 @@ class TaskConfig(Base):
     interval_seconds = Column(Integer, default=1800, comment="interval 模式：间隔秒数")
     cron_expression = Column(String(64), default="", comment="cron 模式：cron 表达式")
     enabled = Column(Boolean, default=True, comment="是否启用")
+    source_store_id = Column(
+        Integer,
+        ForeignKey("stores.id", ondelete="SET NULL"),
+        nullable=True,
+        comment="任务调用 Ozon 使用的店铺 ID",
+    )
     last_run_at = Column(DateTime, nullable=True, comment="最后执行时间")
     last_status = Column(String(16), default="", comment="success / failed")
     created_at = Column(DateTime, default=_utcnow)

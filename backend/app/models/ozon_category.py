@@ -1,6 +1,7 @@
 from sqlalchemy import Boolean, Column, DateTime, Index, Integer, JSON, String, func
 
 from app.core.db import Base
+from app.ozon_constants import OZON_CATEGORY_LANGUAGE
 
 
 class OzonCategory(Base):
@@ -10,7 +11,7 @@ class OzonCategory(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     node_key = Column(String(160), nullable=False)
-    language = Column(String(16), nullable=False, default="ZH_HANS")
+    language = Column(String(16), nullable=False, default=OZON_CATEGORY_LANGUAGE)
     description_category_id = Column(Integer, nullable=False, index=True)
     type_id = Column(Integer, nullable=True, index=True)
     parent_node_key = Column(String(160), nullable=True, index=True)

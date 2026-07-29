@@ -11,6 +11,8 @@ from dataclasses import dataclass, field
 from functools import wraps
 from typing import Any, Callable, Dict, Optional
 
+from app.ozon_constants import OZON_CATEGORY_LANGUAGE
+
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
@@ -1473,24 +1475,18 @@ class OzonClient:
     # Product API — Category Tree
     # ------------------------------------------------------------------
 
-    def get_category_tree(
-        self,
-        language: str = "ZH_HANS",
-    ) -> list[dict]:
-        """Get Ozon description category tree.
+    def get_category_tree(self) -> list[dict]:
+        """Get the complete Simplified Chinese Ozon description category tree.
 
         POST /v1/description-category/tree
         https://docs.ozon.ru/api/seller/zh/#tag/ProductAPI/operation/DescriptionCategoryTree
 
-        Args:
-            category_id: Parent category ID (0 for root).
-            language: Language code. 'ZH' for Chinese.
-
         Returns:
-            List of category dicts with keys: category_id, category_name, children, etc.
+            List of category dicts with description_category_id, category_name,
+            type_id, type_name and children fields.
         """
         payload: dict[str, Any] = {
-            "language": language,
+            "language": OZON_CATEGORY_LANGUAGE,
         }
         data = self._request(
             "POST",
@@ -1507,13 +1503,12 @@ class OzonClient:
             - name: Product title
             - description_category_id: Ozon category ID
             - type_id: Ozon type ID within the category
-            - price: Price in kopecks (amount × 100)
+            - price/old_price: Decimal monetary strings with at most 2 places
             - images: List of image URLs
             - weight, height, depth, width: Dimensions
-            - status: 'processed' to auto-publish
 
         Returns:
-            Dict with 'result' containing task_ids for async processing.
+            Dict with integer ``result.task_id`` for async processing.
         """
         data = self._request(
             "POST",
@@ -1522,26 +1517,27 @@ class OzonClient:
         )
         return data
 
-    def get_import_tasks_status(
+    def get_import_task_status(
         self,
-        task_ids: list[int],
-    ) -> list[dict]:
-        """Check status of product import tasks.
+        task_id: int | str,
+    ) -> dict:
+        """Check one product import task via POST /v1/product/import/info.
 
         POST /v1/product/import/info
 
         Args:
-            task_ids: List of task IDs returned by import_products.
+            task_id: Task ID returned by import_products.
 
         Returns:
-            List of task status dicts with keys: task_id, status, last_updated, etc.
+            Official ``result`` object containing ``items`` and ``total``.
         """
         data = self._request(
             "POST",
             "/v1/product/import/info",
-            json_body={"task_id": task_ids},
+            json_body={"task_id": str(task_id)},
         )
-        return data.get("result", [])
+        result = data.get("result", {})
+        return result if isinstance(result, dict) else {}
 
     def get_product_list_by_task_id(
         self,

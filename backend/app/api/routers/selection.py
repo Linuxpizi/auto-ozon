@@ -83,12 +83,6 @@ class BatchUploadRequest(BaseModel):
     package_override_reason: Optional[str] = None
 
 
-class CategoryTreeRequest(BaseModel):
-    """查询 Ozon 分类树"""
-    category_id: int = 0
-    language: str = "ZH"
-
-
 class PriceCalcRequest(BaseModel):
     """价格换算"""
     price_cny: float
@@ -215,21 +209,8 @@ def _build_direct_upload_draft(record, body: Any, *, offer_id: str):
 
 
 def _extract_task_ids(result: Any) -> list[int]:
-    """Accept current list and legacy dict-shaped Ozon import responses."""
-    payload = result.get("result", []) if isinstance(result, dict) else []
-    if isinstance(payload, dict):
-        payload = payload.get("task_id", [])
-    if not isinstance(payload, list):
-        payload = [payload]
-    task_ids: list[int] = []
-    for value in payload:
-        try:
-            task_id = int(value)
-        except (TypeError, ValueError):
-            continue
-        if task_id > 0:
-            task_ids.append(task_id)
-    return task_ids
+    """Return the one task ID from the official product import response."""
+    return [upload_service._extract_import_task_id(result)]
 
 
 def _dimension_response(draft) -> dict[str, Any]:
@@ -572,18 +553,16 @@ def batch_upload_products(body: BatchUploadRequest, db: Session = Depends(get_db
         chunk = valid_uploads[chunk_start:chunk_start + 100]
         try:
             import_result = client.import_products(items=[entry[2] for entry in chunk])
-            task_ids = _extract_task_ids(import_result)
-            fallback_task_id = task_ids[0] if task_ids else 0
+            task_id = _extract_task_ids(import_result)[0]
             if not first_task_id:
-                first_task_id = fallback_task_id
+                first_task_id = task_id
 
-            for index, (product_id, offer_id, item) in enumerate(chunk):
+            for product_id, offer_id, item in chunk:
                 record = records_by_id[product_id]
-                task_id = task_ids[index] if index < len(task_ids) else fallback_task_id
                 record.ozon_category_id = item["description_category_id"]
                 record.ozon_type_id = item["type_id"]
                 record.upload_status = "uploading"
-                record.upload_task_id = str(task_id) if task_id else ""
+                record.upload_task_id = str(task_id)
                 record.offer_id = offer_id
 
             db.commit()
@@ -625,18 +604,29 @@ def update_upload_status(product_id: int, db: Session = Depends(get_db)):
     try:
         client = OzonClient(client_id=store.client_id, api_key=store.api_key)
         task_id = int(record.upload_task_id)
-        status_list = client.get_import_tasks_status([task_id])
+        status_result = client.get_import_task_status(task_id)
+        items = status_result.get("items", []) if isinstance(status_result, dict) else []
+        task_info = next(
+            (
+                item
+                for item in items
+                if isinstance(item, dict)
+                and str(item.get("offer_id", "")) == str(record.offer_id or "")
+            ),
+            None,
+        )
+        if task_info is None and len(items) == 1 and isinstance(items[0], dict):
+            task_info = items[0]
 
-        if status_list:
-            task_info = status_list[0]
+        if task_info:
             ozon_status = task_info.get("status", "")
             status_map = {
                 "pending": "pending",
-                "processing": "uploading",
-                "processed": "success",
+                "imported": "success",
                 "failed": "failed",
+                "skipped": "success",
             }
-            new_status = status_map.get(ozon_status, ozon_status)
+            new_status = status_map.get(ozon_status, record.upload_status or "unknown")
 
             errors = task_info.get("errors", [])
             error_msg = ""
@@ -669,46 +659,12 @@ def update_upload_status(product_id: int, db: Session = Depends(get_db)):
 @router.get("/ozon-categories")
 def get_ozon_categories(
     store_id: Optional[int] = Query(None, description="兼容旧客户端；本地读取不需要店铺"),
-    language: str = Query("ZH_HANS", description="本地分类语言，当前仅支持 ZH_HANS"),
     db: Session = Depends(get_db),
 ):
     """从应用数据库读取完整中文 Ozon 分类树，不访问 Ozon。"""
-    from app.services.ozon_category_service import CHINESE_LANGUAGE, get_category_tree_snapshot
+    from app.services.ozon_category_service import get_category_tree_snapshot
 
-    if language != CHINESE_LANGUAGE:
-        raise HTTPException(status_code=400, detail="本地分类库当前仅支持 ZH_HANS")
-    return get_category_tree_snapshot(db, language=language)
-
-
-@router.post("/ozon-categories/sync")
-def sync_ozon_categories(
-    store_id: int = Query(..., description="用于调用 Ozon 的店铺 ID"),
-    db: Session = Depends(get_db),
-):
-    """通过指定店铺凭证拉取完整中文分类，并原子替换本地快照。"""
-    from app.models.store import Store
-    from app.services.ozon_category_service import CHINESE_LANGUAGE, replace_category_snapshot
-    from app.services.ozon_client import OzonClient
-
-    store = db.query(Store).filter(Store.id == store_id).first()
-    if not store:
-        raise HTTPException(status_code=404, detail="未找到该店铺")
-
-    client = OzonClient(client_id=store.client_id, api_key=store.api_key)
-    try:
-        tree = client.get_category_tree(language=CHINESE_LANGUAGE)
-        return replace_category_snapshot(
-            db,
-            tree,
-            source_store_id=store.id,
-            language=CHINESE_LANGUAGE,
-        )
-    except ValueError as exc:
-        raise HTTPException(status_code=502, detail=str(exc)) from exc
-    except Exception as exc:
-        db.rollback()
-        logger.error("Failed to sync Ozon category tree: %s", str(exc))
-        raise HTTPException(status_code=502, detail=f"同步分类失败: {str(exc)}") from exc
+    return get_category_tree_snapshot(db)
 
 
 @router.post("/price-calc")

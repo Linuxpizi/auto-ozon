@@ -11,6 +11,7 @@ class TaskConfigBase(BaseModel):
     interval_seconds: int = 1800
     cron_expression: str = ""
     enabled: bool = True
+    source_store_id: Optional[int] = None
 
 
 class TaskConfigCreate(TaskConfigBase):
@@ -24,6 +25,7 @@ class TaskConfigUpdate(BaseModel):
     interval_seconds: Optional[int] = None
     cron_expression: Optional[str] = None
     enabled: Optional[bool] = None
+    source_store_id: Optional[int] = None
 
 
 class TaskConfigRead(TaskConfigBase):

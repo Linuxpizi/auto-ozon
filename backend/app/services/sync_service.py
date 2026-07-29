@@ -19,6 +19,7 @@ from app.services.ozon_client import (
     _sku_from_product_info,
 )
 from app.models.store import Store
+from app.models.task_config import TaskConfig
 from app.models.listing import Listing
 from app.crud import order as order_crud
 from app.crud import finance as finance_crud
@@ -973,11 +974,47 @@ def _is_quality_check(order_number: str) -> bool:
 
 
 def run_sync_task(db: Session, task_key: str) -> str:
-    """Execute a sync task across all enabled stores.
+    """Execute one task through its configured centralized synchronization path.
 
     Returns 'success' or 'failed'.
     """
     try:
+        if task_key == "sync_ozon_categories":
+            task_config = (
+                db.query(TaskConfig)
+                .filter(TaskConfig.task_key == task_key)
+                .first()
+            )
+            if task_config is None:
+                raise ValueError("未找到 Ozon 中文分类同步任务配置")
+            if task_config.source_store_id is None:
+                raise ValueError("Ozon 中文分类同步任务未指定执行店铺")
+
+            store = (
+                db.query(Store)
+                .filter(Store.id == task_config.source_store_id)
+                .first()
+            )
+            if store is None:
+                raise ValueError(
+                    f"Ozon 中文分类同步任务指定的店铺不存在: {task_config.source_store_id}"
+                )
+
+            from app.services.ozon_category_service import (
+                sync_category_snapshot_for_store,
+            )
+
+            result = sync_category_snapshot_for_store(db, store)
+            logger.info(
+                "run_sync_task(%s): synced %d category nodes from store %s (id=%s)",
+                task_key,
+                result["count"],
+                store.name,
+                store.id,
+            )
+            mark_task_run(db, task_key, "success")
+            return "success"
+
         stores = db.query(Store).filter(Store.status == "active").all()
         if not stores:
             logger.warning("run_sync_task(%s): no active stores", task_key)

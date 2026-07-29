@@ -93,6 +93,15 @@ DEFAULT_TASKS = [
         interval_seconds=60 * 60 * 6,  # 6 h
         enabled=True,
     ),
+    TaskConfigCreate(
+        task_key="sync_ozon_categories",
+        name="同步 Ozon 中文分类",
+        description="使用指定 Ozon 店铺同步 ZH_HANS 中文分类到本地快照 (每一周)",
+        trigger_type="interval",
+        interval_seconds=7 * 24 * 60 * 60,  # 与低频仓库同步采用相同周期间隔
+        enabled=False,
+        source_store_id=None,
+    ),
 ]
 
 

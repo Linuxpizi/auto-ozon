@@ -1,5 +1,6 @@
 from unittest.mock import patch
 
+import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
@@ -234,10 +235,10 @@ def _expected_exact_item(offer_id: str = "DIRECT-1") -> dict:
         "primary_image": "https://sku.example/1.jpg",
         "images": [
             f"https://sku.example/{index}.jpg"
-            for index in range(1, 16)
+            for index in range(2, 18)
         ],
-        "price": "12345",
-        "old_price": "15001",
+        "price": "123.45",
+        "old_price": "150.01",
         "vat": "0",
         "currency_code": "RUB",
         "attributes": [
@@ -291,7 +292,7 @@ def test_single_direct_upload_sends_exact_selected_sku_payload(
 
     with patch("app.services.ozon_client.OzonClient") as client_class:
         importer = client_class.return_value.import_products
-        importer.return_value = {"result": [123]}
+        importer.return_value = {"result": {"task_id": 123}}
 
         response = test_app.post(
             f"/api/selection/products/{record.id}/upload",
@@ -316,7 +317,7 @@ def test_single_direct_upload_sends_exact_selected_sku_payload(
 
     assert response.json() == {
         "success": True,
-        "result": {"result": [123]},
+        "result": {"result": {"task_id": 123}},
         "task_id": 123,
         "offer_id": "DIRECT-1",
         "dimensions": {
@@ -368,6 +369,37 @@ def test_invalid_single_direct_upload_never_constructs_ozon_client(
     assert record.upload_task_id == ""
 
 
+@pytest.mark.parametrize("import_result", [{}, {"result": [123]}])
+def test_invalid_single_import_response_does_not_persist_uploading_state(
+    test_app: TestClient,
+    test_db: Session,
+    import_result: dict,
+):
+    headers = _auth_headers(test_app)
+    store = _create_store(test_db)
+    record = _save_records(test_db, [_ready_record()])[0]
+
+    with patch("app.services.ozon_client.OzonClient") as client_class:
+        client_class.return_value.import_products.return_value = import_result
+        response = test_app.post(
+            f"/api/selection/products/{record.id}/upload",
+            headers=headers,
+            json={
+                "store_id": store.id,
+                "description_category_id": 100,
+                "type_id": 200,
+                "offer_id": "INVALID-RESPONSE",
+            },
+        )
+
+    assert response.status_code == 500, response.text
+    assert "result.task_id" in response.json()["detail"]
+    test_db.refresh(record)
+    assert record.upload_status == "not_uploaded"
+    assert record.upload_task_id == ""
+    assert record.offer_id == ""
+
+
 def test_manual_package_overrides_require_reason_and_are_audited(
     test_app: TestClient,
     test_db: Session,
@@ -395,7 +427,7 @@ def test_manual_package_overrides_require_reason_and_are_audited(
         client_class.assert_not_called()
 
         importer = client_class.return_value.import_products
-        importer.return_value = {"result": [456]}
+        importer.return_value = {"result": {"task_id": 456}}
         accepted_response = test_app.post(
             f"/api/selection/products/{record.id}/upload",
             headers=headers,
@@ -436,7 +468,7 @@ def test_mixed_batch_sends_only_valid_exact_items(
 
     with patch("app.services.ozon_client.OzonClient") as client_class:
         importer = client_class.return_value.import_products
-        importer.return_value = {"result": [701]}
+        importer.return_value = {"result": {"task_id": 701}}
         response = test_app.post(
             "/api/selection/products/batch-upload",
             headers=headers,
@@ -478,8 +510,8 @@ def test_batch_chunks_101_valid_items_and_tracks_each_task(
     with patch("app.services.ozon_client.OzonClient") as client_class:
         importer = client_class.return_value.import_products
         importer.side_effect = [
-            {"result": list(range(1000, 1100))},
-            {"result": [2001]},
+            {"result": {"task_id": 1000}},
+            {"result": {"task_id": 2001}},
         ]
         response = test_app.post(
             "/api/selection/products/batch-upload",
@@ -505,7 +537,7 @@ def test_batch_chunks_101_valid_items_and_tracks_each_task(
     test_db.refresh(records[99])
     test_db.refresh(records[100])
     assert records[0].upload_task_id == "1000"
-    assert records[99].upload_task_id == "1099"
+    assert records[99].upload_task_id == "1000"
     assert records[100].upload_task_id == "2001"
     assert all(record.upload_status == "uploading" for record in records)
 
@@ -524,9 +556,9 @@ def test_batch_chunk_failure_keeps_previous_and_later_successes(
     with patch("app.services.ozon_client.OzonClient") as client_class:
         importer = client_class.return_value.import_products
         importer.side_effect = [
-            {"result": [3001]},
+            {"result": {"task_id": 3001}},
             RuntimeError("middle chunk rejected"),
-            {"result": [3003]},
+            {"result": {"task_id": 3003}},
         ]
         response = test_app.post(
             "/api/selection/products/batch-upload",
@@ -564,3 +596,89 @@ def test_batch_chunk_failure_keeps_previous_and_later_successes(
     assert records[199].upload_task_id == ""
     assert records[200].upload_status == "uploading"
     assert records[200].upload_task_id == "3003"
+
+
+@pytest.mark.parametrize(
+    ("ozon_status", "expected_status"),
+    [
+        ("pending", "pending"),
+        ("imported", "success"),
+        ("failed", "failed"),
+        ("skipped", "success"),
+    ],
+)
+def test_upload_status_maps_official_status_for_matching_offer_id(
+    test_app: TestClient,
+    test_db: Session,
+    ozon_status: str,
+    expected_status: str,
+):
+    headers = _auth_headers(test_app)
+    _create_store(test_db)
+    record = _ready_record()
+    record.upload_status = "uploading"
+    record.upload_task_id = "172549793"
+    record.offer_id = "MATCH-ME"
+    record = _save_records(test_db, [record])[0]
+
+    with patch("app.services.ozon_client.OzonClient") as client_class:
+        client = client_class.return_value
+        client.get_import_task_status.return_value = {
+            "items": [
+                {"offer_id": "OTHER", "status": "failed"},
+                {"offer_id": "MATCH-ME", "status": ozon_status},
+            ],
+            "total": 2,
+        }
+        client.get_product_list_by_task_id.return_value = []
+        response = test_app.post(
+            f"/api/selection/products/{record.id}/upload-status",
+            headers=headers,
+        )
+
+    assert response.status_code == 200, response.text
+    assert response.json() == {
+        "upload_status": expected_status,
+        "ozon_status": ozon_status,
+        "errors": "",
+        "ozon_product_id": 0,
+    }
+    client.get_import_task_status.assert_called_once_with(172549793)
+    if expected_status == "success":
+        client.get_product_list_by_task_id.assert_called_once_with(172549793)
+    else:
+        client.get_product_list_by_task_id.assert_not_called()
+    test_db.refresh(record)
+    assert record.upload_status == expected_status
+
+
+def test_imported_upload_status_persists_product_id_and_match(
+    test_app: TestClient,
+    test_db: Session,
+):
+    headers = _auth_headers(test_app)
+    _create_store(test_db)
+    record = _ready_record()
+    record.upload_status = "uploading"
+    record.upload_task_id = "321"
+    record.offer_id = "ONLY-OFFER"
+    record = _save_records(test_db, [record])[0]
+
+    with patch("app.services.ozon_client.OzonClient") as client_class:
+        client = client_class.return_value
+        client.get_import_task_status.return_value = {
+            "items": [{"offer_id": "ONLY-OFFER", "status": "imported"}],
+            "total": 1,
+        }
+        client.get_product_list_by_task_id.return_value = [{"product_id": 987654}]
+        response = test_app.post(
+            f"/api/selection/products/{record.id}/upload-status",
+            headers=headers,
+        )
+
+    assert response.status_code == 200, response.text
+    assert response.json()["ozon_product_id"] == 987654
+    test_db.refresh(record)
+    assert record.upload_status == "success"
+    assert record.ozon_product_id == 987654
+    assert record.matched is True

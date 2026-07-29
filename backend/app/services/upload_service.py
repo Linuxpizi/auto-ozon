@@ -11,6 +11,7 @@ import copy
 import logging
 import uuid
 from datetime import datetime, timezone
+from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 from typing import Any, List, Optional
 
 from sqlalchemy.orm import Session
@@ -22,6 +23,8 @@ from app.services.ozon_client import OzonClient
 import app.crud.upload_draft as draft_crud
 
 logger = logging.getLogger(__name__)
+
+_OZON_VAT_VALUES = ("0", "0.05", "0.07", "0.1", "0.2", "0.22")
 
 
 PACKAGE_FIELDS: dict[str, dict[str, Any]] = {
@@ -153,11 +156,31 @@ def convert_price_to_rub(
     return round(base * markup_mult * comm_mult, 2)
 
 
-def price_to_kopecks(price_rub: float) -> str:
-    """RUB → kopecks string for Ozon API"""
-    if price_rub <= 0:
+def format_ozon_price(value: Any) -> str:
+    """Format a positive monetary amount as an Ozon decimal string."""
+    if value is None or isinstance(value, bool):
         return ""
-    return str(int(round(price_rub * 100)))
+    try:
+        amount = Decimal(str(value).strip().replace(",", "."))
+        if not amount.is_finite() or amount <= 0:
+            return ""
+        rounded = amount.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+    except (InvalidOperation, ValueError):
+        return ""
+    return format(rounded, "f").rstrip("0").rstrip(".")
+
+
+def _normalize_ozon_vat(value: Any) -> str | None:
+    """Return the canonical Product API VAT enum value, if supported."""
+    raw = str(value or "0").strip().replace(",", ".")
+    try:
+        amount = Decimal(raw)
+    except InvalidOperation:
+        return None
+    for allowed in _OZON_VAT_VALUES:
+        if amount == Decimal(allowed):
+            return allowed
+    return None
 
 
 # ── Draft creation ────────────────────────────────────────────────────
@@ -374,6 +397,8 @@ def get_draft_readiness_errors(draft: UploadDraft) -> list[str]:
         errors.append("缺少商品标题")
     if _positive_number(getattr(draft, "price_rub", None)) is None:
         errors.append("上架价格必须大于 0 RUB")
+    if _normalize_ozon_vat(getattr(draft, "vat", None)) is None:
+        errors.append(f"VAT 必须是 Ozon 支持的值：{', '.join(_OZON_VAT_VALUES)}")
 
     valid_images = _valid_http_urls(getattr(draft, "images", None))
     primary = str(getattr(draft, "primary_image", "") or "").strip()
@@ -563,7 +588,7 @@ def _draft_data_from_scraped_record(
         "price_rub": price_rub,
         "old_price_rub": old_price_rub if old_price_rub > 0 else selected_old_price,
         "primary_image": valid_images[0] if valid_images else "",
-        "images": valid_images[:15],
+        "images": valid_images[:30],
         "ozonbox_tags": _serialize_tags(record.tags),
         **package_scalars,
         "selected_sku_snapshot": selected_snapshot,
@@ -778,9 +803,10 @@ def _build_ozon_item(draft: UploadDraft) -> dict:
     valid_images = _valid_http_urls(getattr(draft, "images", None))
     primary_image = str(getattr(draft, "primary_image", "") or "").strip()
     if primary_image.startswith(("http://", "https://")):
-        valid_images = [primary_image, *[url for url in valid_images if url != primary_image]]
+        valid_images = [url for url in valid_images if url != primary_image][:29]
     else:
-        primary_image = valid_images[0]
+        primary_image = ""
+        valid_images = valid_images[:30]
     attributes, complex_attributes = _ozon_attributes(
         getattr(draft, "ozon_attribute_facts", None)
     )
@@ -799,16 +825,29 @@ def _build_ozon_item(draft: UploadDraft) -> dict:
         "width": _positive_int(draft.width),
         "weight": _positive_int(draft.weight),
         "primary_image": primary_image,
-        "images": valid_images[:15],
-        "price": price_to_kopecks(draft.price_rub),
-        "old_price": price_to_kopecks(draft.old_price_rub),
-        "vat": draft.vat or "0",
+        "images": valid_images,
+        "price": format_ozon_price(draft.price_rub),
+        "old_price": format_ozon_price(draft.old_price_rub),
+        "vat": _normalize_ozon_vat(draft.vat),
         "currency_code": "RUB",
         "attributes": attributes,
         "complex_attributes": complex_attributes,
     }
 
     return item
+
+
+def _extract_import_task_id(response: Any) -> int:
+    """Extract the single task ID returned by POST /v3/product/import."""
+    result = response.get("result") if isinstance(response, dict) else None
+    raw_task_id = result.get("task_id") if isinstance(result, dict) else None
+    try:
+        task_id = int(raw_task_id)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("Ozon 导入响应缺少有效的 result.task_id") from exc
+    if task_id <= 0:
+        raise ValueError("Ozon 导入响应缺少有效的 result.task_id")
+    return task_id
 
 
 # ── Submit to Ozon ────────────────────────────────────────────────────
@@ -848,8 +887,7 @@ def submit_draft_to_ozon(
     try:
         client = OzonClient(client_id=store.client_id, api_key=store.api_key)
         result = client.import_products(items=[item])
-        task_ids = result.get("result", [])
-        ozon_task_id = task_ids[0] if task_ids else 0
+        ozon_task_id = _extract_import_task_id(result)
 
         draft_crud.update_draft(db, draft_id, {
             "status": "submitted",
@@ -934,15 +972,14 @@ def submit_batch_to_ozon(
                 })
             try:
                 result = client.import_products(items=chunk)
-                task_ids = result.get("result", [])
+                task_id = _extract_import_task_id(result)
 
-                for j, d in enumerate(chunk_drafts):
-                    tid = task_ids[j] if j < len(task_ids) else (task_ids[0] if task_ids else 0)
+                for d in chunk_drafts:
                     draft_crud.update_draft(db, d.id, {
                         "status": "submitted",
-                        "ozon_task_id": tid,
+                        "ozon_task_id": task_id,
                     })
-                    all_results.append({"draft_id": d.id, "success": True, "task_id": tid, "error": ""})
+                    all_results.append({"draft_id": d.id, "success": True, "task_id": task_id, "error": ""})
                     total_submitted += 1
             except Exception as e:
                 logger.error("Batch submit for store %d failed: %s", store_id, str(e))
@@ -979,11 +1016,23 @@ def check_draft_status(
 
     try:
         client = OzonClient(client_id=store.client_id, api_key=store.api_key)
-        result = client.get_import_tasks_status(task_id=draft.ozon_task_id)
+        result = client.get_import_task_status(task_id=draft.ozon_task_id)
 
-        items = result.get("result", [])
+        items = result.get("items", []) if isinstance(result, dict) else []
         if items:
-            item = items[0] if isinstance(items, list) else items
+            item = next(
+                (
+                    candidate
+                    for candidate in items
+                    if isinstance(candidate, dict)
+                    and str(candidate.get("offer_id", "")) == str(draft.offer_id)
+                ),
+                None,
+            )
+            if item is None and len(items) == 1 and isinstance(items[0], dict):
+                item = items[0]
+            if item is None:
+                return {"status": draft.status, "message": "导入结果中未找到当前 offer_id"}
             ozon_status = item.get("status", "")
             product_id = item.get("product_id", 0)
             errors = item.get("errors", [])
@@ -994,20 +1043,23 @@ def check_draft_status(
                     for e in errors
                 )
 
-            if ozon_status == "success":
+            if ozon_status in ("imported", "skipped"):
                 new_status = "active"
-            elif ozon_status in ("pending", "processing"):
+            elif ozon_status == "pending":
                 new_status = "processing"
-            else:
+            elif ozon_status == "failed":
                 new_status = "error"
                 error_msg = error_msg or f"Ozon status: {ozon_status}"
+            else:
+                return {"status": draft.status, "message": f"未知 Ozon status: {ozon_status}"}
 
-            update = {"status": new_status, "ozon_last_synced_at": datetime.now()}
+            update = {
+                "status": new_status,
+                "ozon_last_synced_at": datetime.now(),
+                "error_message": error_msg,
+            }
             if product_id:
                 update["ozon_product_id"] = product_id
-            if error_msg:
-                update["error_message"] = error_msg
-
             draft_crud.update_draft(db, draft_id, update)
 
             return {

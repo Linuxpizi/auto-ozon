@@ -8,9 +8,9 @@ from typing import Any, Iterable
 from sqlalchemy.orm import Session
 
 from app.models.ozon_category import OzonCategory
-
-
-CHINESE_LANGUAGE = "ZH_HANS"
+from app.models.store import Store
+from app.ozon_constants import OZON_CATEGORY_LANGUAGE
+from app.services.ozon_client import OzonClient
 
 
 def _positive_int(value: Any) -> int | None:
@@ -22,30 +22,21 @@ def _positive_int(value: Any) -> int | None:
 
 
 def _category_id(node: dict[str, Any]) -> int | None:
-    return _positive_int(
-        node.get("description_category_id")
-        or node.get("category_id")
-        or node.get("id")
-    )
+    return _positive_int(node.get("description_category_id"))
 
 
 def _type_id(node: dict[str, Any]) -> int | None:
-    return _positive_int(node.get("type_id") or node.get("ozon_type_id"))
+    return _positive_int(node.get("type_id"))
 
 
 def _node_name(node: dict[str, Any], *, is_type: bool) -> str:
-    candidates = (
-        (node.get("type_name"), node.get("name"), node.get("category_name"))
-        if is_type
-        else (node.get("category_name"), node.get("name"), node.get("type_name"))
-    )
-    return next((str(value).strip() for value in candidates if str(value or "").strip()), "")
+    field = "type_name" if is_type else "category_name"
+    return str(node.get(field) or "").strip()
 
 
 def flatten_category_tree(
     tree: Iterable[dict[str, Any]],
     *,
-    language: str = CHINESE_LANGUAGE,
     source_store_id: int | None = None,
     synced_at: datetime | None = None,
 ) -> list[OzonCategory]:
@@ -65,33 +56,38 @@ def flatten_category_tree(
     ) -> None:
         for sort_order, raw_node in enumerate(nodes):
             if not isinstance(raw_node, dict):
-                continue
+                raise ValueError("Ozon 分类树包含非对象节点")
             direct_category_id = _category_id(raw_node)
             effective_category_id = direct_category_id or parent_category_id
             type_id = _type_id(raw_node)
             if not effective_category_id:
-                continue
+                raise ValueError("Ozon 分类节点缺少有效的 description_category_id")
 
             is_type = type_id is not None
+            name = _node_name(raw_node, is_type=is_type)
+            if not name:
+                name_field = "type_name" if is_type else "category_name"
+                raise ValueError(f"Ozon 分类节点缺少 {name_field}")
             node_key = (
                 f"type:{effective_category_id}:{type_id}"
                 if is_type
                 else f"cat:{effective_category_id}"
             )
             if node_key in seen_keys:
-                continue
+                raise ValueError(f"Ozon 分类树包含重复节点: {node_key}")
             seen_keys.add(node_key)
 
-            name = _node_name(raw_node, is_type=is_type)
             path_parts = [*parent_path, name] if name else list(parent_path)
             children = raw_node.get("children")
-            child_nodes = children if isinstance(children, list) else []
+            if children is not None and not isinstance(children, list):
+                raise ValueError(f"Ozon 分类节点 children 必须是数组: {node_key}")
+            child_nodes = children or []
             payload = {key: value for key, value in raw_node.items() if key != "children"}
 
             rows.append(
                 OzonCategory(
                     node_key=node_key,
-                    language=language,
+                    language=OZON_CATEGORY_LANGUAGE,
                     description_category_id=effective_category_id,
                     type_id=type_id,
                     parent_node_key=parent_key,
@@ -122,13 +118,11 @@ def replace_category_snapshot(
     tree: list[dict[str, Any]],
     *,
     source_store_id: int,
-    language: str = CHINESE_LANGUAGE,
 ) -> dict[str, Any]:
-    """Atomically replace one complete language snapshot after successful fetch."""
+    """Atomically replace the complete Chinese snapshot after validation."""
 
     rows = flatten_category_tree(
         tree,
-        language=language,
         source_store_id=source_store_id,
     )
     if not rows:
@@ -136,7 +130,9 @@ def replace_category_snapshot(
 
     synced_at = rows[0].synced_at
     try:
-        db.query(OzonCategory).filter(OzonCategory.language == language).delete(
+        db.query(OzonCategory).filter(
+            OzonCategory.language == OZON_CATEGORY_LANGUAGE
+        ).delete(
             synchronize_session="fetch"
         )
         db.add_all(rows)
@@ -146,21 +142,30 @@ def replace_category_snapshot(
         raise
 
     return {
-        "language": language,
+        "language": OZON_CATEGORY_LANGUAGE,
         "count": len(rows),
         "synced_at": synced_at,
         "source_store_id": source_store_id,
     }
 
 
+def sync_category_snapshot_for_store(
+    db: Session,
+    store: Store,
+) -> dict[str, Any]:
+    """Fetch and atomically persist the Chinese category snapshot for one store."""
+
+    client = OzonClient(client_id=store.client_id, api_key=store.api_key)
+    tree = client.get_category_tree()
+    return replace_category_snapshot(db, tree, source_store_id=store.id)
+
+
 def get_category_tree_snapshot(
     db: Session,
-    *,
-    language: str = CHINESE_LANGUAGE,
 ) -> dict[str, Any]:
     rows = (
         db.query(OzonCategory)
-        .filter(OzonCategory.language == language)
+        .filter(OzonCategory.language == OZON_CATEGORY_LANGUAGE)
         .order_by(OzonCategory.level, OzonCategory.sort_order, OzonCategory.id)
         .all()
     )
@@ -188,7 +193,7 @@ def get_category_tree_snapshot(
     source_store_id = next((row.source_store_id for row in rows if row.source_store_id), None)
     return {
         "categories": build(None),
-        "language": language,
+        "language": OZON_CATEGORY_LANGUAGE,
         "count": len(rows),
         "synced_at": latest,
         "source_store_id": source_store_id,

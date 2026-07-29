@@ -968,7 +968,7 @@ function fetchSellerAnalytics(sku: string, shopId: string, tabId?: number) {
     shopId,
     'what-to-sell',
     'https://seller.ozon.ru/api/site/seller-analytics/what_to_sell/data/v3',
-    { limit: '50', offset: '0', filter: { stock: 'any_stock', sku: String(sku) }, sort: { key: 'sum_gmv_desc' } },
+    { limit: '50', offset: '0', filter: { stock: 'any_stock', sku: sku }, sort: { key: 'sum_gmv_desc' } },
     'zh-Hans',
     tabId,
   )
@@ -983,7 +983,7 @@ function fetchSellerVariantPackage(variantId: string, shopId: string, tabId?: nu
     undefined,
     'https://seller.ozon.ru/api/site/seller-prototype/create-bundle-by-variant-id',
     { company_id: companyId, variant_id: normalizedVariantId, source: 'SOURCE_UI_COPY_MERGED' },
-    'RU',
+    'zh-Hans',
     tabId,
   )
 }
@@ -1113,7 +1113,7 @@ async function checkCurrentPage() {
         ? /s\.1688\.com\/(selloffer|offer_search|company)/.test(url)
         : isPdd
           ? /(search|mall|category|list|index)/i.test(url) && !isProductPage
-        : /\/(category|brand|search|seller|collection)\//i.test(url)
+          : /\/(category|brand|search|seller|collection)\//i.test(url)
       return {
         isSupported: true,
         platform,

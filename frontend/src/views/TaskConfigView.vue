@@ -22,6 +22,7 @@
               <th>任务标识</th>
               <th>触发方式</th>
               <th>间隔</th>
+              <th>执行店铺</th>
               <th>状态</th>
               <th>上次执行</th>
               <th>结果</th>
@@ -37,6 +38,24 @@
               <td><n-tag size="small" round>{{ task.task_key }}</n-tag></td>
               <td>{{ task.trigger_type === 'interval' ? '间隔' : 'Cron' }}</td>
               <td>{{ formatInterval(task) }}</td>
+              <td>
+                <template v-if="isOzonCategoryTask(task)">
+                  <n-select
+                    :value="task.source_store_id"
+                    :options="storeOptions"
+                    :loading="savingSourceStore === task.task_key"
+                    placeholder="请选择 Ozon 店铺"
+                    clearable
+                    size="small"
+                    style="min-width: 180px;"
+                    @update:value="value => updateSourceStore(task, value)"
+                  />
+                  <div v-if="task.source_store_id === null" class="source-store-warning">
+                    选择执行店铺后才能同步中文分类
+                  </div>
+                </template>
+                <span v-else style="color: var(--text-muted);">-</span>
+              </td>
               <td>
                 <n-tag :type="task.enabled ? 'success' : 'default'" size="small" round>
                   {{ task.enabled ? '运行中' : '已暂停' }}
@@ -55,6 +74,7 @@
                   <n-button size="small" @click="toggleTask(task)">{{ task.enabled ? '暂停' : '启用'
                     }}</n-button>
                   <n-button size="small" type="primary" :loading="triggering === task.task_key"
+                    :disabled="isOzonCategoryTask(task) && task.source_store_id === null"
                     @click="triggerTask(task)">
                     {{ triggering === task.task_key ? '触发中...' : '立即执行' }}
                   </n-button>
@@ -70,7 +90,7 @@
 
 <script setup lang="ts">
 import { onMounted, ref } from "vue";
-import { NH2, NButton, NTag, NSpace } from "naive-ui";
+import { NH2, NButton, NTag, NSpace, NSelect, useMessage } from "naive-ui";
 import { apiGet, apiPost, apiPut } from "../api";
 
 interface TaskConfig {
@@ -82,13 +102,31 @@ interface TaskConfig {
   interval_seconds: number;
   cron_expression: string;
   enabled: boolean;
+  source_store_id: number | null;
   last_run_at: string | null;
   last_status: string;
 }
 
+interface StoreOption {
+  label: string;
+  value: number;
+}
+
+interface TriggerResult {
+  task_key: string;
+  status: string;
+}
+
+const message = useMessage();
 const tasks = ref<TaskConfig[]>([]);
+const storeOptions = ref<StoreOption[]>([]);
 const loading = ref(false);
 const triggering = ref("");
+const savingSourceStore = ref("");
+
+function isOzonCategoryTask(task: TaskConfig) {
+  return task.task_key === "sync_ozon_categories";
+}
 
 function formatInterval(task: TaskConfig) {
   if (task.trigger_type === 'cron') return task.cron_expression;
@@ -107,11 +145,34 @@ function formatTime(t: string | null) {
 async function loadData() {
   loading.value = true;
   try {
-    tasks.value = await apiGet<TaskConfig[]>("/task-configs/");
-  } catch (e) {
-    console.error(e);
+    const [taskRows, stores] = await Promise.all([
+      apiGet<TaskConfig[]>("/task-configs/"),
+      apiGet<Array<{ id: number; name: string }>>("/stores/"),
+    ]);
+    tasks.value = taskRows;
+    storeOptions.value = stores.map(store => ({
+      label: store.name,
+      value: store.id,
+    }));
+  } catch (e: any) {
+    message.error("加载定时任务失败: " + (e.message || "未知错误"));
   } finally {
     loading.value = false;
+  }
+}
+
+async function updateSourceStore(task: TaskConfig, sourceStoreId: number | null) {
+  savingSourceStore.value = task.task_key;
+  try {
+    const updated = await apiPut<TaskConfig>(`/task-configs/${task.task_key}`, {
+      source_store_id: sourceStoreId,
+    });
+    task.source_store_id = updated.source_store_id;
+    message.success(sourceStoreId === null ? "已清除分类同步执行店铺" : "分类同步执行店铺已保存");
+  } catch (e: any) {
+    message.error("保存执行店铺失败: " + (e.message || "未知错误"));
+  } finally {
+    savingSourceStore.value = "";
   }
 }
 
@@ -119,18 +180,28 @@ async function toggleTask(task: TaskConfig) {
   try {
     await apiPut(`/task-configs/${task.task_key}`, { enabled: !task.enabled });
     await loadData();
-  } catch (e) {
-    console.error(e);
+    message.success(task.enabled ? "任务已暂停" : "任务已启用");
+  } catch (e: any) {
+    message.error("更新任务状态失败: " + (e.message || "未知错误"));
   }
 }
 
 async function triggerTask(task: TaskConfig) {
+  if (isOzonCategoryTask(task) && task.source_store_id === null) {
+    message.warning("请先为 Ozon 中文分类同步任务选择执行店铺");
+    return;
+  }
   triggering.value = task.task_key;
   try {
-    await apiPost(`/task-configs/${task.task_key}/trigger`);
+    const result = await apiPost<TriggerResult>(`/task-configs/${task.task_key}/trigger`);
     await loadData();
-  } catch (e) {
-    console.error(e);
+    if (result.status === "success") {
+      message.success("任务执行成功");
+    } else {
+      message.error("任务执行失败，请查看任务结果和后端日志");
+    }
+  } catch (e: any) {
+    message.error("任务触发失败: " + (e.message || "未知错误"));
   } finally {
     triggering.value = "";
   }
@@ -138,3 +209,12 @@ async function triggerTask(task: TaskConfig) {
 
 onMounted(loadData);
 </script>
+
+<style scoped>
+.source-store-warning {
+  margin-top: 4px;
+  color: var(--error-color, #d03050);
+  font-size: 12px;
+  white-space: nowrap;
+}
+</style>

@@ -7,6 +7,7 @@ from app.services.upload_service import (
     OzonItemValidationError,
     _build_ozon_item,
     create_draft_from_scraped,
+    format_ozon_price,
     get_draft_readiness_errors,
 )
 
@@ -303,12 +304,9 @@ def test_ozon_item_exact_request_uses_only_listing_fields():
         "width": 220,
         "weight": 321,
         "primary_image": "https://sku.example/primary.jpg",
-        "images": [
-            "https://sku.example/primary.jpg",
-            "https://sku.example/other.jpg",
-        ],
-        "price": "12345",
-        "old_price": "15001",
+        "images": ["https://sku.example/other.jpg"],
+        "price": "123.45",
+        "old_price": "150.01",
         "vat": "0.2",
         "currency_code": "RUB",
         "attributes": [
@@ -494,3 +492,64 @@ def test_matching_manual_package_audit_makes_explicit_overrides_ready():
         903,
         904,
     )
+
+
+@pytest.mark.parametrize(
+    ("value", "expected"),
+    [
+        (123, "123"),
+        (123.4, "123.4"),
+        (123.45, "123.45"),
+        (0.1 + 0.2, "0.3"),
+        ("1,235", "1.24"),
+        ("2.345", "2.35"),
+        (None, ""),
+        (0, ""),
+        (-1, ""),
+        ("invalid", ""),
+        (True, ""),
+    ],
+)
+def test_ozon_price_is_a_decimal_monetary_string(value, expected):
+    assert format_ozon_price(value) == expected
+
+
+@pytest.mark.parametrize(
+    ("vat", "expected"),
+    [("0.050", "0.05"), ("0,22", "0.22"), ("0", "0")],
+)
+def test_supported_vat_values_are_canonicalized(vat, expected):
+    item = _build_ozon_item(_ready_draft(vat=vat))
+
+    assert item["vat"] == expected
+
+
+def test_unsupported_vat_is_rejected_before_import():
+    with pytest.raises(OzonItemValidationError) as exc_info:
+        _build_ozon_item(_ready_draft(vat="0.18"))
+
+    assert any("VAT" in error and "0.22" in error for error in exc_info.value.errors)
+
+
+def test_explicit_primary_image_is_not_repeated_and_gallery_is_limited_to_29():
+    primary = "https://sku.example/primary.jpg"
+    gallery = [primary, primary] + [
+        f"https://sku.example/{index}.jpg" for index in range(1, 32)
+    ]
+
+    item = _build_ozon_item(_ready_draft(primary_image=primary, images=gallery))
+
+    assert item["primary_image"] == primary
+    assert item["images"] == [
+        f"https://sku.example/{index}.jpg" for index in range(1, 30)
+    ]
+    assert primary not in item["images"]
+
+
+def test_gallery_without_explicit_primary_keeps_first_image_and_is_limited_to_30():
+    gallery = [f"https://sku.example/{index}.jpg" for index in range(1, 32)]
+
+    item = _build_ozon_item(_ready_draft(primary_image="", images=gallery))
+
+    assert item["primary_image"] == ""
+    assert item["images"] == gallery[:30]

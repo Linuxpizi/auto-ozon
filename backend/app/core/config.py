@@ -17,8 +17,8 @@ ACCESS_TOKEN_EXPIRE_MINUTES = int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", "1440
 # ── DeepSeek / LLM Configuration ────────────────────────────────────────
 # 使用的腾讯云
 DEEPSEEK_API_KEY = os.getenv("DEEPSEEK_API_KEY", "")
-DEEPSEEK_BASE_URL = os.getenv("DEEPSEEK_BASE_URL", "https://api.deepseek.com")
-DEEPSEEK_MODEL = os.getenv("DEEPSEEK_MODEL", "deepseek-v4-pro")
+DEEPSEEK_BASE_URL = os.getenv("DEEPSEEK_BASE_URL", "https://api.orcarouter.ai/v1")
+DEEPSEEK_MODEL = os.getenv("DEEPSEEK_MODEL", "orcarouter/free")
 
 
 # ── OpenAI Image Configuration (GPT Image 2) ───────────────────────────
